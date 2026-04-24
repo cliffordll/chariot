@@ -1,0 +1,26 @@
+[package]
+name = "chariot-desktop"
+version = "0.1.0"
+description = "Chariot 桌面外壳"
+authors = ["lianaipeng"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+# staticlib / cdylib 为 iOS / Android 构建需要;rlib 给 main.rs 引用 lib 用
+name = "chariot_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+thiserror = "1"

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Chariot logo — Twin-Wheel Helix">
+  <defs>
+    <linearGradient id="gc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3D5AF1"/>
+      <stop offset="1" stop-color="#22D1EE"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="52" cy="128" r="30" fill="none" stroke="url(#gc)" stroke-width="5"/>
+  <g stroke="url(#gc)" stroke-width="2.5" stroke-linecap="round">
+    <line x1="52" y1="102" x2="52" y2="154"/>
+    <line x1="26" y1="128" x2="78" y2="128"/>
+    <line x1="34" y1="110" x2="70" y2="146"/>
+    <line x1="34" y1="146" x2="70" y2="110"/>
+  </g>
+  <circle cx="52" cy="128" r="4.5" fill="url(#gc)"/>
+
+  <circle cx="204" cy="128" r="30" fill="none" stroke="url(#gc)" stroke-width="5"/>
+  <g stroke="url(#gc)" stroke-width="2.5" stroke-linecap="round">
+    <line x1="204" y1="102" x2="204" y2="154"/>
+    <line x1="178" y1="128" x2="230" y2="128"/>
+    <line x1="186" y1="110" x2="222" y2="146"/>
+    <line x1="186" y1="146" x2="222" y2="110"/>
+  </g>
+  <circle cx="204" cy="128" r="4.5" fill="url(#gc)"/>
+
+  <g stroke="url(#gc)" stroke-width="2" opacity="0.45">
+    <line x1="97"  y1="104" x2="97"  y2="152"/>
+    <line x1="119" y1="104" x2="119" y2="152"/>
+    <line x1="141" y1="104" x2="141" y2="152"/>
+    <line x1="163" y1="104" x2="163" y2="152"/>
+  </g>
+
+  <path d="M 85 128 Q 97 80 108 128 T 130 128 T 152 128 T 174 128"
+        fill="none" stroke="#3D5AF1" stroke-width="4" stroke-linecap="round"/>
+
+  <path d="M 85 128 Q 97 176 108 128 T 130 128 T 152 128 T 174 128"
+        fill="none" stroke="#22D1EE" stroke-width="4" stroke-linecap="round"/>
+</svg>

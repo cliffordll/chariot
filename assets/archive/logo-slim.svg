@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Chariot logo — Evolving Wheel on Axle (A3 v7)">
+  <defs>
+    <linearGradient id="ga" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="256" y2="256">
+      <stop offset="0" stop-color="#3D5AF1"/>
+      <stop offset="1" stop-color="#22D1EE"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="128" cy="128" r="100" fill="none" stroke="url(#ga)" stroke-width="6"/>
+
+  <g stroke="url(#ga)" stroke-linecap="round" fill="none">
+    <line x1="128" y1="128" x2="202.42" y2="182.08" stroke-width="2.5"/>
+    <line x1="128" y1="128" x2="156.43" y2="215.47" stroke-width="3"/>
+    <line x1="128" y1="128" x2="99.57"  y2="215.47" stroke-width="3.5"/>
+    <line x1="128" y1="128" x2="53.58"  y2="182.08" stroke-width="4"/>
+    <line x1="128" y1="128" x2="53.58"  y2="73.92"  stroke-width="4.5"/>
+    <line x1="128" y1="128" x2="99.57"  y2="40.53"  stroke-width="5"/>
+    <line x1="128" y1="128" x2="156.43" y2="40.53"  stroke-width="5.5"/>
+    <line x1="128" y1="128" x2="202.42" y2="73.92"  stroke-width="6"/>
+  </g>
+
+  <line x1="4" y1="128" x2="252" y2="128" stroke="url(#ga)" stroke-width="6" stroke-linecap="round"/>
+
+  <circle cx="128" cy="128" r="12" fill="#F4CB78"/>
+</svg>

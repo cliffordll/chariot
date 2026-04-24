@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # 创建 Release 并上传 assets 需要写权限
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Step 1:Python CLI / server exe(PyInstaller)
+  python-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (incl. build group)
+        run: uv sync --frozen --group build
+
+      - name: Quick sanity (lint + test)
+        # release 前兜底一次,避免打了坏 exe;比 ci.yml 少跑 pyright 节省 30s
+        run: |
+          uv run ruff check .
+          uv run pytest -q
+
+      - name: Build exes (PyInstaller) + 同步 sidecar 到 Tauri binaries/
+        run: uv run --group build python scripts/build.py --sync-sidecar
+
+      - name: Upload PyInstaller artifacts (for desktop job)
+        # 下一 job 复用 sidecar 就位的 binaries/;同时作 Release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: chariot-python-exes
+          path: |
+            dist/chariot.exe
+            dist/chariot-server.exe
+            packages/desktop/tauri/binaries/chariot-server-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach CLI / server exe to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/chariot.exe
+            dist/chariot-server.exe
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+
+  # Step 2:Tauri 桌面 installer(需要 Python exe 先就位做 sidecar)
+  desktop-installer:
+    needs: python-exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node / Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/tauri -> target
+
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+
+      - name: Download PyInstaller sidecar
+        # 把上一 job 打好的 chariot-server-*.exe 放到 Tauri binaries/
+        uses: actions/download-artifact@v4
+        with:
+          name: chariot-python-exes
+          path: _dl/
+      - name: Place sidecar
+        run: |
+          mkdir -p packages/desktop/tauri/binaries
+          cp _dl/packages/desktop/tauri/binaries/chariot-server-*.exe packages/desktop/tauri/binaries/
+        shell: bash
+
+      - name: Build Tauri installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # tauri-action 内部走 GitHub Releases API 创建 / 上传 asset,必须显式注入
+          # token;顶层 permissions: contents: write 已授权,这里把 GITHUB_TOKEN
+          # 传进环境即可
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 以下 secrets 需要用户自行在 repo settings → Secrets 配置;
+          # 未配置时 tauri-action 会跳过签名(SmartScreen 会警告但能装)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Windows Authenticode 签名(可选,无则 installer 无签但仍可装);
+          # 证书文件 base64 编码后存到 secret,action 内部解码
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: packages/desktop/tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: "Chariot ${{ github.ref_name }}"
+          releaseBody: "自动发布;安装包见下方 assets。Python CLI / server exe 在 python-exe job 的 release 里。"
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          includeUpdaterJson: true # 生成 latest.json 供 tauri-plugin-updater 用

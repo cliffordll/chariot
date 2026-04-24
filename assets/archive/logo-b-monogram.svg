@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Chariot logo — C monogram">
+  <defs>
+    <linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="256" y2="256">
+      <stop offset="0" stop-color="#3D5AF1"/>
+      <stop offset="1" stop-color="#22D1EE"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M 196.94 70.15 A 90 90 0 1 0 196.94 185.85"
+        fill="none" stroke="url(#gb)" stroke-width="22" stroke-linecap="round"/>
+
+  <line x1="198" y1="68" x2="223.91" y2="45.00"
+        stroke="url(#gb)" stroke-width="14" stroke-linecap="round"/>
+
+  <polygon points="244,26 232.5,54.5 212,33" fill="url(#gb)"/>
+
+  <circle cx="128" cy="128" r="11" fill="url(#gb)"/>
+</svg>
