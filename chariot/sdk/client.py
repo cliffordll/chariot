@@ -19,7 +19,7 @@ admin 相关的 request / response schema 直接从 `chariot.server.controller.*
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -51,7 +51,7 @@ class ProxyClient:
     @asynccontextmanager
     async def discover_session(
         cls, *, parent_pid: int | None = None, spawn_if_missing: bool = True
-    ) -> AsyncIterator[Self]:
+    ) -> AsyncGenerator[Self]:
         """发现或拉起本地 server,返回连到它的 client。"""
         ep = await ServerDiscovery.find_or_spawn(
             parent_pid=parent_pid, spawn_if_missing=spawn_if_missing
@@ -129,7 +129,7 @@ class ProxyClient:
         self,
         fmt: Protocol,
         body: dict[str, Any],
-    ) -> AsyncIterator[httpx.Response]:
+    ) -> AsyncGenerator[httpx.Response]:
         """流式数据面 POST;返回 async context,`resp.aiter_bytes()` 读流。"""
         req = self.http.build_request(
             "POST",
