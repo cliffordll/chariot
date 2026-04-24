@@ -101,18 +101,25 @@ class MessagesAdapter(ProtocolAdapter):
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             return ""
-        for msg in reversed(messages):
+        message_items = cast(list[Any], messages)
+        for msg in reversed(message_items):
             if not isinstance(msg, dict):
                 continue
-            if msg.get("role") != "user":
+            msg_dict = cast(dict[str, Any], msg)
+            if msg_dict.get("role") != "user":
                 continue
-            content = msg.get("content")
+            content = msg_dict.get("content")
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                for block in reversed(content):
-                    if isinstance(block, dict) and isinstance(block.get("text"), str):
-                        return cast(str, block["text"])
+                content_blocks = cast(list[Any], content)
+                for block in reversed(content_blocks):
+                    if not isinstance(block, dict):
+                        continue
+                    block_dict = cast(dict[str, Any], block)
+                    text = block_dict.get("text")
+                    if isinstance(text, str):
+                        return text
         return ""
 
     def build_once_response(self, reply: str) -> dict[str, Any]:
@@ -184,18 +191,25 @@ class CompletionsAdapter(ProtocolAdapter):
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             return ""
-        for msg in reversed(messages):
+        message_items = cast(list[Any], messages)
+        for msg in reversed(message_items):
             if not isinstance(msg, dict):
                 continue
-            if msg.get("role") != "user":
+            msg_dict = cast(dict[str, Any], msg)
+            if msg_dict.get("role") != "user":
                 continue
-            content = msg.get("content")
+            content = msg_dict.get("content")
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                for block in reversed(content):
-                    if isinstance(block, dict) and isinstance(block.get("text"), str):
-                        return cast(str, block["text"])
+                content_blocks = cast(list[Any], content)
+                for block in reversed(content_blocks):
+                    if not isinstance(block, dict):
+                        continue
+                    block_dict = cast(dict[str, Any], block)
+                    text = block_dict.get("text")
+                    if isinstance(text, str):
+                        return text
         return ""
 
     def build_once_response(self, reply: str) -> dict[str, Any]:
@@ -252,15 +266,22 @@ class ResponsesAdapter(ProtocolAdapter):
         if isinstance(inp, str):
             return inp
         if isinstance(inp, list) and inp:
-            last = inp[-1]
+            input_items = cast(list[Any], inp)
+            last = input_items[-1]
             if isinstance(last, dict):
-                content = last.get("content")
+                last_dict = cast(dict[str, Any], last)
+                content = last_dict.get("content")
                 if isinstance(content, str):
                     return content
                 if isinstance(content, list):
-                    for part in reversed(content):
-                        if isinstance(part, dict) and isinstance(part.get("text"), str):
-                            return cast(str, part["text"])
+                    content_parts = cast(list[Any], content)
+                    for part in reversed(content_parts):
+                        if not isinstance(part, dict):
+                            continue
+                        part_dict = cast(dict[str, Any], part)
+                        text = part_dict.get("text")
+                        if isinstance(text, str):
+                            return text
         instr = body.get("instructions")
         if isinstance(instr, str):
             return instr
