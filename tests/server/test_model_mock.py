@@ -5,17 +5,23 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from chariot.server.model.mock import MockModel
 from chariot.server.service.exceptions import ServiceError
 from chariot.shared.protocols import Protocol
 
 
-async def _drain_stream(resp: StreamingResponse) -> str:
+async def _drain_stream(resp: Response) -> str:
+    assert isinstance(resp, StreamingResponse)
     chunks: list[bytes] = []
     async for c in resp.body_iterator:
-        chunks.append(c if isinstance(c, bytes) else c.encode("utf-8"))
+        if isinstance(c, bytes):
+            chunks.append(c)
+        elif isinstance(c, str):
+            chunks.append(c.encode("utf-8"))
+        else:
+            chunks.append(bytes(c))
     return b"".join(chunks).decode("utf-8")
 
 

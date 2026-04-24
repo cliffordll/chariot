@@ -1,4 +1,4 @@
-"""`chariot status` — server 状态 + upstream 计数。"""
+"""`chariot status` — server 状态。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from chariot.sdk.client import ProxyClient
 
 
 def status_cmd() -> None:
-    """显示 server 状态(running / not running)+ upstream 计数。"""
+    """显示 server 状态(running / not running)。"""
     asyncio.run(_run())
 
 
@@ -19,13 +19,13 @@ async def _run() -> None:
     try:
         async with ProxyClient.discover_session(spawn_if_missing=False) as client:
             st = await client.status()
-            upstreams = await client.list_upstreams()
             Renderer.kv(
                 {
                     "server": client.base_url,
                     "version": st.version,
                     "uptime_ms": st.uptime_ms,
-                    "upstreams": f"{st.upstreams_count} ({len(upstreams)} via list)",
+                    "model": st.model,
+                    "url": st.url,
                 }
             )
     except RuntimeError:
