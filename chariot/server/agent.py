@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fastapi.responses import Response
 
@@ -123,21 +123,25 @@ class Agent:
     def _detect_stream(body: bytes) -> bool:
         """粗扫 body 判断 stream=true;非法 JSON 视为 False。"""
         try:
-            data = json.loads(body)
+            data: Any = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return False
-        return isinstance(data, dict) and data.get("stream") is True
+        try:
+            return data.get("stream") is True
+        except AttributeError:
+            return False
 
     @staticmethod
     def _detect_model_hint(body: bytes) -> str | None:
         """从 body 抽 `model` 字段作日志展示用;拿不到就 None。"""
         try:
-            data = json.loads(body)
+            data: Any = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
-        if not isinstance(data, dict):
+        try:
+            m = data.get("model")
+        except AttributeError:
             return None
-        m = data.get("model")
         return m if isinstance(m, str) else None
 
     async def _record_log(
