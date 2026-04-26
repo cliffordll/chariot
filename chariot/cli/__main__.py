@@ -23,6 +23,9 @@ from chariot.cli.commands import (
     logs as logs_mod,
 )
 from chariot.cli.commands import (
+    model as model_mod,
+)
+from chariot.cli.commands import (
     start as start_mod,
 )
 from chariot.cli.commands import (
@@ -67,6 +70,7 @@ for mod in (
     logs_mod,
     stats_mod,
     chat_mod,
+    model_mod,
 ):
     mod.register(app)
 

@@ -30,6 +30,7 @@ import httpx
 from chariot.sdk.chat import ChatResult
 from chariot.sdk.discover import ServerDiscovery
 from chariot.server.controller.logs import LogOut
+from chariot.server.controller.models import ModelsListResponse, SwitchModelResponse
 from chariot.server.controller.runtime import StatusResponse
 from chariot.server.controller.stats import Period, StatsOut
 
@@ -105,6 +106,22 @@ class ProxyClient:
         """请求 server 优雅关闭;response 返回后不等待实际退出。"""
         resp = await self.http.post(f"{self.base_url}/admin/shutdown", timeout=_ADMIN_TIMEOUT)
         resp.raise_for_status()
+
+    async def list_models(self) -> ModelsListResponse:
+        """列出可用 model + 当前 active + 已注册 type。"""
+        resp = await self.http.get(f"{self.base_url}/admin/models", timeout=_ADMIN_TIMEOUT)
+        resp.raise_for_status()
+        return ModelsListResponse.model_validate(resp.json())
+
+    async def use_model(self, name: str) -> SwitchModelResponse:
+        """切换 active model。失败(name 未配 / type 未注册)→ httpx.HTTPStatusError(400)。"""
+        resp = await self.http.post(
+            f"{self.base_url}/admin/models",
+            json={"name": name},
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return SwitchModelResponse.model_validate(resp.json())
 
     # ---------- data plane ----------
 

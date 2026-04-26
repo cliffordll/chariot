@@ -121,7 +121,7 @@
 - 失败(unknown name / build error)→ 400/500 + 错误信息
 - **验证**:`uv run pytest -q tests/server/test_admin.py` 通过
 
-### D.2 CLI `chariot model list / use`
+### ✅ D.2 CLI `chariot model list / use`
 
 - 新增 `chariot/cli/commands/model.py` 子命令组
 - `model list` 调 `/admin/models` 显示 available + active 标记
