@@ -143,15 +143,21 @@ chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端
 
 | File | Purpose |
 |---|---|
-| [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture reference — Controller / Agent / Model layering |
-| [`docs/FEATURE.md`](docs/FEATURE.md) | Phased task list (v0 ✅ baseline / v1 real models / v2 agent evolution) |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Post-v0 directions |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.2.0)— Controller / Agent / Model 分层 + Config + Registry |
+| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.2.0:单协议化 + 真实模型 + 切换控制面) |
+| [`docs/history/`](docs/history/) | 历史版本 DESIGN / FEATURE 归档(每个发布版本一份冻结快照) |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.3.0+ 方向(多轮记忆 / 工具调用 / 进化循环) |
 | [`docs/guides/first-run.md`](docs/guides/first-run.md) | **First-time setup** — tools, deps, sidecar, launch |
 | [`docs/guides/`](docs/guides/) | Developer guides (CLI, DB, Tauri, uv, etc.) |
 | [`CLAUDE.md`](CLAUDE.md) | Claude session conventions (project-level) |
 
 ## Status
 
-**v0 skeleton ✅** — Controller / Agent / Model 三层就位;`MockModel` 是默认
-(本地 echo,零外部依赖)。v1 通过 `Model` 接口挂真实模型后端,v2 在 Agent
-层加对话记忆 / 工具调用 / 自我进化循环。
+**0.2.0 ✅** — 单协议化(只接 Anthropic Messages)+ 真实模型接入(`AnthropicModel`
+透传到上游 + 错误映射 + 流式 SSE)+ Model 注册中心(`ModelRegistry` 装饰器派发)+
+`~/.chariot/config.toml` 配置 + 运行时切换(`/admin/models` / `chariot model
+list use` / Dashboard 切换面板)。无配置时自动 fallback 到 `MockModel`(开箱可用)。
+
+**0.3.0+** 方向:Agent 层加多轮对话记忆 / 工具调用 / 自我进化循环 —— 详见
+[`docs/ROADMAP.md`](docs/ROADMAP.md)。新加真实后端只需写一个 `chariot/server/model/<name>.py`
++ `@ModelRegistry.register("xxx")` 一行装饰器。

@@ -1,3 +1,3 @@
-"""Chariot — 本地 LLM API 格式转换中枢."""
+"""Chariot — 本机跑的智能体 server(Anthropic Messages 协议)。"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
