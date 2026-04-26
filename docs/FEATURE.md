@@ -61,7 +61,7 @@
 
 ## B. 配置 + Registry 骨架
 
-### B.1 ChariotConfig + ConfigLoader
+### ✅ B.1 ChariotConfig + ConfigLoader
 
 - 新增 `chariot/server/config.py`:`ModelEntry` / `ChariotConfig` / `ConfigLoader`
 - 用 `tomllib`(Python 3.11+ stdlib)解析
