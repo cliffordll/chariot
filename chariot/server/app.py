@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from chariot import __version__
 from chariot.server.agent import Agent
+from chariot.server.config import ConfigLoader
 from chariot.server.controller import (
     admin_router,
     dataplane_router,
@@ -23,9 +24,16 @@ _log = logging.getLogger("chariot.server.app")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    _log.info("starting chariot v%s (init db + agent)", __version__)
+    """启动:init_db + 读 config + 装 agent;结束:卸 agent + dispose_db。
+
+    `ConfigLoader.load()` 找不到文件返 `ChariotConfig.empty()`,Agent 走 MockModel
+    fallback,行为兼容 0.1.0(零配置开箱可用)。配置 TOML 错或字段非法
+    `ConfigError` 会上冒,server 不会起来 —— 强制配置正确性。
+    """
+    _log.info("starting chariot v%s (init db + load config + install agent)", __version__)
     await init_db()
-    agent = Agent.install()  # 默认 model=None → fallback MockModel
+    config = ConfigLoader.load()
+    agent = Agent.install_from_config(config)
     _log.info("startup complete (agent.model=%s)", agent.model.name)
     try:
         yield

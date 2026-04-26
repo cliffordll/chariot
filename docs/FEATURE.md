@@ -77,7 +77,7 @@
 - 测试 `tests/server/test_model_registry.py`(注册 / 构造 / 未知 type 报错)
 - **验证**:`uv run pytest -q tests/server/` 通过
 
-### B.3 lifespan 接 config
+### ✅ B.3 lifespan 接 config
 
 - `chariot/server/app.py` 的 lifespan 改成 `Agent.install_from_config(ConfigLoader.load())`
 - 无 config 文件时表现 = 0.1.0 现状(走 MockModel)
