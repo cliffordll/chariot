@@ -104,7 +104,7 @@
 - 流式错误码:首响应已发后只能断;首响应前可正常返 502
 - **验证**:respx 流式 fixture 测试通过;手工 `curl --no-buffer -d '{"stream":true,...}'` 看到逐 chunk 输出
 
-### C.3 文档 + 配置示例
+### ✅ C.3 文档 + 配置示例
 
 - README 加"接 Anthropic 真实 API"小节(配置示例 + ANTHROPIC_API_KEY 设置)
 - 可选 `docs/guides/real-models.md`

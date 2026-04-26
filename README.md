@@ -78,6 +78,42 @@ Controller  →  Agent.handle(body)
 三层通过两条窄接口解耦,新增一个模型或一条进化逻辑不穿层。契约细节见
 [`docs/DESIGN.md`](docs/DESIGN.md) §5。
 
+## 接真实 Anthropic 模型
+
+默认走 `MockModel`(本地 echo)。要让 chariot 真打到 Anthropic Messages API:
+
+1. 设置 API key 环境变量(bash 示例,Windows PowerShell 用 `$env:ANTHROPIC_API_KEY="..."`):
+
+   ```bash
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+
+2. 写 `~/.chariot/config.toml`(Windows:`%USERPROFILE%\.chariot\config.toml`):
+
+   ```toml
+   [[models]]
+   name = "claude"
+   type = "anthropic"
+   [models.options]
+   model_id = "claude-opus-4-5"
+   # 可选,默认就是这俩:
+   # api_key_env = "ANTHROPIC_API_KEY"
+   # base_url    = "https://api.anthropic.com"
+
+   [active]
+   model = "claude"
+   ```
+
+3. 重启 server:`uv run python -m chariot.server`。Dashboard 或 `curl /v1/messages` 会走真实模型。
+
+行为细节:
+- 客户端 body 里写啥 `model` 都会被替换成配置里的 `model_id`(chariot 是单一身份代理)
+- 上游 401 / 403 → 502 `upstream_auth_failed`(检查 `ANTHROPIC_API_KEY`);429 透传;5xx → 502
+- 流式:`stream: true` 直接透传上游 SSE 字节,中途断开靠断 TCP 通知客户端
+- 没设 `[active]`、或删除 `config.toml` 文件 → 自动 fallback 到 MockModel(开箱可用)
+
+需要换其它 env 名:在 `[models.options]` 里加 `api_key_env = "YOUR_VAR"`。
+
 ## OpenAI 客户端怎么接
 
 chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端调 chariot,
