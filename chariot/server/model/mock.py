@@ -16,11 +16,13 @@ from typing import Any, ClassVar, cast
 
 from fastapi.responses import Response, StreamingResponse
 
+from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 
 _MOCK_MODEL_NAME = "mock-echo-v1"
 
 
+@ModelRegistry.register("mock")
 class MockModel:
     """内置本地模型。生成 Anthropic Messages 协议的 echo 响应(非流 + SSE)。
 
@@ -37,6 +39,14 @@ class MockModel:
     # ---- 调试/测试可调的协议节奏 ----
     _CHUNK_CHARS: ClassVar[int] = 4
     _TOKEN_DELAY_SEC: ClassVar[float] = 0.02
+
+    # ---- ModelRegistry 构造契约 ----
+
+    @classmethod
+    def from_config(cls, options: dict[str, Any]) -> MockModel:
+        """mock 不消费任何 options;签名兼容 ModelRegistry 即可。"""
+        del options  # 显式标注未使用,避免 lint 警告
+        return cls()
 
     # ---- Model 接口 ----
 

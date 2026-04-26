@@ -69,7 +69,7 @@
 - 单元测试 `tests/server/test_config.py`:合法 / 非法 / 缺失 / env 覆盖
 - **验证**:`uv run pytest -q tests/server/test_config.py` 通过
 
-### B.2 ModelRegistry + Agent.install_from_config
+### ✅ B.2 ModelRegistry + Agent.install_from_config
 
 - 新增 `chariot/server/model/registry.py`:`ModelRegistry`(`@register` / `build` / `known_types`)
 - `Agent` 加 classmethod `install_from_config(config: ChariotConfig)`

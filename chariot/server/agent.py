@@ -34,8 +34,10 @@ from typing import Any, ClassVar
 
 from fastapi.responses import Response
 
+from chariot.server.config import ChariotConfig
 from chariot.server.model.base import Model
 from chariot.server.model.mock import mock_model
+from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 from chariot.server.service.log_writer import log_writer
 
@@ -75,6 +77,19 @@ class Agent:
         cls._current = cls(model)
         _log.info("agent installed with model=%s", cls._current.model.name)
         return cls._current
+
+    @classmethod
+    def install_from_config(cls, config: ChariotConfig) -> Agent:
+        """按 `ChariotConfig` 注入 model 并安装为当前 agent。
+
+        - `config.active_entry()` 为 None(无配置 / 无 active)→ MockModel fallback
+        - 否则 `ModelRegistry.build(entry)` 构造对应实现
+        - lifespan startup 期 raise 的 `ConfigError` 直接上冒(让 server 不要起来)
+        """
+        entry = config.active_entry()
+        if entry is None:
+            return cls.install()
+        return cls.install(model=ModelRegistry.build(entry))
 
     @classmethod
     def current(cls) -> Agent:

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.server.agent import Agent
+from chariot.server.config import ChariotConfig, ModelEntry
 from chariot.server.database.models import LogEntry
 from chariot.server.model.mock import MockModel, mock_model
 from chariot.server.service.exceptions import ServiceError
@@ -75,6 +76,42 @@ def test_install_with_explicit_model() -> None:
     a = Agent.install(model=spy)
     assert a.model is spy
     assert Agent.current().model is spy
+    Agent.uninstall()
+
+
+# ---------- install_from_config ----------
+
+
+def test_install_from_config_empty_uses_mock() -> None:
+    """空配置 → MockModel fallback。"""
+    Agent.uninstall()
+    a = Agent.install_from_config(ChariotConfig.empty())
+    assert isinstance(a.model, MockModel)
+    Agent.uninstall()
+
+
+def test_install_from_config_active_uses_registry() -> None:
+    """有 active entry → 走 ModelRegistry.build,本例 type="mock" 仍然返 MockModel。"""
+    Agent.uninstall()
+    config = ChariotConfig(
+        models=(ModelEntry(name="m", type="mock", options={}),),
+        active="m",
+    )
+    a = Agent.install_from_config(config)
+    assert isinstance(a.model, MockModel)
+    assert Agent.current() is a
+    Agent.uninstall()
+
+
+def test_install_from_config_no_active_uses_mock() -> None:
+    """有 models 但没设 active → 也走 fallback。"""
+    Agent.uninstall()
+    config = ChariotConfig(
+        models=(ModelEntry(name="m", type="mock", options={}),),
+        active=None,
+    )
+    a = Agent.install_from_config(config)
+    assert isinstance(a.model, MockModel)
     Agent.uninstall()
 
 
