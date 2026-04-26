@@ -72,6 +72,13 @@
 
 - **文档先行**:任何架构级改动,先在 `docs/` 更新设计文档,再写代码
 - **三文件体系**:`docs/DESIGN.md`(架构真源) + `docs/FEATURE.md`(任务清单 · heading emoji 标进度) + `docs/ROADMAP.md`(v1+ 方向) — 职责正交,不要混写。执行细节由 commit history 承载
+- **DESIGN / FEATURE 按版本归档**:历史的 `DESIGN.md` / `FEATURE.md` 是冻结快照,**不直接编辑**。
+  - 用户**明确说"归档"**之前:不要主动 archive、不要改这两个文件,只能读
+  - 用户说"归档"后,按下面流程动手:
+    1. `git mv docs/DESIGN.md docs/history/<version>/DESIGN.md`、`git mv docs/FEATURE.md docs/history/<version>/FEATURE.md`(`<version>` 是该文档代表的 semver 版本号,如 `0.1.0`、`0.2.0` —— 即这套文档驱动的那个发布版本),保留 git 历史
+    2. 新建下一个小版本的 `docs/DESIGN.md` / `docs/FEATURE.md` 作为当前活跃文档,顶部标明对应 semver 版本号 + 链接到上一版归档(`docs/history/<上一版本>/`)
+    3. `ROADMAP.md` 不归档,跨版本沿用
+  - 触发词严格:含糊的"这步过了 / 通过"不算,必须看到"归档"两个字
 - **逻辑 audit 常态化**:schema / 流程 / 协议相关的变更,实现前先做一轮逻辑漏洞扫描
 
 ## 命名与重构

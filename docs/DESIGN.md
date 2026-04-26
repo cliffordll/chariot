@@ -1,87 +1,69 @@
-# Chariot 架构设计(v0)
+# Chariot 架构设计(0.2.0)
 
-> **定位**:本机跑的智能体(agent)server —— 不是代理、不是翻译层、不是网关。
-> 用户通过三种业界主流 API 格式(Anthropic Messages / OpenAI Chat Completions /
-> OpenAI Responses)和它对话,server 内部自己生成响应。
-> 默认 fallback 到内置 `MockModel`(本地 echo),将来挂真实模型是一层 `Model` 实现的替换。
+> **当前版本**:`0.2.0`(开发中)
+> **上一版归档**:[`docs/history/0.1.0/DESIGN.md`](history/0.1.0/DESIGN.md)
+>
+> **0.2.0 关键变更**(vs 0.1.0):
+> - 对外端点从三个收窄到一个(`/v1/messages`);OpenAI 兼容剥离给外部转换器(LiteLLM 等)
+> - Model 协议契约从"必须支持三协议 schema"简化为"只支持 Anthropic Messages"
+> - 引入配置 + 注册中心,支持运行时切换真实模型(AnthropicModel 是首个真模型)
 
 ---
 
 ## 1. 一句话总结
 
-**Chariot = 本机 HTTP server → Agent → Model(默认 Mock)**,三者通过两条窄接口解耦:
+**Chariot = 本机 HTTP server + Anthropic Messages 协议 + 可热插拔 Model**
 
-- `Controller → Agent.handle(protocol, body)` —— 只管 HTTP 粘合
-- `Agent → Model.respond(protocol, body, *, stream)` —— 只管"输入 bytes → 响应"
-
-不存在"上游"、"代理"、"翻译"、"透传"的概念。
+- 对外只接 `POST /v1/messages`(Anthropic 原生)
+- 内部 `Model` 实现按配置注入(默认 Mock,真实模型如 `AnthropicModel`)
+- OpenAI 客户端通过外部转换器(LiteLLM / claude-code-router 等)接入,chariot 不做协议翻译
 
 ---
 
 ## 2. 分层
 
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│  客户端:CLI / Web UI / Tauri 桌面 / 任何 HTTP 客户端                │
-└──────────────────────────────┬────────────────────────────────────┘
-                               │ HTTP
-                               ▼
-          POST /v1/messages           POST /v1/chat/completions
-                                      POST /v1/responses
-                               │
-                               ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  Controller (dataplane.py)                                          │
-│   读 body;按 URL 映射 protocol;get_agent().handle(protocol, body) │
-└──────────────────────────────┬────────────────────────────────────┘
-                               ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  Agent (chariot/server/agent.py)                                    │
-│  - 单例,lifespan startup 里 init_agent()                            │
-│  - handle(): 探测 stream flag → model.respond() → 记一条 log        │
-│  - 未来可在这层加:多轮记忆、工具调用、自我进化循环、model 路由       │
-└──────────────────────────────┬────────────────────────────────────┘
-                               ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  Model Protocol (chariot/server/model/base.py)                      │
-│  - 无状态的响应生成器接口                                            │
-│  - respond(protocol, body, *, stream) -> Response                   │
-│  - 不碰 DB、不记 log、不感知 "上游"                                  │
-└──────────────────────────────┬────────────────────────────────────┘
-                               ▼
-                  ┌─────────────┴─────────────┐
-                  │                           │
-           ┌──────────────┐           ┌──────────────────┐
-           │  MockModel   │           │  (将来) 真模型   │
-           │  三协议手写   │           │  本地 llama / 云  │
-           │  echo 响应    │           │  LLM adapter 等   │
-           └──────────────┘           └──────────────────┘
+客户端 (Anthropic SDK / claude code / 自定义)
+        │  POST /v1/messages
+        ▼
+Controller (controller/dataplane.py)
+   读 body → Agent.handle(body)
+        │
+        ▼
+Agent (server/agent.py)
+   - 类级单例(install / current / uninstall)
+   - 探测 stream → model.respond → 记日志
+   - 0.3.0+ 这层加多轮记忆 / 工具调用 / 进化循环
+        │
+        ▼
+Model Protocol (server/model/base.py)
+   async respond(body, *, stream) -> Response
+   无状态 / 不碰 DB / 不记 log
+        │
+        ├── MockModel        (默认 fallback)
+        ├── AnthropicModel   (透传到 Anthropic API)
+        └── (未来) LocalLlamaModel ...
 
-                              (DB · 只记 logs)
-                  ┌──────────────────────────────┐
-                  │  logs: id / model / status / │
-                  │  latency / error / created   │
-                  └──────────────────────────────┘
+Lifespan startup:
+   ConfigLoader.load() → ChariotConfig
+                         ↓
+   ModelRegistry.build(active_entry) → Model
+                         ↓
+   Agent.install(model=...)
 ```
 
 ---
 
-## 3. 三协议端点(不做翻译,只做格式对话)
-
-chariot 同时承认三种业界主流 API schema。Model 实现决定自己怎么回答每种协议。
+## 3. 唯一对外端点
 
 | 端点 | 协议 | 请求 schema | 响应 schema |
 |---|---|---|---|
-| `POST /v1/messages` | Anthropic Messages | `{model, max_tokens, messages: [{role, content}], stream?}` | `{id, type: "message", role: "assistant", content: [{type: "text", text}], stop_reason, usage}` |
-| `POST /v1/chat/completions` | OpenAI Chat Completions | `{model, messages, stream?, stream_options?}` | `{id, object: "chat.completion", choices: [{message, finish_reason}], usage}` |
-| `POST /v1/responses` | OpenAI Responses | `{model, input, stream?}` | `{id, object: "response", status, output: [...], output_text, usage}` |
+| `POST /v1/messages` | Anthropic Messages | `{model, max_tokens, messages, stream?, system?, ...}` | `{id, type:"message", role:"assistant", content:[...], stop_reason, usage}` |
 
-**关键**:这三个 endpoint 的 schema 由**上游生态定义**,chariot 不做跨格式翻译;但 `Model` 实现**必须**按请求 hit 的协议返回对应 schema。`MockModel` 为每个协议手写了最小响应(非流 + SSE 两份)。
+**OpenAI 客户端怎么接**:推荐用 [LiteLLM](https://github.com/BerriAI/litellm) 等成熟代理,把 chariot 配成 Anthropic 后端即可。chariot 不内置该转换层 —— 专业的事交给专业项目,chariot 的差异化在 Agent 层(0.3.0+ 的记忆 / 工具 / 进化循环)。
 
-SSE 各协议事件约定:
-- Messages:`message_start` → `content_block_start` → N × `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`
-- Chat Completions:逐 chunk 吐,末尾一个 `finish_reason: "stop"` 的空 delta,最后 `data: [DONE]`
-- Responses:`response.created` → `output_item.added` → `content_part.added` → N × `output_text.delta` → `output_text.done` → `response.completed`
+SSE 事件序列(沿用 0.1.0):
+`message_start` → `content_block_start` → N × `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`
 
 ---
 
@@ -92,16 +74,16 @@ client POST /v1/messages { model, stream, messages }
          │
          ▼
 controller.messages(request):
-    body  = await request.body()     # 原始 bytes
-    return await get_agent().handle(Protocol.MESSAGES, body)
+    body = await request.body()
+    return await Agent.current().handle(body)
          │
          ▼
-Agent.handle(protocol, body):
+Agent.handle(body):
     t0 = monotonic()
-    model_hint = _detect_model_hint(body)    # 仅作日志
+    model_hint = _detect_model_hint(body)     # 仅作日志
     is_stream  = _detect_stream(body)
     try:
-        resp = await self.model.respond(protocol, body, stream=is_stream)
+        resp = await self.model.respond(body, stream=is_stream)
         await log_writer.record(status="ok", model=model_hint, latency_ms=...)
         return resp
     except ServiceError as e:
@@ -109,116 +91,234 @@ Agent.handle(protocol, body):
         raise
          │
          ▼
-MockModel.respond(Protocol.MESSAGES, body, *, stream=True):
-    _parse_body(body)               # JSON → dict;非法就 ServiceError(400)
-    echo = _extract_echo_text(...)  # 最后一条 user 消息的纯文本
-    reply = f"[mock echo] {echo}"
-    return StreamingResponse(_messages_sse(reply), media_type="text/event-stream")
+AnthropicModel.respond(body, *, stream=True):
+    payload = self._rewrite_model_id(body)    # client.model → 配置 model_id
+    return await self._stream(payload)        # httpx → upstream /v1/messages,SSE 透传
 ```
 
-响应一路透传回 client,controller / Agent 不改 body,只追加 log。
+响应一路透传回 client;Controller / Agent 不改 body,只追加 log。
 
 ---
 
 ## 5. Model 接口契约
-
-`chariot.server.model.base.Model` 是 `typing.Protocol`,实现 checklist:
 
 ```python
 class Model(Protocol):
     name: str  # 写入 logs.model;UI 展示
     async def respond(
         self,
-        protocol: Protocol,
         body: bytes,
         *,
         stream: bool,
     ) -> Response: ...
 ```
 
-三条硬约束:
+三条硬约束(同 0.1.0,只删除 protocol 维度):
+1. **无状态**。多轮对话由客户端在 body.messages 里管理
+2. **不碰 DB**。日志归 Agent
+3. **不感知"上游"**。Model 是响应的源头(直接生成 / 透传 / 调本机 llama 都算)
 
-1. **无状态**。不保存对话历史,不 last-seen;每次 respond() 独立。多轮在 body.messages 里,由客户端管理。
-2. **不碰 DB**。Model 只做 "bytes → Response";日志由 Agent 记。
-3. **不感知 "上游"**。Model 里不区分什么外部代理、什么 api_key。Model **就是**响应的源头。
+新增 builder 契约(支持 ModelRegistry 自动构造):
 
-将来加新 model(比如 `LocalLlamaModel`、`AnthropicAdapterModel`)就写一个实现这三条的类,`init_agent(model=...)` 换一下。
+```python
+@classmethod
+def from_config(cls, options: dict[str, Any]) -> Self: ...
+```
+
+每个 Model 类用 `@ModelRegistry.register("type_name")` 装饰器注册,模块 import 即生效。
 
 ---
 
-## 6. logs 表
+## 6. 配置层
 
-唯一一张表。每次 `Agent.handle()` 落一条:
+### 6.1 文件位置
+
+`~/.chariot/config.toml`(env `CHARIOT_CONFIG` 可覆盖)。无文件 → `ChariotConfig.empty()` → fallback `MockModel`。
+
+### 6.2 Schema
+
+```toml
+[[models]]
+name = "claude-opus"
+type = "anthropic"
+[models.options]
+api_key_env = "ANTHROPIC_API_KEY"
+base_url    = "https://api.anthropic.com"
+model_id    = "claude-opus-4-5"
+
+[[models]]
+name = "local-llama"
+type = "llama_local"
+[models.options]
+endpoint = "http://127.0.0.1:11434"
+model_id = "llama3.1-70b"
+
+[active]
+model = "claude-opus"
+```
+
+### 6.3 类设计
+
+| 类 | 文件 | 职责 |
+|---|---|---|
+| `ModelEntry` | `chariot/server/config.py` | 单个 model 条目(name / type / options dict) |
+| `ChariotConfig` | `chariot/server/config.py` | 顶层配置(models 列表 + active);`empty()` / `active_entry()` / `from_dict()` |
+| `ConfigLoader` | `chariot/server/config.py` | `load(path=None) -> ChariotConfig`;`tomllib` 解析;DEFAULT_PATH = `~/.chariot/config.toml` |
+| `ModelRegistry` | `chariot/server/model/registry.py` | `@register("type")` 装饰器收集 builder;`build(entry)` 派发;`known_types()` |
+
+封装内聚要点:
+
+- `chariot/server/config.py` 只对外暴露 `ConfigLoader.load()` 和 `ChariotConfig` 数据类;`ModelEntry` / 解析细节都内聚在文件内
+- `ModelRegistry` 用 ClassVar 挂注册表,classmethod 管理生命周期;模块级零可变变量
+
+---
+
+## 7. logs 表(沿用 0.1.0,schema 不变)
 
 ```sql
 CREATE TABLE logs (
-    id            TEXT PRIMARY KEY,           -- 32 char UUID4 hex
-    model         TEXT,                       -- body.model 字段(客户端意向)
+    id            TEXT PRIMARY KEY,
+    model         TEXT,
     input_tokens  INTEGER,
     output_tokens INTEGER,
     latency_ms    INTEGER,
-    status        TEXT NOT NULL,              -- ok / error / timeout
+    status        TEXT NOT NULL,
     error         TEXT,
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_logs_created_at ON logs(created_at);
 ```
 
-- Agent 层在请求成功 / 失败 / 异常时都记。
-- `LogWriter` 自己拿 session,不侵入 controller;写失败 warning 不上冒。
+Agent 仍是唯一日志写入者;0.2.0 不动 schema。
 
 ---
 
-## 7. 管理面(/admin/*)
+## 8. 管理面
 
 ```
 GET  /admin/ping       → {ok: true}
 GET  /admin/status     → {version, uptime_ms, model, url}
-POST /admin/shutdown   → graceful shutdown(响应先发,再 should_exit)
+POST /admin/shutdown   → graceful shutdown
 GET  /admin/logs       → list LogOut(limit / offset / since)
 GET  /admin/stats      → {period, total_requests, success_rate, avg_latency_ms}
+GET  /admin/models     → 新增:列出可选 model + 当前 active + 可用 type
+POST /admin/models     → 新增:切换 active(body: {name})
 ```
 
-`/admin/status.model` 就是当前 Agent 的 `model.name`。Dashboard 用这个字段展示。
+`/admin/models` 行为:
+
+- GET → `{available: ["claude-opus", "local-llama"], active: "claude-opus", types: ["mock", "anthropic", "llama_local"]}`
+- POST `{name}` → 用对应 entry rebuild Model → `Agent.install(model=...)` 覆盖 → 返回新 active
 
 ---
 
-## 8. 单例 / lifespan
+## 9. 单例 / lifespan
 
 ```python
-# chariot/server/app.py 里
 async with lifespan(_app):
     await init_db()
-    init_agent()          # 默认 MockModel;v1+ 从 config 读
+    config = ConfigLoader.load()
+    Agent.install_from_config(config)        # 无 config 走 mock,有 config 走 registry
     yield
-    reset_agent()
+    Agent.uninstall()
     await dispose_db()
 ```
 
-`get_agent()` 是整个 server 唯一对外的 Agent 入口。Controller 不 import 具体 Agent 类、不 import 具体 Model 类。
+```python
+# Agent 类新增
+@classmethod
+def install_from_config(cls, config: ChariotConfig) -> Agent:
+    entry = config.active_entry()
+    model = ModelRegistry.build(entry) if entry else mock_model
+    return cls.install(model=model)
+```
 
 ---
 
-## 9. 测试
+## 10. AnthropicModel 实现要点
+
+```python
+@ModelRegistry.register("anthropic")
+class AnthropicModel:
+    name = "anthropic"
+
+    def __init__(self, *, api_key: str, base_url: str, model_id: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10),
+        )
+        self._model_id = model_id
+
+    @classmethod
+    def from_config(cls, options: dict[str, Any]) -> AnthropicModel:
+        env_name = options.get("api_key_env", "ANTHROPIC_API_KEY")
+        api_key = os.environ.get(env_name)
+        if not api_key:
+            raise ConfigError(f"环境变量 {env_name} 未设置")
+        return cls(
+            api_key=api_key,
+            base_url=options.get("base_url", "https://api.anthropic.com"),
+            model_id=options["model_id"],
+        )
+
+    async def respond(self, body: bytes, *, stream: bool) -> Response:
+        payload = self._rewrite_model_id(body)
+        return await (self._stream(payload) if stream else self._unary(payload))
+```
+
+错误映射:
+
+- 上游 401 / 403 → 502(用户配置错误,但本服务对上游不可用)
+- 上游 429 → 透传 429
+- 上游 5xx → 502
+- 网络超时 / 连接拒绝 → 502 + error 文案带原因
+- **流式中途断开**:沿用 0.1.0 "200 已发后只能断 TCP,不伪造事件"
+
+---
+
+## 11. 设计模式
+
+| 模式 | 用在哪 | 解决什么 |
+|---|---|---|
+| **Strategy** | `Model` Protocol 多实现 | Agent 持有一个引用,运行时可换 model |
+| **Registry + Factory Method** | `ModelRegistry` `@register` + `Model.from_config` | 加新 model 不改 Agent / Controller / lifespan;只写新文件 + 一行装饰器 |
+| **Singleton(类级)** | `Agent._current: ClassVar` + `install / current / uninstall` | 模块级零可变变量,符合封装顶级原则 |
+
+刻意**不**用的:
+
+- ❌ Adapter — 单协议下没"三分支 dispatch",造一个 Adapter 反违反"内聚优先于 DRY"
+- ❌ Builder — 配置直接 dataclass + classmethod 构造,不需分步
+- ❌ Chain of Responsibility — 没"链式 fallback"需求
+
+---
+
+## 12. 测试覆盖
 
 | 文件 | 覆盖 |
 |---|---|
-| `tests/server/test_model_mock.py` | MockModel 三协议 schema + SSE 事件 + 错误路径 |
-| `tests/server/test_agent.py` | Agent.handle 转发契约 + 日志落地 + factory / singleton |
-| `tests/server/test_dataplane.py` | 3 endpoint → Agent 的 protocol 映射 + body 透传 + 默认 Mock 端到端 |
-| `tests/server/test_admin.py` | /admin/ping、/admin/status、/admin/logs since 游标 |
-| `tests/sdk/test_client_admin.py` | ProxyClient admin 方法 |
-| `tests/cli/test_commands.py` | CLI 子命令注册 + help |
-| `tests/sdk/test_discover.py` | server 发现 / 启动协议 |
+| `tests/server/test_config.py` | ConfigLoader 解析合法 / 非法 / 缺失 / env 覆盖 |
+| `tests/server/test_model_registry.py` | register / build / unknown type / known_types |
+| `tests/server/test_model_mock.py` | MockModel(单协议化后)非流 + SSE + 错误路径 |
+| `tests/server/test_model_anthropic.py` | 用 `respx` 模拟上游;非流 / 流 / 错误码映射 / model_id 改写 |
+| `tests/server/test_agent.py` | handle 转发契约 + 日志 + factory + install_from_config |
+| `tests/server/test_dataplane.py` | 单端点 → Agent + 默认 Mock 端到端 |
+| `tests/server/test_admin.py` | /admin/ping、/admin/status、/admin/logs、/admin/models |
+| `tests/sdk/test_client_admin.py` | ProxyClient admin + models 切换 |
+| `tests/cli/test_commands.py` | CLI 子命令注册 + help + `chariot model list / use` |
 
 ---
 
-## 10. 未来扩展(v1+,不在当前范围)
+## 13. 0.3.0+ 路标
 
-- **真实模型**:写 `chariot/server/model/<name>.py` 实现 Model,启动时按 config 注入
-- **多轮记忆**:Agent 里加 `Conversation` 存 history,model 变成"按轮生成"
-- **工具调用**:Agent 在 respond 后检查 tool_use,执行工具,再调 model 补响应
-- **进化循环**:Agent 可以持有多个 model 候选,根据 logs 的 feedback 调权重 / 切换
-- **多 agent**:不再单例,按 agent_id 路由;logs 加 agent_id 字段
+详见 `docs/ROADMAP.md`。要点:
 
-这些都**不改** `Controller` 和 `Model` 的接口,都在 Agent 层。
+- **0.3.0**:Agent 层多轮记忆 + 工具调用
+- **0.4.0**:进化循环(读 logs feedback 调权重 / 切 model / 修 prompt)
+- **0.5.0**:多 Agent 实例(logs 加 agent_id)
+
+这些都不动 Controller / Model 接口,只在 Agent 层加。
