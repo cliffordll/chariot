@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chariot.server.agent import Agent
 from chariot.server.controller import dataplane_router
 from chariot.server.database.session import get_session
-from chariot.shared.protocols import Protocol
 
 
 class _CapturingModel:
@@ -23,12 +22,12 @@ class _CapturingModel:
     name = "capturing"
 
     def __init__(self) -> None:
-        self.last: tuple[Protocol, bytes, bool] | None = None
+        self.last: tuple[bytes, bool] | None = None
 
-    async def respond(self, protocol: Protocol, body: bytes, *, stream: bool) -> Response:
-        self.last = (protocol, body, stream)
+    async def respond(self, body: bytes, *, stream: bool) -> Response:
+        self.last = (body, stream)
         return Response(
-            content=json.dumps({"ok": True, "p": protocol.value}).encode("utf-8"),
+            content=json.dumps({"ok": True}).encode("utf-8"),
             status_code=200,
             media_type="application/json",
         )
@@ -57,10 +56,10 @@ async def client_and_model(
     Agent.uninstall()
 
 
-# ---------- 唯一端点 → Messages 协议 ----------
+# ---------- 唯一端点 → Agent.handle ----------
 
 
-async def test_messages_endpoint_forwards_messages_protocol(
+async def test_messages_endpoint_forwards_to_agent(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     client, model = client_and_model
@@ -68,9 +67,8 @@ async def test_messages_endpoint_forwards_messages_protocol(
     resp = await client.post("/v1/messages", json=body)
 
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "p": "messages"}
+    assert resp.json() == {"ok": True}
     assert model.last is not None
-    assert model.last[0] is Protocol.MESSAGES
 
 
 # ---------- OpenAI 端点已下线 —— 应该返 404 ----------
@@ -103,7 +101,7 @@ async def test_body_is_forwarded_verbatim(
     await client.post("/v1/messages", json=body)
 
     assert model.last is not None
-    _, received_body, _ = model.last
+    received_body, _ = model.last
     assert b"unique-marker-42" in received_body
 
 
@@ -116,7 +114,7 @@ async def test_stream_flag_propagated(
         json={"model": "x", "stream": True, "messages": []},
     )
     assert model.last is not None
-    assert model.last[2] is True
+    assert model.last[1] is True
 
 
 async def test_non_stream_when_flag_missing(
@@ -125,7 +123,7 @@ async def test_non_stream_when_flag_missing(
     client, model = client_and_model
     await client.post("/v1/messages", json={"model": "x", "messages": []})
     assert model.last is not None
-    assert model.last[2] is False
+    assert model.last[1] is False
 
 
 # ---------- 用默认 MockModel 的端到端 ----------

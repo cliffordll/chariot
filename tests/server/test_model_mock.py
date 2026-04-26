@@ -1,4 +1,4 @@
-"""MockModel 测试 —— 三协议 echo 响应契约(结构 + 文本)。"""
+"""MockModel 测试 —— Anthropic Messages echo 响应契约(结构 + 文本 + SSE)。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from fastapi.responses import Response, StreamingResponse
 
 from chariot.server.model.mock import MockModel
 from chariot.server.service.exceptions import ServiceError
-from chariot.shared.protocols import Protocol
 
 
 async def _drain_stream(resp: Response) -> str:
@@ -33,7 +32,7 @@ async def test_messages_non_stream_schema() -> None:
     body = json.dumps(
         {"model": "x", "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}]}
     ).encode("utf-8")
-    resp = await m.respond(Protocol.MESSAGES, body, stream=False)
+    resp = await m.respond(body, stream=False)
     data = json.loads(bytes(resp.body))
 
     assert data["type"] == "message"
@@ -43,33 +42,6 @@ async def test_messages_non_stream_schema() -> None:
     assert data["content"][0]["text"].startswith("[mock echo]")
     assert data["content"][0]["text"].endswith("hi")
     assert data["model"] == "mock-echo-v1"
-
-
-async def test_completions_non_stream_schema() -> None:
-    m = MockModel()
-    body = json.dumps({"model": "x", "messages": [{"role": "user", "content": "hey"}]}).encode(
-        "utf-8"
-    )
-    resp = await m.respond(Protocol.CHAT_COMPLETIONS, body, stream=False)
-    data = json.loads(bytes(resp.body))
-
-    assert data["object"] == "chat.completion"
-    assert data["choices"][0]["message"]["role"] == "assistant"
-    assert data["choices"][0]["message"]["content"].startswith("[mock echo]")
-    assert data["choices"][0]["finish_reason"] == "stop"
-
-
-async def test_responses_non_stream_schema() -> None:
-    m = MockModel()
-    body = json.dumps({"model": "x", "input": "ping"}).encode("utf-8")
-    resp = await m.respond(Protocol.RESPONSES, body, stream=False)
-    data = json.loads(bytes(resp.body))
-
-    assert data["object"] == "response"
-    assert data["status"] == "completed"
-    assert data["output"][0]["type"] == "message"
-    assert data["output"][0]["content"][0]["type"] == "output_text"
-    assert data["output_text"].startswith("[mock echo]")
 
 
 # ---------- 流式响应关键事件 ----------
@@ -85,7 +57,7 @@ async def test_messages_stream_has_required_events() -> None:
             "messages": [{"role": "user", "content": "hello"}],
         }
     ).encode("utf-8")
-    resp = await m.respond(Protocol.MESSAGES, body, stream=True)
+    resp = await m.respond(body, stream=True)
     assert isinstance(resp, StreamingResponse)
     raw = await _drain_stream(resp)
 
@@ -98,32 +70,9 @@ async def test_messages_stream_has_required_events() -> None:
         "message_stop",
     ):
         assert tag in raw, f"stream missing event {tag!r}"
-    # 文本被 chunk 成 4 字符一段,不在任何单个 chunk 里完整出现
-    # 但 "mock" 短到会出现在某个 delta 里
-    assert '"text": "[mo' in raw or '"text": "mo' in raw  # 第一个 chunk 带 [mo 或 mo
+    # 文本被 chunk 成 4 字符一段;首个 delta 带 "[mo" 或 "mo" 这种前缀
+    assert '"text": "[mo' in raw or '"text": "mo' in raw
     assert "hello"[:3] in raw
-
-
-async def test_completions_stream_ends_with_done() -> None:
-    m = MockModel()
-    body = json.dumps(
-        {"model": "x", "stream": True, "messages": [{"role": "user", "content": "yo"}]}
-    ).encode("utf-8")
-    resp = await m.respond(Protocol.CHAT_COMPLETIONS, body, stream=True)
-    raw = await _drain_stream(resp)
-
-    assert '"finish_reason": "stop"' in raw
-    assert raw.rstrip().endswith("data: [DONE]")
-
-
-async def test_responses_stream_completes() -> None:
-    m = MockModel()
-    body = json.dumps({"model": "x", "stream": True, "input": "ok"}).encode("utf-8")
-    resp = await m.respond(Protocol.RESPONSES, body, stream=True)
-    raw = await _drain_stream(resp)
-
-    for tag in ("response.created", "response.output_text.delta", "response.completed"):
-        assert tag in raw, f"stream missing event {tag!r}"
 
 
 # ---------- 错误路径 ----------
@@ -132,7 +81,7 @@ async def test_responses_stream_completes() -> None:
 async def test_invalid_json_raises_service_error() -> None:
     m = MockModel()
     with pytest.raises(ServiceError) as exc:
-        await m.respond(Protocol.MESSAGES, b"not a json", stream=False)
+        await m.respond(b"not a json", stream=False)
     assert exc.value.status == 400
     assert exc.value.code == "invalid_json_body"
 
@@ -140,7 +89,7 @@ async def test_invalid_json_raises_service_error() -> None:
 async def test_json_non_object_raises() -> None:
     m = MockModel()
     with pytest.raises(ServiceError) as exc:
-        await m.respond(Protocol.MESSAGES, b"[1, 2, 3]", stream=False)
+        await m.respond(b"[1, 2, 3]", stream=False)
     assert exc.value.status == 400
     assert exc.value.code == "invalid_json_body"
 
@@ -149,6 +98,6 @@ async def test_empty_messages_still_returns_placeholder() -> None:
     """空消息不炸;MockModel 返占位 echo("收到空消息")。"""
     m = MockModel()
     body = json.dumps({"model": "x", "messages": []}).encode("utf-8")
-    resp = await m.respond(Protocol.CHAT_COMPLETIONS, body, stream=False)
+    resp = await m.respond(body, stream=False)
     data = json.loads(bytes(resp.body))
-    assert "mock" in data["choices"][0]["message"]["content"].lower()
+    assert "mock" in data["content"][0]["text"].lower()

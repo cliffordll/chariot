@@ -13,7 +13,6 @@ from chariot.server.agent import Agent
 from chariot.server.database.models import LogEntry
 from chariot.server.model.mock import MockModel, mock_model
 from chariot.server.service.exceptions import ServiceError
-from chariot.shared.protocols import Protocol
 
 
 class _SpyModel:
@@ -22,11 +21,11 @@ class _SpyModel:
     name = "spy"
 
     def __init__(self, *, raise_exc: Exception | None = None) -> None:
-        self.calls: list[tuple[Protocol, bytes, bool]] = []
+        self.calls: list[tuple[bytes, bool]] = []
         self._raise = raise_exc
 
-    async def respond(self, protocol: Protocol, body: bytes, *, stream: bool) -> Response:
-        self.calls.append((protocol, body, stream))
+    async def respond(self, body: bytes, *, stream: bool) -> Response:
+        self.calls.append((body, stream))
         if self._raise is not None:
             raise self._raise
         return Response(content=b'{"ok": true}', status_code=200, media_type="application/json")
@@ -82,17 +81,16 @@ def test_install_with_explicit_model() -> None:
 # ---------- handle() 转发契约 ----------
 
 
-async def test_handle_calls_model_with_protocol_and_body(session: AsyncSession) -> None:
+async def test_handle_calls_model_with_body(session: AsyncSession) -> None:
     spy = _SpyModel()
     agent = Agent(model=spy)
     body = json.dumps({"model": "foo", "messages": []}).encode("utf-8")
 
-    resp = await agent.handle(Protocol.MESSAGES, body)
+    resp = await agent.handle(body)
 
     assert resp.status_code == 200
     assert len(spy.calls) == 1
-    called_proto, called_body, called_stream = spy.calls[0]
-    assert called_proto is Protocol.MESSAGES
+    called_body, called_stream = spy.calls[0]
     assert called_body is body
     assert called_stream is False  # body 里没 stream: True
 
@@ -103,8 +101,8 @@ async def test_handle_detects_stream_flag(session: AsyncSession) -> None:
     agent = Agent(model=spy)
     body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
 
-    await agent.handle(Protocol.CHAT_COMPLETIONS, body)
-    _, _, is_stream = spy.calls[0]
+    await agent.handle(body)
+    _, is_stream = spy.calls[0]
     assert is_stream is True
 
 
@@ -116,9 +114,9 @@ async def test_handle_invalid_json_still_forwards_with_stream_false(
     agent = Agent(model=spy)
     body = b"not json"
 
-    resp = await agent.handle(Protocol.MESSAGES, body)
+    resp = await agent.handle(body)
     assert resp.status_code == 200
-    _, _, is_stream = spy.calls[0]
+    _, is_stream = spy.calls[0]
     assert is_stream is False  # 探测失败默认 False
 
 
@@ -130,7 +128,7 @@ async def test_handle_writes_log_on_success(session: AsyncSession) -> None:
     agent = Agent(model=_SpyModel())
     body = json.dumps({"model": "claude-haiku-4-5", "messages": []}).encode("utf-8")
 
-    await agent.handle(Protocol.MESSAGES, body)
+    await agent.handle(body)
 
     rows = (await session.execute(select(LogEntry))).scalars().all()
     assert len(rows) == 1
@@ -148,7 +146,7 @@ async def test_handle_writes_log_on_service_error(session: AsyncSession) -> None
     body = json.dumps({"model": "m"}).encode("utf-8")
 
     with pytest.raises(ServiceError):
-        await agent.handle(Protocol.MESSAGES, body)
+        await agent.handle(body)
 
     rows = (await session.execute(select(LogEntry))).scalars().all()
     assert len(rows) == 1
@@ -163,7 +161,7 @@ async def test_handle_writes_log_on_generic_exception(session: AsyncSession) -> 
     body = json.dumps({"model": "m"}).encode("utf-8")
 
     with pytest.raises(RuntimeError, match="boom"):
-        await agent.handle(Protocol.MESSAGES, body)
+        await agent.handle(body)
 
     rows = (await session.execute(select(LogEntry))).scalars().all()
     assert len(rows) == 1

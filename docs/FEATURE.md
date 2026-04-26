@@ -32,26 +32,29 @@
 - README 加"OpenAI 客户端怎么接 chariot"小节,推荐 LiteLLM
 - **验证**:`uv run pytest -q tests/server/test_dataplane.py` 通过;`curl /v1/chat/completions` 返回 404
 
-### A.2 删除 Protocol 枚举 + 简化 Model 接口
+### ✅ A.2 收窄 Model / Agent 接口(含 mock 简化)
 
-- 删 `chariot/shared/protocols.py`(整个文件);相关 import 全部清理
 - `Model.respond` 签名移除 `protocol` 参数
 - `Agent.handle` 同步移除 `protocol` 参数,Controller 传一个少一个
+- MockModel 收敛到 Messages-only(原 A.3 内容并入,因为接口收窄直接驱动 mock 三协议 dispatch 崩塌)
+- 服务器侧 tests 同步(`test_agent` / `test_dataplane` / `test_model_mock`)
+- **保留** `chariot/shared/protocols.py`:SDK / CLI 仍在用,延后到 A.4 删除
 - **验证**:`uv run pyright chariot/` 通过;`uv run pytest -q` 全绿
 
-### A.3 简化 MockModel
+### ✅ A.3 简化 MockModel
 
-- 删 OpenAI Chat Completions 和 Responses 协议的 echo + SSE 实现
-- 只保留 Anthropic Messages 协议(非流 + SSE)
-- 文件预计从 ~456 行瘦到 ~140 行
-- **验证**:`uv run pytest -q tests/server/test_model_mock.py` 通过;手动 `curl /v1/messages`(mock)返回 echo
+> 已并入 A.2 —— Model 接口去掉 protocol 参数后,mock 的三协议 dispatch 必然崩塌,
+> 一起做更连贯。原文件 ~456 行 → ~190 行。
 
-### A.4 SDK / CLI 单协议化
+### A.4 SDK / CLI 单协议化 + 删 protocols.py
 
 - `chariot/sdk/_adapters.py`:删除或瘦成只剩 messages
 - `chariot/sdk/client.py`:`post_chat` / `stream_chat` 移除 protocol 维度
-- `chariot/sdk/chat.py`:同步精简
-- `chariot/cli/commands/chat.py`:删 `--protocol` 选项
+- `chariot/sdk/chat.py` / `chariot/sdk/streams.py`:同步精简
+- `chariot/cli/commands/chat.py`、`chariot/cli/core/repl.py`、`chariot/cli/core/context.py`:
+  删 `--protocol` 选项 + fmt 参数
+- **删除** `chariot/shared/protocols.py`(SDK / CLI 不再 import 后即可)
+- `docs/guides/cli-typer.md` 同步更新(若提及 --protocol)
 - **验证**:`uv run pytest -q tests/sdk/ tests/cli/` 通过;`chariot chat "hi"` 工作
 
 ---

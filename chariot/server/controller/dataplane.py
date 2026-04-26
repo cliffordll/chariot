@@ -15,7 +15,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from chariot.server.agent import Agent
-from chariot.shared.protocols import Protocol
 
 router = APIRouter()
 
@@ -23,4 +22,4 @@ router = APIRouter()
 @router.post("/v1/messages")
 async def messages(request: Request) -> Response:
     body = await request.body()
-    return await Agent.current().handle(Protocol.MESSAGES, body)
+    return await Agent.current().handle(body)
