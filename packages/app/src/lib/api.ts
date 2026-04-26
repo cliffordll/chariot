@@ -6,35 +6,17 @@
  *   `http://127.0.0.1:<port>` 跨 origin → 启动时 invoke `get_server_url`
  *   拿 base URL,之后所有 fetch 都 prepend
  * - 类型手写,对齐 `chariot/server/controller/*.py` 的 Pydantic schema
+ *
+ * 0.2.0 起 chariot 单协议化(只接 Anthropic Messages),client 不再需要
+ * Protocol 枚举 / 三协议 model 候选;active model 在 server 端切换。
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-/** 客户端侧 API 协议;与 `chariot.shared.protocols.Protocol` 的 str 值严格一致。 */
-export const Protocol = {
-  MESSAGES: "messages",
-  CHAT_COMPLETIONS: "completions",
-  RESPONSES: "responses",
-} as const;
-export type Protocol = (typeof Protocol)[keyof typeof Protocol];
-
-/** 三协议各自的默认模型 + 下拉候选(硬编码;v1+ 再引入动态发现)。 */
-export const DEFAULT_MODELS: Record<Protocol, string> = {
-  [Protocol.MESSAGES]: "claude-haiku-4-5",
-  [Protocol.CHAT_COMPLETIONS]: "gpt-4o-mini",
-  [Protocol.RESPONSES]: "gpt-4o-mini",
-};
-
-export const MODEL_CHOICES: Record<Protocol, string[]> = {
-  [Protocol.MESSAGES]: ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"],
-  [Protocol.CHAT_COMPLETIONS]: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
-  [Protocol.RESPONSES]: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
-};
-
 export interface StatusResponse {
   version: string;
   uptime_ms: number;
-  /** 当前 agent 的 model 标识(默认 `mock-echo-v1`)。 */
+  /** 当前 agent 的 model 标识(默认 `mock-echo-v1`,真模型如 `anthropic`)。 */
   model: string;
   /** 客户端抵达 server 的 base URL(含 scheme + host + port)。 */
   url: string;

@@ -1,113 +1,61 @@
 /**
- * 三格式 SSE 文本增量 + usage 抽取。
+ * Anthropic Messages SSE 文本增量 + usage 抽取(浏览器侧)。
  *
- * 对齐 `chariot/sdk/streams.py`(Python 端的 `ChatStream`):
- * - 文本抽取:
- *   · MESSAGES       → `content_block_delta` + `delta.type == "text_delta"` → `delta.text`
- *   · CHAT_COMPLETIONS → `choices[0].delta.content`
- *   · RESPONSES      → `type == "response.output_text.delta"` → `delta`(字符串)
- * - Usage 抽取:
- *   · MESSAGES       → `message_start.message.usage.input_tokens` + `message_delta.usage.output_tokens`(累计)
- *   · CHAT_COMPLETIONS → 最后一个 chunk 的 `usage.{prompt,completion}_tokens`(需 `stream_options.include_usage`)
- *   · RESPONSES      → `response.completed.response.usage.{input,output}_tokens`
+ * 对齐 `chariot/sdk/streams.py::ChatStream`(Python 端)。0.2.0 起 chariot 单
+ * 协议化,只处理 Messages SSE:
+ * - 文本增量:`content_block_delta` + `delta.type == "text_delta"` → `delta.text`
+ * - Usage 累加:`message_start.message.usage.input_tokens` 起始;
+ *   `message_delta.usage.output_tokens` 累计
  *
- * 其余事件(tool_use / thinking / error)v0.1 忽略。
+ * 其余事件(tool_use / thinking / error)0.2.x 忽略。
  */
 
 import { iterSse, type SseFrame } from "@/lib/sse";
-import { Protocol } from "@/lib/api";
 
-/** 消费一条流:边 yield 文本增量,边把 usage 累积到 `usage` 对象。 */
+/** 消费一条 Messages SSE 流:边 yield 文本增量,边累加 usage。 */
 export class ChatStream {
-  readonly fmt: Protocol;
   inputTokens = 0;
   outputTokens = 0;
-
-  constructor(fmt: Protocol) {
-    this.fmt = fmt;
-  }
 
   async *textDeltas(resp: Response, signal?: AbortSignal): AsyncGenerator<string> {
     for await (const frame of iterSse(resp, signal)) {
       this.updateUsage(frame);
-      const t = extractText(this.fmt, frame);
+      const t = extractText(frame);
       if (t) yield t;
     }
   }
 
   private updateUsage(frame: SseFrame): void {
     const { event, data } = frame;
-
-    if (this.fmt === Protocol.MESSAGES) {
-      const etype = event ?? (typeof data.type === "string" ? data.type : null);
-      if (etype === "message_start") {
-        const msg = data.message;
-        if (isObj(msg)) {
-          const u = msg.usage;
-          if (isObj(u)) {
-            this.inputTokens = toInt(u.input_tokens);
-            this.outputTokens = toInt(u.output_tokens);
-          }
-        }
-      } else if (etype === "message_delta") {
-        const u = data.usage;
-        if (isObj(u)) {
-          const ot = u.output_tokens;
-          if (typeof ot === "number") this.outputTokens = ot;
-        }
-      }
-      return;
-    }
-
-    if (this.fmt === Protocol.CHAT_COMPLETIONS) {
-      const u = data.usage;
-      if (isObj(u)) {
-        this.inputTokens = toInt(u.prompt_tokens);
-        this.outputTokens = toInt(u.completion_tokens);
-      }
-      return;
-    }
-
-    // RESPONSES
     const etype = event ?? (typeof data.type === "string" ? data.type : null);
-    if (etype === "response.completed") {
-      const r = data.response;
-      if (isObj(r)) {
-        const u = r.usage;
+
+    if (etype === "message_start") {
+      const msg = data.message;
+      if (isObj(msg)) {
+        const u = msg.usage;
         if (isObj(u)) {
           this.inputTokens = toInt(u.input_tokens);
           this.outputTokens = toInt(u.output_tokens);
         }
       }
+    } else if (etype === "message_delta") {
+      const u = data.usage;
+      if (isObj(u)) {
+        const ot = u.output_tokens;
+        // Anthropic message_delta.usage.output_tokens 是累计值
+        if (typeof ot === "number") this.outputTokens = ot;
+      }
     }
   }
 }
 
-function extractText(fmt: Protocol, frame: SseFrame): string {
+function extractText(frame: SseFrame): string {
   const { event, data } = frame;
-
-  if (fmt === Protocol.MESSAGES) {
-    const etype = event ?? (typeof data.type === "string" ? data.type : null);
-    if (etype !== "content_block_delta") return "";
-    const delta = data.delta;
-    if (!isObj(delta) || delta.type !== "text_delta") return "";
-    return typeof delta.text === "string" ? delta.text : "";
-  }
-
-  if (fmt === Protocol.CHAT_COMPLETIONS) {
-    const choices = data.choices;
-    if (!Array.isArray(choices) || choices.length === 0) return "";
-    const c0 = choices[0];
-    if (!isObj(c0)) return "";
-    const delta = c0.delta;
-    if (!isObj(delta)) return "";
-    return typeof delta.content === "string" ? delta.content : "";
-  }
-
-  // RESPONSES
   const etype = event ?? (typeof data.type === "string" ? data.type : null);
-  if (etype !== "response.output_text.delta") return "";
-  return typeof data.delta === "string" ? data.delta : "";
+  if (etype !== "content_block_delta") return "";
+  const delta = data.delta;
+  if (!isObj(delta) || delta.type !== "text_delta") return "";
+  return typeof delta.text === "string" ? delta.text : "";
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {

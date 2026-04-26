@@ -169,6 +169,35 @@
 
 ---
 
+---
+
+## 0.2.2 patch
+
+### ✅ P.2 Chat 页单协议化清理
+
+- 0.2.0 已经把 server 端 / SDK / CLI 单协议化(只接 `/v1/messages`),但 React 端
+  `Chat.tsx` 还残留 0.1.0 的"协议下拉 + 模型下拉 + 自定义 model 输入"控件 ——
+  这些选择项在 server 侧已被 active config 改写,UI 上选什么都不再影响实际行为,
+  纯混淆用户。本步把这些遗留 UI 全部摘掉:
+  - `packages/app/src/lib/api.ts`:删 `Protocol` 枚举 / `DEFAULT_MODELS` /
+    `MODEL_CHOICES` 等三协议时代的常量
+  - `packages/app/src/lib/streams.ts`:`ChatStream` 移除 `Protocol` 入参,
+    单一处理 Messages SSE
+  - `packages/app/src/lib/chat.ts`:`runTurn` 删 `fmt` 字段,固定 POST
+    `/v1/messages`;`ChatTurnOpts.model` 仅作为 body.model 传给 server(供
+    `logs.model` 显示)
+  - `packages/app/src/pages/Chat.tsx`:删除协议 / 模型下拉 + 自定义输入,
+    改成 mount 时拉 `/admin/models.active`(fallback 到 `/admin/status.model`)
+    展示当前 active model;旁边给 "在 Dashboard 切换" 链接,引导到 D.3 的
+    切换面板做实际切换
+- pyproject + `chariot/__init__` 升 `0.2.1 → 0.2.2`
+- **验证**:`bun run --filter=@chariot/app build`(tsc + vite build)通过;
+  Python 全套(`uv run ruff check . && uv run ruff format --check . &&
+  uv run pyright chariot/ && uv run pytest -q`)保持全绿(本步纯前端,
+  不影响 server 测试)
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.1 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.2 收尾。

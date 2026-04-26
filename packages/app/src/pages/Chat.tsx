@@ -1,32 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ApiError,
-  DEFAULT_MODELS,
-  MODEL_CHOICES,
-  Protocol,
-} from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 
-const CUSTOM_MODEL_SENTINEL = "__custom__";
+const FALLBACK_MODEL_LABEL = "(server)";
+const MAX_TOKENS = 1024;
 
 interface MetaInfo {
   model: string;
   inputTokens: number;
   outputTokens: number;
   latencyMs: number;
-  pathLabel: string;
 }
 
 type DisplayMsg =
@@ -40,9 +27,13 @@ type DisplayMsg =
     };
 
 export default function Chat() {
-  const [protocol, setProtocol] = useState<Protocol>(Protocol.MESSAGES);
-  const [model, setModel] = useState<string>(DEFAULT_MODELS[Protocol.MESSAGES]);
-  const [useCustomModel, setUseCustomModel] = useState(false);
+  /**
+   * server 当前 active model 的展示名;mount 时一次性拉取(从 /admin/models 优先取
+   * config 里的友好名,fallback 到 /admin/status.model 的技术标识)。
+   * 用作 body.model 字段(server 会按 active config 改写;影响 logs.model 显示)
+   * 与对话尾部 meta 行的 model 标签。
+   */
+  const [activeModel, setActiveModel] = useState<string>(FALLBACK_MODEL_LABEL);
 
   const [messages, setMessages] = useState<DisplayMsg[]>([]);
   const [input, setInput] = useState("");
@@ -51,11 +42,27 @@ export default function Chat() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // 切 protocol:把 model 重置为该 protocol 的默认首选,并关掉自定义
-  const onProtocolChange = useCallback((next: Protocol) => {
-    setProtocol(next);
-    setModel(DEFAULT_MODELS[next]);
-    setUseCustomModel(false);
+  // 拉 active model 名;切换在 Dashboard 做,这里只读
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const models = await api.listModels();
+        if (cancelled) return;
+        if (models.active) {
+          setActiveModel(models.active);
+          return;
+        }
+        // 无 active(MockModel fallback)→ 退到 /admin/status.model 的技术标识
+        const status = await api.status();
+        if (!cancelled) setActiveModel(status.model);
+      } catch {
+        // server 不可用就保留 fallback label;Send 时会再次失败给清晰错误
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // auto-scroll to bottom unless user is scrolled up
@@ -68,7 +75,7 @@ export default function Chat() {
     }
   }, [messages]);
 
-  const canSend = !inFlight && input.trim().length > 0 && model.trim().length > 0;
+  const canSend = !inFlight && input.trim().length > 0;
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -100,9 +107,8 @@ export default function Chat() {
 
     try {
       const result = await runTurn(history, {
-        fmt: protocol,
-        model,
-        maxTokens: 1024,
+        model: activeModel,
+        maxTokens: MAX_TOKENS,
         signal: ctrl.signal,
         onToken: (tok) => {
           setMessages((cur) => {
@@ -124,11 +130,10 @@ export default function Chat() {
             ...last,
             status: result.aborted ? "aborted" : "done",
             meta: {
-              model,
+              model: activeModel,
               inputTokens: result.inputTokens,
               outputTokens: result.outputTokens,
               latencyMs: result.latencyMs,
-              pathLabel: protocol,
             },
           };
         }
@@ -149,7 +154,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, messages, protocol, model]);
+  }, [input, inFlight, messages, activeModel]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -186,76 +191,19 @@ export default function Chat() {
   return (
     <section className="flex h-full flex-col">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Chat</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Chat</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            active model:{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{activeModel}</code>{" "}
+            <Link to="/" className="ml-1 underline-offset-2 hover:underline">
+              在 Dashboard 切换
+            </Link>
+          </p>
+        </div>
         <Button variant="outline" size="sm" onClick={handleNewChat}>
           New chat
         </Button>
-      </div>
-
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <div>
-          <Label className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-            Protocol
-          </Label>
-          <Select value={protocol} onValueChange={(v) => onProtocolChange(v as Protocol)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={Protocol.MESSAGES}>messages</SelectItem>
-              <SelectItem value={Protocol.CHAT_COMPLETIONS}>completions</SelectItem>
-              <SelectItem value={Protocol.RESPONSES}>responses</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-            Model
-          </Label>
-          {useCustomModel ? (
-            <div className="flex gap-1">
-              <Input
-                value={model}
-                placeholder="模型 id"
-                onChange={(e) => setModel(e.target.value)}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setUseCustomModel(false);
-                  setModel(DEFAULT_MODELS[protocol]);
-                }}
-              >
-                预设
-              </Button>
-            </div>
-          ) : (
-            <Select
-              value={MODEL_CHOICES[protocol].includes(model) ? model : CUSTOM_MODEL_SENTINEL}
-              onValueChange={(v) => {
-                if (v === CUSTOM_MODEL_SENTINEL) {
-                  setUseCustomModel(true);
-                  return;
-                }
-                setModel(v);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODEL_CHOICES[protocol].map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_MODEL_SENTINEL}>自定义…</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-        </div>
       </div>
 
       <div
@@ -356,7 +304,6 @@ function MetaLine({ meta }: { meta: MetaInfo }) {
     meta.model,
     `${meta.inputTokens}→${meta.outputTokens} tok`,
     `${meta.latencyMs} ms`,
-    meta.pathLabel,
   ];
   return <div className="text-xs text-muted-foreground font-mono">[{parts.join(" · ")}]</div>;
 }

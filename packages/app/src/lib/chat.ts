@@ -1,12 +1,14 @@
 /**
- * Chat 页的核心:历史消息 → 请求体构造 + 一轮流式请求。
+ * Chat 页核心:历史消息 → Anthropic Messages 请求体 → 一轮流式调用。
  *
- * v0 架构:全部打本地 chariot-server,server 里的 Agent 直接生成响应。
- * 没有上游 / api-key 概念。历史只存纯文本 `{role, content}[]`。
+ * 0.2.0 起 chariot 单协议化(只接 `/v1/messages`),client 不再持 `fmt`;
+ * 历史只存纯文本 `{role, content}[]`,server 端 `Agent` 决定用哪个 Model 实现。
  */
 
-import { apiBase, Protocol } from "@/lib/api";
+import { apiBase } from "@/lib/api";
 import { ChatStream } from "@/lib/streams";
+
+const MESSAGES_PATH = "/v1/messages";
 
 export interface ChatTurnMsg {
   role: "user" | "assistant";
@@ -14,7 +16,7 @@ export interface ChatTurnMsg {
 }
 
 export interface ChatTurnOpts {
-  fmt: Protocol;
+  /** 仅用于 `body.model` 字段(server 会按 active config 改写;影响 `logs.model` 显示)。 */
   model: string;
   maxTokens: number;
   signal: AbortSignal;
@@ -41,24 +43,22 @@ export class ChatError extends Error {
   }
 }
 
-/** protocol → 数据面路径。 */
-const URL_BY_PROTOCOL: Record<Protocol, string> = {
-  [Protocol.MESSAGES]: "/v1/messages",
-  [Protocol.CHAT_COMPLETIONS]: "/v1/chat/completions",
-  [Protocol.RESPONSES]: "/v1/responses",
-};
-
 export async function runTurn(
   messages: ChatTurnMsg[],
   opts: ChatTurnOpts,
 ): Promise<ChatTurnResult> {
-  const body = buildBody(opts.fmt, messages, opts.model, opts.maxTokens);
+  const body = {
+    model: opts.model,
+    max_tokens: opts.maxTokens,
+    stream: true,
+    messages,
+  };
 
   const base = await apiBase();
   const t0 = performance.now();
   let resp: Response;
   try {
-    resp = await fetch(base + URL_BY_PROTOCOL[opts.fmt], {
+    resp = await fetch(base + MESSAGES_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -76,7 +76,7 @@ export async function runTurn(
     throw new ChatError(resp.status, text);
   }
 
-  const stream = new ChatStream(opts.fmt);
+  const stream = new ChatStream();
   const buf: string[] = [];
   let aborted = false;
   try {
@@ -98,36 +98,5 @@ export async function runTurn(
     outputTokens: stream.outputTokens,
     latencyMs: Math.round(performance.now() - t0),
     aborted,
-  };
-}
-
-function buildBody(
-  fmt: Protocol,
-  messages: ChatTurnMsg[],
-  model: string,
-  maxTokens: number,
-): Record<string, unknown> {
-  if (fmt === Protocol.MESSAGES) {
-    return { model, max_tokens: maxTokens, stream: true, messages };
-  }
-  if (fmt === Protocol.CHAT_COMPLETIONS) {
-    return {
-      model,
-      stream: true,
-      stream_options: { include_usage: true },
-      max_tokens: maxTokens,
-      messages,
-    };
-  }
-  // RESPONSES:字段名是 max_output_tokens,input item 需带 type="message"
-  return {
-    model,
-    stream: true,
-    max_output_tokens: maxTokens,
-    input: messages.map((m) => ({
-      type: "message",
-      role: m.role,
-      content: m.content,
-    })),
   };
 }
