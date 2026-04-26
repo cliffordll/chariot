@@ -97,7 +97,7 @@
 - 用 `respx` 写测试覆盖上述路径
 - **验证**:`uv run pytest -q tests/server/test_model_anthropic.py` 通过
 
-### C.2 AnthropicModel 流式路径
+### ✅ C.2 AnthropicModel 流式路径
 
 - httpx `client.stream()` + `StreamingResponse`,直接转发 SSE 字节
 - 流式中途断开:不伪造事件,直接断 TCP

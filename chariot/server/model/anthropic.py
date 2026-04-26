@@ -5,13 +5,18 @@
 1. 用配置里的 `model_id` 改写 body.model(client 写啥都按配置走)
 2. 注入 `x-api-key` / `anthropic-version` header
 
-错误映射(C.1 非流路径)
-----------------------
+错误映射(非流 + 流首响应已收前同等行为)
+-------------------------------------
 - 上游 401 / 403 → 502(用户配置错,但本服务对上游不可用)
 - 上游 429 → 透传 429(rate limit)
 - 上游 4xx (其它) → 透传(让客户端拿到原始错误)
 - 上游 5xx → 502
 - httpx 网络异常(超时 / 连接拒绝) → 502 + error 文案带原因
+
+流式中途断开
+------------
+首响应 200 已发回客户端后,后续上游异常 / 客户端断开 → 只能断 TCP,不伪造
+SSE 事件、不重写状态码(沿用 0.1.0 流式契约)。
 
 封装:client / model_id 都在实例字段里,模块级零自由函数。
 """
@@ -20,10 +25,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import AsyncIterator
 from typing import Any, ClassVar, cast
 
 import httpx
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from chariot.server.config import ConfigError
 from chariot.server.model.registry import ModelRegistry
@@ -110,10 +116,7 @@ class AnthropicModel:
     async def respond(self, body: bytes, *, stream: bool) -> Response:
         payload = self._rewrite_model_id(body)
         if stream:
-            # C.2 才上;C.1 阶段流式调用先 raise,客户端会拿到 502
-            raise ServiceError(
-                status=502, code="not_implemented", message="anthropic 流式路径在 C.2 完成"
-            )
+            return await self._stream(payload)
         return await self._unary(payload)
 
     # ---- 内部:body 改写 + 上游调用 ----
@@ -143,6 +146,52 @@ class AnthropicModel:
                 status=502, code="upstream_unreachable", message=f"上游不可达: {e}"
             ) from e
         return self._map_upstream_response(upstream)
+
+    async def _stream(self, payload: bytes) -> Response:
+        """流式上游调用。
+
+        - 首响应未到 / 错误码:同 _unary 路径处理(可正常 raise / 透传)
+        - 首响应 2xx:返回 `StreamingResponse`,字节透传;之后任何异常只能断 TCP
+        """
+        req = self._client.build_request("POST", "/v1/messages", content=payload)
+        try:
+            upstream = await self._client.send(req, stream=True)
+        except httpx.TimeoutException as e:
+            raise ServiceError(status=502, code="upstream_timeout", message=f"上游超时: {e}") from e
+        except httpx.HTTPError as e:
+            raise ServiceError(
+                status=502, code="upstream_unreachable", message=f"上游不可达: {e}"
+            ) from e
+
+        sc = upstream.status_code
+        if sc != 200:
+            # 错误码:把 body 读完 + 关连接,再走 _map(带 raise / 透传)
+            try:
+                await upstream.aread()
+            finally:
+                await upstream.aclose()
+            return self._map_upstream_response(upstream)
+
+        # 2xx:把 raw 字节流喂给 StreamingResponse;迭代器负责 close
+        media_type = upstream.headers.get("content-type", "text/event-stream")
+        return StreamingResponse(
+            self._stream_chunks(upstream),
+            status_code=200,
+            media_type=media_type,
+        )
+
+    @staticmethod
+    async def _stream_chunks(upstream: httpx.Response) -> AsyncIterator[bytes]:
+        """逐 chunk 转发上游字节;结束 / 异常时关 response 释放连接。
+
+        异常不吞 —— 让 StreamingResponse 异常上抛,starlette 会断 TCP 给客户端
+        (符合 0.1.0 "200 已发后只能断"契约,不伪造事件)。
+        """
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
 
     @staticmethod
     def _map_upstream_response(upstream: httpx.Response) -> Response:

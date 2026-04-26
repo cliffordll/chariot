@@ -1,20 +1,32 @@
-"""AnthropicModel 测试 —— from_config 校验 + 非流路径(C.1 范围)。
+"""AnthropicModel 测试 —— from_config 校验 + 非流 + 流式路径。
 
-用 `httpx.MockTransport` 拦截请求,不真打 anthropic API。流式路径(C.2)和
-错误码映射在另外的用例里覆盖。
+用 `httpx.MockTransport` 拦截请求,不真打 anthropic API。
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 import httpx
 import pytest
+from fastapi.responses import StreamingResponse
 
 from chariot.server.config import ConfigError
 from chariot.server.model.anthropic import AnthropicModel
 from chariot.server.service.exceptions import ServiceError
+
+
+async def _drain_streaming_response(resp: StreamingResponse) -> bytes:
+    chunks: list[bytes] = []
+    async for c in resp.body_iterator:
+        if isinstance(c, bytes):
+            chunks.append(c)
+        elif isinstance(c, str):
+            chunks.append(c.encode("utf-8"))
+        else:
+            chunks.append(bytes(c))
+    return b"".join(chunks)
 
 
 def _build_model(
@@ -228,13 +240,112 @@ async def test_respond_timeout_maps_to_502() -> None:
     assert exc.value.code == "upstream_timeout"
 
 
-# ---------- 流式路径(C.1 阶段尚未实现) ----------
+# ---------- 流式路径 ----------
 
 
-async def test_respond_stream_not_implemented_yet() -> None:
-    m = _build_model(handler=lambda _: httpx.Response(200))
+def _sse_handler(chunks: list[bytes]) -> Callable[[httpx.Request], httpx.Response]:
+    """构造一个返 SSE 流的 mock handler。"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        async def stream_body() -> AsyncIterator[bytes]:
+            for c in chunks:
+                yield c
+
+        return httpx.Response(
+            200,
+            content=stream_body(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    return handler
+
+
+async def test_respond_stream_2xx_forwards_chunks() -> None:
+    delta_payload = b'{"type":"content_block_delta","delta":{"text":"hi"}}'
+    chunks = [
+        b'event: message_start\ndata: {"type":"message_start"}\n\n',
+        b"event: content_block_delta\ndata: " + delta_payload + b"\n\n",
+        b"event: message_stop\ndata: {}\n\n",
+    ]
+    m = _build_model(handler=_sse_handler(chunks))
+    body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
+    resp = await m.respond(body, stream=True)
+
+    assert isinstance(resp, StreamingResponse)
+    assert resp.status_code == 200
+    assert resp.media_type == "text/event-stream"
+    raw = await _drain_streaming_response(resp)
+    assert b"message_start" in raw
+    assert b"content_block_delta" in raw
+    assert b"message_stop" in raw
+
+
+async def test_respond_stream_rewrites_model_id() -> None:
+    captured: dict[str, bytes] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = req.content
+
+        async def stream_body() -> AsyncIterator[bytes]:
+            yield b"event: message_start\ndata: {}\n\n"
+
+        return httpx.Response(
+            200, content=stream_body(), headers={"content-type": "text/event-stream"}
+        )
+
+    m = _build_model(handler=handler, model_id="claude-opus-4-5")
+    body = json.dumps({"model": "client-x", "stream": True, "messages": []}).encode("utf-8")
+    resp = await m.respond(body, stream=True)
+    # 必须把流消费掉,handler 才会被调
+    await _drain_streaming_response(resp)  # type: ignore[arg-type]
+    sent = json.loads(captured["body"])
+    assert sent["model"] == "claude-opus-4-5"
+
+
+async def test_respond_stream_401_maps_to_502_before_first_byte() -> None:
+    """首响应 401 还没发字节给客户端 → 可正常映射成 502。"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"type": "auth_error"}})
+
+    m = _build_model(handler=handler)
     body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
     with pytest.raises(ServiceError) as exc:
         await m.respond(body, stream=True)
     assert exc.value.status == 502
-    assert exc.value.code == "not_implemented"
+    assert exc.value.code == "upstream_auth_failed"
+
+
+async def test_respond_stream_500_maps_to_502_before_first_byte() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=b"oops")
+
+    m = _build_model(handler=handler)
+    body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
+    with pytest.raises(ServiceError) as exc:
+        await m.respond(body, stream=True)
+    assert exc.value.status == 502
+
+
+async def test_respond_stream_429_passthrough_before_first_byte() -> None:
+    """流式情形下 429 也透传(还没开始 SSE,可以正常返非流响应)。"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"type": "rate_limit"}})
+
+    m = _build_model(handler=handler)
+    body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
+    resp = await m.respond(body, stream=True)
+    assert resp.status_code == 429
+
+
+async def test_respond_stream_network_error_maps_to_502() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("simulated DNS failure")
+
+    m = _build_model(handler=handler)
+    body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
+    with pytest.raises(ServiceError) as exc:
+        await m.respond(body, stream=True)
+    assert exc.value.status == 502
+    assert exc.value.code == "upstream_unreachable"
