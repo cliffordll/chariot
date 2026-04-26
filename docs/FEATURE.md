@@ -128,7 +128,7 @@
 - `model use <name>` 调 POST + 显示切换结果
 - **验证**:本地启动 server,`chariot model list` / `chariot model use claude-opus` 工作
 
-### D.3 UI Dashboard 切换面板
+### ✅ D.3 UI Dashboard 切换面板
 
 - React Dashboard 加"Active Model"卡片:下拉 + 切换按钮
 - 切换成功后刷新 status 显示

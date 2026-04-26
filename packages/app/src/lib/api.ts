@@ -59,6 +59,22 @@ export interface ListLogsParams {
   since?: string;
 }
 
+/** `GET /admin/models` 响应。对齐 `chariot.server.controller.models.ModelsListResponse`。 */
+export interface ModelsListResponse {
+  /** 配置文件里的 model name 列表(`[[models]] name = ...`)。 */
+  available: string[];
+  /** 当前激活的 model name;MockModel fallback 时为 null。 */
+  active: string | null;
+  /** ModelRegistry 已注册的 type key 列表(mock / anthropic / ...)。 */
+  types: string[];
+}
+
+/** `POST /admin/models` 响应。对齐 `chariot.server.controller.models.SwitchModelResponse`。 */
+export interface SwitchModelResponse {
+  active: string;
+  model: string;
+}
+
 export class ApiError extends Error {
   status: number;
   body: string;
@@ -121,5 +137,14 @@ export const api = {
     if (params.since) q.set("since", params.since);
     const qs = q.toString();
     return request(`/admin/logs${qs ? "?" + qs : ""}`);
+  },
+  listModels(): Promise<ModelsListResponse> {
+    return request("/admin/models");
+  },
+  useModel(name: string): Promise<SwitchModelResponse> {
+    return request("/admin/models", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
   },
 };

@@ -2,7 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { api, type ApiError, type StatusResponse } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  api,
+  type ApiError,
+  type ModelsListResponse,
+  type StatusResponse,
+} from "@/lib/api";
 import {
   checkForUpdate,
   installUpdate,
@@ -15,8 +27,21 @@ type FetchState =
   | { kind: "ok"; status: StatusResponse }
   | { kind: "err"; message: string };
 
+type ModelsState =
+  | { kind: "loading" }
+  | { kind: "ok"; data: ModelsListResponse }
+  | { kind: "err"; message: string };
+
+type SwitchState =
+  | { kind: "idle" }
+  | { kind: "switching"; name: string }
+  | { kind: "err"; message: string };
+
 export default function Dashboard() {
   const [state, setState] = useState<FetchState>({ kind: "loading" });
+  const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
+  const [pendingChoice, setPendingChoice] = useState<string | null>(null);
+  const [switchState, setSwitchState] = useState<SwitchState>({ kind: "idle" });
   const [updateState, setUpdateState] = useState<
     | { kind: "idle" }
     | { kind: "checking" }
@@ -28,15 +53,34 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
+    setModelsState({ kind: "loading" });
     try {
-      const status = await api.status();
+      const [status, models] = await Promise.all([api.status(), api.listModels()]);
       setState({ kind: "ok", status });
+      setModelsState({ kind: "ok", data: models });
+      setPendingChoice(models.active);
     } catch (e) {
       const msg =
         e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setState({ kind: "err", message: msg });
+      setModelsState({ kind: "err", message: msg });
     }
   }, []);
+
+  const runSwitch = useCallback(async () => {
+    if (!pendingChoice) return;
+    setSwitchState({ kind: "switching", name: pendingChoice });
+    try {
+      await api.useModel(pendingChoice);
+      setSwitchState({ kind: "idle" });
+      // 切换成功后刷新 status + models 显示
+      await load();
+    } catch (e) {
+      const msg =
+        e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setSwitchState({ kind: "err", message: msg });
+    }
+  }, [pendingChoice, load]);
 
   const runCheckUpdate = useCallback(async () => {
     setUpdateState({ kind: "checking" });
@@ -139,22 +183,119 @@ export default function Dashboard() {
       )}
 
       {state.kind === "ok" && (
-        <div className="grid max-w-2xl grid-cols-2 gap-4">
-          <Stat label="status" value={<Badge>running</Badge>} />
-          <Stat label="version" value={state.status.version} />
-          <Stat label="uptime" value={formatUptime(state.status.uptime_ms)} />
-          <Stat label="model" value={<code className="font-mono text-sm">{state.status.model}</code>} />
-          <Stat
-            label="server url"
-            value={
-              <code className="break-all font-mono text-sm">
-                {state.status.url || "(unknown)"}
-              </code>
-            }
+        <>
+          <div className="mb-6 grid max-w-2xl grid-cols-2 gap-4">
+            <Stat label="status" value={<Badge>running</Badge>} />
+            <Stat label="version" value={state.status.version} />
+            <Stat label="uptime" value={formatUptime(state.status.uptime_ms)} />
+            <Stat label="model" value={<code className="font-mono text-sm">{state.status.model}</code>} />
+            <Stat
+              label="server url"
+              value={
+                <code className="break-all font-mono text-sm">
+                  {state.status.url || "(unknown)"}
+                </code>
+              }
+            />
+          </div>
+
+          <ActiveModelCard
+            modelsState={modelsState}
+            pendingChoice={pendingChoice}
+            onChoose={setPendingChoice}
+            switchState={switchState}
+            onSwitch={() => void runSwitch()}
           />
-        </div>
+        </>
       )}
     </section>
+  );
+}
+
+function ActiveModelCard({
+  modelsState,
+  pendingChoice,
+  onChoose,
+  switchState,
+  onSwitch,
+}: {
+  modelsState: ModelsState;
+  pendingChoice: string | null;
+  onChoose: (name: string) => void;
+  switchState: SwitchState;
+  onSwitch: () => void;
+}) {
+  if (modelsState.kind === "loading") {
+    return (
+      <div className="max-w-2xl rounded-lg border border-border p-4 text-sm text-muted-foreground">
+        Loading models…
+      </div>
+    );
+  }
+
+  if (modelsState.kind === "err") {
+    return (
+      <div className="max-w-2xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+        无法读取 model 列表:{modelsState.message}
+      </div>
+    );
+  }
+
+  const { data } = modelsState;
+  const isSwitching = switchState.kind === "switching";
+
+  return (
+    <div className="max-w-2xl rounded-lg border border-border p-4">
+      <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+        active model
+      </div>
+
+      {data.available.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          配置文件里没有 model —— 当前走 MockModel fallback。{" "}
+          <span className="font-mono">~/.chariot/config.toml</span> 里加{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5">[[models]]</code> 后重启 server。
+        </p>
+      ) : (
+        <div className="flex items-center gap-3">
+          <Select
+            value={pendingChoice ?? undefined}
+            onValueChange={onChoose}
+            disabled={isSwitching}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="选 model" />
+            </SelectTrigger>
+            <SelectContent>
+              {data.available.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                  {name === data.active && (
+                    <span className="ml-2 text-xs text-muted-foreground">(current)</span>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
+            size="sm"
+            onClick={onSwitch}
+            disabled={isSwitching || !pendingChoice || pendingChoice === data.active}
+          >
+            {isSwitching ? "切换中…" : "切换"}
+          </Button>
+        </div>
+      )}
+
+      {switchState.kind === "err" && (
+        <p className="mt-2 text-xs text-destructive">切换失败:{switchState.message}</p>
+      )}
+
+      <div className="mt-3 text-xs text-muted-foreground">
+        已注册 type:{data.types.join(", ")}
+      </div>
+    </div>
   );
 }
 
