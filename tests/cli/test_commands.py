@@ -79,9 +79,15 @@ def test_upstream_subcommand_removed() -> None:
     assert result.exit_code != 0
 
 
-def test_chat_invalid_protocol_fails() -> None:
-    """--protocol 必须是 messages/completions/responses;其它值在 argparse 前就报错。"""
-    result = runner.invoke(app, ["chat", "--protocol", "bogus", "hi"])
+def test_chat_protocol_option_removed() -> None:
+    """0.2.0 起单协议化,`chat --protocol ...` 选项已下线。"""
+    result = runner.invoke(app, ["chat", "--protocol", "messages", "hi"])
+    assert result.exit_code != 0
+
+
+def test_chat_invalid_max_tokens_fails() -> None:
+    """`--max-tokens` 必须是 int;非数字 typer 自带 parser 阶段就报错(不触 server)。"""
+    result = runner.invoke(app, ["chat", "--max-tokens", "abc", "hi"])
     assert result.exit_code != 0
 
 
@@ -103,7 +109,7 @@ def test_quiet_flag_sets_renderer_state() -> None:
 
     Renderer.QUIET = False  # 保险丝
     # 用一个必然失败的子命令快速走完 callback + 子命令参数校验(不触 server)
-    runner.invoke(app, ["--quiet", "chat", "--protocol", "bogus", "hi"])
+    runner.invoke(app, ["--quiet", "chat", "--max-tokens", "abc", "hi"])
     assert Renderer.QUIET is True
     Renderer.QUIET = False  # 复位,避免污染后续 test
 
@@ -112,6 +118,6 @@ def test_short_quiet_flag() -> None:
     from chariot.cli.core.render import Renderer
 
     Renderer.QUIET = False
-    runner.invoke(app, ["-q", "chat", "--protocol", "bogus", "hi"])
+    runner.invoke(app, ["-q", "chat", "--max-tokens", "abc", "hi"])
     assert Renderer.QUIET is True
     Renderer.QUIET = False

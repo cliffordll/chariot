@@ -6,9 +6,9 @@
 - `ProxyClient.discover_session()`:async context manager;内部走 `discover()`,
   找到或启动本地 chariot-server,构 httpx client 指向 server。
 
-v0 架构:server 本身就是智能体 (agent),不再有 upstream / BYO-key 概念。
-所有数据面请求都走 `/v1/messages` / `/v1/chat/completions` / `/v1/responses`,
-body 经 agent 路径生成响应。
+0.2.0 架构:server 本身就是智能体 (agent),不再有 upstream / BYO-key 概念;
+单协议对外只接 `POST /v1/messages`(Anthropic Messages)。OpenAI 客户端通过外部
+转换器(LiteLLM 等)接入,SDK 这边不再需要 protocol 维度。
 
 Pydantic 模型复用
 ----------------
@@ -27,16 +27,15 @@ from typing import Any, Self, cast
 
 import httpx
 
-from chariot.sdk._adapters import adapter_for
 from chariot.sdk.chat import ChatResult
 from chariot.sdk.discover import ServerDiscovery
 from chariot.server.controller.logs import LogOut
 from chariot.server.controller.runtime import StatusResponse
 from chariot.server.controller.stats import Period, StatsOut
-from chariot.shared.protocols import UPSTREAM_PATH, Protocol
 
 _DATA_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 _ADMIN_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+_MESSAGES_PATH = "/v1/messages"
 
 
 @dataclass
@@ -109,31 +108,24 @@ class ProxyClient:
 
     # ---------- data plane ----------
 
-    def _data_url(self, fmt: Protocol) -> str:
-        return f"{self.base_url}{UPSTREAM_PATH[fmt]}"
+    @property
+    def _data_url(self) -> str:
+        return f"{self.base_url}{_MESSAGES_PATH}"
 
-    async def post_chat(
-        self,
-        fmt: Protocol,
-        body: dict[str, Any],
-    ) -> httpx.Response:
+    async def post_chat(self, body: dict[str, Any]) -> httpx.Response:
         """非流式数据面 POST;调用方拿到 Response 自己 `.json()`。"""
         return await self.http.post(
-            self._data_url(fmt),
+            self._data_url,
             json=body,
             headers={"content-type": "application/json"},
         )
 
     @asynccontextmanager
-    async def stream_chat(
-        self,
-        fmt: Protocol,
-        body: dict[str, Any],
-    ) -> AsyncGenerator[httpx.Response]:
+    async def stream_chat(self, body: dict[str, Any]) -> AsyncGenerator[httpx.Response]:
         """流式数据面 POST;返回 async context,`resp.aiter_bytes()` 读流。"""
         req = self.http.build_request(
             "POST",
-            self._data_url(fmt),
+            self._data_url,
             json=body,
             headers={"content-type": "application/json"},
         )
@@ -148,19 +140,21 @@ class ProxyClient:
         text: str,
         *,
         model: str,
-        fmt: Protocol = Protocol.MESSAGES,
         max_tokens: int = 1024,
     ) -> ChatResult:
         """发一条消息,非流式,返回 `ChatResult`。
 
-        简单用例的便捷入口;更复杂场景用 `post_chat` / `stream_chat` 自己拼。
-        流式渲染走 `stream_chat` + `ChatStream(fmt).text_deltas(resp)`。
+        简单用例的便捷入口;更复杂场景用 `post_chat` / `stream_chat` 自己拼 body。
+        流式渲染走 `stream_chat(body)` + `ChatStream().text_deltas(resp)`。
         """
-        adapter = adapter_for(fmt)
-        body = adapter.build_request_body(text, model=model, max_tokens=max_tokens, stream=False)
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": text}],
+        }
 
         t0 = time.monotonic()
-        resp = await self.post_chat(fmt, body)
+        resp = await self.post_chat(body)
         latency_ms = int((time.monotonic() - t0) * 1000)
         resp.raise_for_status()
 
@@ -170,8 +164,6 @@ class ProxyClient:
 
         return ChatResult.from_response_data(
             cast(dict[str, Any], data),
-            adapter=adapter,
-            fmt=fmt,
             server_base_url=self.base_url,
             latency_ms=latency_ms,
         )

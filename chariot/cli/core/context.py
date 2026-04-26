@@ -1,12 +1,15 @@
 """chat 会话上下文:客户端 + 会话配置 + 多轮 messages 历史。
 
-`ChatContext` 同时服务一次性命令(`chat.py::_one_shot`)和 REPL(`repl.py`)。
+`ChatContext` 同时服务一次性命令(`commands/chat.py::_one_shot`)和 REPL(`repl.py`)。
 独立于 typer / REPL / 前端 UI,只管"一轮流式请求 + usage 抽取 + 消息历史"。
+
+0.2.0 起 chariot 单协议化(只接 Anthropic Messages),`ChatContext` 跟着收敛 ——
+不再持 fmt 字段,_build_body 只产 messages 协议体。
 
 典型用法
 --------
 ```
-ctx = ChatContext(client=client, fmt=Protocol.MESSAGES, model="claude-haiku-4-5")
+ctx = ChatContext(client=client, model="claude-haiku-4-5")
 ctx.append_user("hi")
 result = await ctx.run_turn(on_token=print)
 ctx.append_assistant(result.text)
@@ -22,13 +25,8 @@ from typing import Any
 
 from chariot.sdk.client import ProxyClient
 from chariot.sdk.streams import ChatStream
-from chariot.shared.protocols import Protocol
 
-DEFAULT_MODELS: dict[Protocol, str] = {
-    Protocol.MESSAGES: "claude-haiku-4-5",
-    Protocol.CHAT_COMPLETIONS: "gpt-4o-mini",
-    Protocol.RESPONSES: "gpt-4o-mini",
-}
+DEFAULT_MODEL: str = "claude-haiku-4-5"
 
 
 def _empty_messages() -> list[dict[str, str]]:
@@ -63,7 +61,6 @@ class ChatContext:
     """一次聊天会话的完整上下文:客户端 + 会话配置 + 多轮历史。"""
 
     client: ProxyClient
-    fmt: Protocol
     model: str
     max_tokens: int = 1024
     messages: list[dict[str, str]] = field(default_factory=_empty_messages)
@@ -82,11 +79,8 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(fmt / model / upstream ...)。"""
+        """清空对话历史,保留会话配置(model / max_tokens)。"""
         self.messages.clear()
-
-    def set_fmt(self, fmt: Protocol) -> None:
-        self.fmt = fmt
 
     def set_model(self, model: str) -> None:
         self.model = model
@@ -99,11 +93,11 @@ class ChatContext:
         server 4xx / 5xx 时抛 `ChatError`(body = 响应正文)。
         """
         body = self._build_body()
-        stream = ChatStream(fmt=self.fmt)
+        stream = ChatStream()
         buf: list[str] = []
         t0 = time.monotonic()
 
-        async with self.client.stream_chat(self.fmt, body) as resp:
+        async with self.client.stream_chat(body) as resp:
             if resp.status_code >= 400:
                 err_bytes = await resp.aread()
                 raise ChatError(
@@ -121,39 +115,13 @@ class ChatContext:
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
 
-    # ---------- 私有:按 format 组装请求体 ----------
+    # ---------- 私有:组装请求体 ----------
 
     def _build_body(self) -> dict[str, Any]:
-        """按 self.fmt 把对话历史组装成请求体。
-
-        v0.1 只存纯文本(`content: str`),三格式的多轮表达都能直接消化。
-        """
-        if self.fmt is Protocol.MESSAGES:
-            return {
-                "model": self.model,
-                "max_tokens": self.max_tokens,
-                "stream": True,
-                "messages": self.messages,
-            }
-
-        if self.fmt is Protocol.CHAT_COMPLETIONS:
-            # include_usage=true 让最后一个 chunk 带 prompt/completion_tokens
-            return {
-                "model": self.model,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-                "max_tokens": self.max_tokens,
-                "messages": self.messages,
-            }
-
-        # Protocol.RESPONSES:字段名是 max_output_tokens;input item 按
-        # Responses 规范带 type="message"
+        """把对话历史组装成 Anthropic Messages 请求体。"""
         return {
             "model": self.model,
+            "max_tokens": self.max_tokens,
             "stream": True,
-            "max_output_tokens": self.max_tokens,
-            "input": [
-                {"type": "message", "role": m["role"], "content": m["content"]}
-                for m in self.messages
-            ],
+            "messages": self.messages,
         }

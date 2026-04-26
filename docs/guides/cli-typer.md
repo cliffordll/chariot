@@ -1,9 +1,11 @@
 # CLI · Typer 使用指南
 
-> **⚠️ 示例含 Rosetta 遗留**:文中用 `chariot upstream add/list` 作 Typer 子命令示例,
-> 但 chariot v0 已无 `upstream` 子命令(当前子命令见 `chariot/cli/__main__.py`:
-> `status / start / stop / chat / logs / stats`)。Typer 用法本身仍然适用,照抄
-> 时把子命令名换成实际要加的那个即可。
+> **⚠️ 示例含 Rosetta / 0.1.0 遗留**:文中用 `chariot upstream add/list` 作 Typer
+> 子命令示例,但 chariot 已无 `upstream` 子命令;`--protocol` 例子(下面 §4.3 +
+> §7)用的是 0.1.0 的 `chariot.shared.protocols.Protocol` 枚举,0.2.0 起 chariot
+> 单协议化(只接 `/v1/messages`)已删除该枚举和 `--protocol` 选项。Typer 用法本身
+> 仍然适用,照抄时把子命令名 / 枚举类换成实际的那个即可。
+> 当前子命令见 `chariot/cli/__main__.py`:`status / start / stop / chat / logs / stats`。
 >
 > **文件定位**:`chariot/cli/` 下用的 Typer 库、项目约定的命令写法、加新命令 / 新参数 / 新测试的手顺。
 > **面向**:第一次改 `chariot` CLI 子命令、或者想新增一条命令时查的自己。

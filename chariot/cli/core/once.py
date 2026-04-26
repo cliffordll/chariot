@@ -13,6 +13,8 @@ import typer
 from chariot.cli.core.context import ChatContext, ChatError
 from chariot.cli.core.render import Renderer
 
+_PROTOCOL_LABEL = "messages"
+
 
 @dataclass
 class ChatOnce:
@@ -35,5 +37,5 @@ class ChatOnce:
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,
-            path=self.ctx.fmt.value,
+            path=_PROTOCOL_LABEL,
         )

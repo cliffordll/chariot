@@ -4,8 +4,11 @@
 ----
 - `ProxyClient.discover_session()`:连到本机 server(不在就自动 spawn)
 - `ProxyClient.chat_once(text, ...)`:发一条消息拿 `ChatResult`(非流)
-- `ProxyClient.stream_chat(fmt, body)` + `ChatStream(fmt).text_deltas(resp)`:流式
+- `ProxyClient.stream_chat(body)` + `ChatStream().text_deltas(resp)`:流式
 - `ServerDiscovery.find_or_spawn(...)`:低层级发现 / 启动 server 的编排
+
+0.2.0 起 chariot 单协议化(只接 Anthropic Messages),SDK 层不再有 protocol /
+fmt 维度。
 """
 
 from __future__ import annotations

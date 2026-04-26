@@ -46,7 +46,7 @@
 > 已并入 A.2 —— Model 接口去掉 protocol 参数后,mock 的三协议 dispatch 必然崩塌,
 > 一起做更连贯。原文件 ~456 行 → ~190 行。
 
-### A.4 SDK / CLI 单协议化 + 删 protocols.py
+### ✅ A.4 SDK / CLI 单协议化 + 删 protocols.py
 
 - `chariot/sdk/_adapters.py`:删除或瘦成只剩 messages
 - `chariot/sdk/client.py`:`post_chat` / `stream_chat` 移除 protocol 维度
