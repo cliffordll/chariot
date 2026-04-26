@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 
 from fastapi.responses import Response
 
-from chariot.server.config import ChariotConfig
+from chariot.server.config import ChariotConfig, ConfigError
 from chariot.server.model.base import Model
 from chariot.server.model.mock import mock_model
 from chariot.server.model.registry import ModelRegistry
@@ -58,6 +58,8 @@ class Agent:
     # ---- 类级单例 ----
 
     _current: ClassVar[Agent | None] = None
+    _config: ClassVar[ChariotConfig | None] = None
+    _active_name: ClassVar[str | None] = None
 
     # ---- 实例构造 ----
 
@@ -73,6 +75,8 @@ class Agent:
 
         - app lifespan startup 里调一次(默认 `model=None` 走 MockModel)
         - 再调会覆盖上一个(动态切 model 时用得上)
+        - 只动 `_current`;`_config` / `_active_name` 由 `install_from_config` /
+          `switch_to` 各自维护
         """
         cls._current = cls(model)
         _log.info("agent installed with model=%s", cls._current.model.name)
@@ -85,11 +89,34 @@ class Agent:
         - `config.active_entry()` 为 None(无配置 / 无 active)→ MockModel fallback
         - 否则 `ModelRegistry.build(entry)` 构造对应实现
         - lifespan startup 期 raise 的 `ConfigError` 直接上冒(让 server 不要起来)
+        - 同时记下 `_config` / `_active_name`,供 /admin/models 端点查询
         """
         entry = config.active_entry()
         if entry is None:
-            return cls.install()
-        return cls.install(model=ModelRegistry.build(entry))
+            agent = cls.install()
+            cls._active_name = None
+        else:
+            agent = cls.install(model=ModelRegistry.build(entry))
+            cls._active_name = entry.name
+        cls._config = config
+        return agent
+
+    @classmethod
+    def switch_to(cls, name: str) -> Agent:
+        """运行时切到名为 `name` 的 model;不改 config 文件,仅换内存里的 active。
+
+        在 `_config.models` 里按 name 找 entry,经 ModelRegistry 重建,覆盖 install。
+        找不到 / build 失败 → `ConfigError`(由 controller 转 4xx/5xx)。
+        """
+        config = cls.config()
+        for entry in config.models:
+            if entry.name == name:
+                model = ModelRegistry.build(entry)
+                agent = cls.install(model=model)
+                cls._active_name = name
+                return agent
+        known = ", ".join(e.name for e in config.models) or "(空)"
+        raise ConfigError(f"未知 model name: {name!r};可选:{known}")
 
     @classmethod
     def current(cls) -> Agent:
@@ -99,9 +126,21 @@ class Agent:
         return cls._current
 
     @classmethod
+    def config(cls) -> ChariotConfig:
+        """取当前 agent 关联的 config;没装载过返 `ChariotConfig.empty()`。"""
+        return cls._config if cls._config is not None else ChariotConfig.empty()
+
+    @classmethod
+    def active_name(cls) -> str | None:
+        """当前 active 的 model name(来自 config 或 switch_to);MockModel fallback 返 None。"""
+        return cls._active_name
+
+    @classmethod
     def uninstall(cls) -> None:
-        """清除当前 agent 注册(lifespan shutdown / 测试 teardown)。"""
+        """清除当前 agent 注册 + 配置状态(lifespan shutdown / 测试 teardown)。"""
         cls._current = None
+        cls._config = None
+        cls._active_name = None
 
     # ---- 请求处理 ----
 

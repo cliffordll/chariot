@@ -114,7 +114,7 @@
 
 ## D. Model 切换控制面
 
-### D.1 /admin/models 端点
+### ✅ D.1 /admin/models 端点
 
 - `GET /admin/models` → `{available, active, types}`
 - `POST /admin/models {name}` → rebuild Model + `Agent.install` 覆盖 + 返回新 active
