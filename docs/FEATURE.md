@@ -25,7 +25,7 @@
 
 ## A. 单协议化(收窄基础)
 
-### A.1 删除 OpenAI 两端点
+### ✅ A.1 删除 OpenAI 两端点
 
 - 删 `POST /v1/chat/completions` 和 `POST /v1/responses` 路由(`chariot/server/controller/dataplane.py`)
 - 删对应测试(`tests/server/test_dataplane.py` 的两协议覆盖)

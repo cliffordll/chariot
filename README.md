@@ -2,12 +2,16 @@
 
 > **Self-evolving intelligence, in motion.** · 驾驭智能,向前。
 
-Chariot 是一个**本机跑的智能体 (agent) server**。通过 HTTP 对话 —— 三种业界主流 API shape
-(Anthropic Messages / OpenAI Chat Completions / OpenAI Responses)都是一等公民,
-server 自己生成响应,不代理到外部 LLM。
+Chariot 是一个**本机跑的智能体 (agent) server**。对外接 Anthropic Messages
+协议(`POST /v1/messages`),server 自己生成响应。
 
-默认自带 `MockModel`(本地 echo,零外部依赖);未来通过同一个 `Model` 接口可以挂
-真实后端(Anthropic / OpenAI / 本地 llama / 自研)或加进化循环。
+默认自带 `MockModel`(本地 echo,零外部依赖);通过 `Model` 接口可以挂真实后端
+(Anthropic / 本地 llama / 自研)或加进化循环。
+
+> **0.2.0 起单协议**:chariot 只对外暴露 `/v1/messages`。OpenAI 兼容性请通过外部
+> 转换器接入(见下方 [OpenAI 客户端怎么接](#openai-客户端怎么接))。架构变更详见
+> [`docs/DESIGN.md`](docs/DESIGN.md);0.1.0 三协议平等的旧设计归档在
+> [`docs/history/0.1.0/`](docs/history/0.1.0/)。
 
 ## Quick start
 
@@ -59,19 +63,35 @@ bun run --filter=@chariot/app dev          # 终端 B:Vite at http://localhost:5
 ## Architecture
 
 ```
-CLI / UI / HTTP client
-        │  POST /v1/messages  |  /v1/chat/completions  |  /v1/responses
+CLI / UI / Anthropic SDK / claude code
+        │  POST /v1/messages
         ▼
-Controller  →  Agent.handle(protocol, body)
+Controller  →  Agent.handle(body)
                     ↓
-                Model.respond(protocol, body, *, stream)
+                Model.respond(body, *, stream)
                     ↓
-              MockModel (v0 default · local echo)
-              future: AnthropicAdapter / OpenAIAdapter / LocalLlama / ...
+              MockModel (default · local echo)
+              AnthropicModel (透传到 Anthropic API)
+              future: LocalLlama / 自研 ...
 ```
 
 三层通过两条窄接口解耦,新增一个模型或一条进化逻辑不穿层。契约细节见
 [`docs/DESIGN.md`](docs/DESIGN.md) §5。
+
+## OpenAI 客户端怎么接
+
+chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端调 chariot,
+推荐架一层成熟的转换代理(把 chariot 当 Anthropic 后端配置即可):
+
+- **[LiteLLM](https://github.com/BerriAI/litellm)** —— 把 chariot 配成 anthropic
+  provider,对外仍暴露 OpenAI 兼容端点
+- **[claude-code-router](https://github.com/musistudio/claude-code-router)** ——
+  专门给 claude code 客户端做 routing 的轻量代理
+- **[oneapi](https://github.com/songquanpeng/one-api)** —— 多 LLM 协议聚合网关
+
+为什么不内置:协议翻译矩阵(schema + SSE × 三协议互译)是块独立工作,这些专门的
+项目做得比 chariot 自己写好。chariot 的差异化在 Agent 层(后续版本的多轮记忆 /
+工具调用 / 进化循环),不在协议适配。
 
 ## Tech stack
 

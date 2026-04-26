@@ -1,4 +1,4 @@
-"""Dataplane endpoint 测试 —— 覆盖 3 个端点转发到 Agent 的 protocol 映射。"""
+"""Dataplane endpoint 测试 —— 单端点 `/v1/messages` 转发到 Agent。"""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ async def client_and_model(
     Agent.uninstall()
 
 
-# ---------- 3 endpoint → 正确 protocol ----------
+# ---------- 唯一端点 → Messages 协议 ----------
 
 
 async def test_messages_endpoint_forwards_messages_protocol(
@@ -73,30 +73,23 @@ async def test_messages_endpoint_forwards_messages_protocol(
     assert model.last[0] is Protocol.MESSAGES
 
 
-async def test_completions_endpoint_forwards_completions_protocol(
+# ---------- OpenAI 端点已下线 —— 应该返 404 ----------
+
+
+async def test_chat_completions_endpoint_removed(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
-    client, model = client_and_model
-    body = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
-    resp = await client.post("/v1/chat/completions", json=body)
-
-    assert resp.status_code == 200
-    assert resp.json()["p"] == "completions"
-    assert model.last is not None
-    assert model.last[0] is Protocol.CHAT_COMPLETIONS
+    client, _ = client_and_model
+    resp = await client.post("/v1/chat/completions", json={"model": "x", "messages": []})
+    assert resp.status_code == 404
 
 
-async def test_responses_endpoint_forwards_responses_protocol(
+async def test_responses_endpoint_removed(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
-    client, model = client_and_model
-    body = {"model": "gpt-4o-mini", "input": "hi"}
-    resp = await client.post("/v1/responses", json=body)
-
-    assert resp.status_code == 200
-    assert resp.json()["p"] == "responses"
-    assert model.last is not None
-    assert model.last[0] is Protocol.RESPONSES
+    client, _ = client_and_model
+    resp = await client.post("/v1/responses", json={"model": "x", "input": "hi"})
+    assert resp.status_code == 404
 
 
 # ---------- body 透传 + stream 标志探测 ----------
@@ -119,7 +112,7 @@ async def test_stream_flag_propagated(
 ) -> None:
     client, model = client_and_model
     await client.post(
-        "/v1/chat/completions",
+        "/v1/messages",
         json={"model": "x", "stream": True, "messages": []},
     )
     assert model.last is not None

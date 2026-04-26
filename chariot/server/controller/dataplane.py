@@ -1,8 +1,12 @@
 """/v1/* 数据面路由。
 
-三端点形状对称,只差 `request_protocol` 一个参数。routes 是哑管道:读 body
-+ 调 `agent.handle(protocol, body)`,不做 selector / forwarder / translation
-—— 这些概念在 v0 架构(server 自己就是 agent)里都不存在。
+0.2.0 起 chariot 只对外暴露 `POST /v1/messages`(Anthropic Messages 协议);
+OpenAI 客户端通过外部转换器(LiteLLM / claude-code-router 等)接入,本服务
+不做协议翻译。详见 `docs/DESIGN.md` §3。
+
+route 是哑管道:读 body + 调 `Agent.current().handle(body)`,不做 selector /
+forwarder / translation —— 这些概念在 chariot 架构(server 自己就是 agent)里
+都不存在。
 """
 
 from __future__ import annotations
@@ -20,15 +24,3 @@ router = APIRouter()
 async def messages(request: Request) -> Response:
     body = await request.body()
     return await Agent.current().handle(Protocol.MESSAGES, body)
-
-
-@router.post("/v1/chat/completions")
-async def chat_completions(request: Request) -> Response:
-    body = await request.body()
-    return await Agent.current().handle(Protocol.CHAT_COMPLETIONS, body)
-
-
-@router.post("/v1/responses")
-async def responses_endpoint(request: Request) -> Response:
-    body = await request.body()
-    return await Agent.current().handle(Protocol.RESPONSES, body)

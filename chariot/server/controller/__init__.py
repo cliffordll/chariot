@@ -3,7 +3,7 @@
 两组 router 对外暴露,app.py 分别挂到不同 prefix:
 
 - `admin_router`(挂在 `/admin`):管理面 —— runtime / logs / stats
-- `dataplane_router`(无 prefix,端点内含 `/v1/*`):数据面 —— messages / chat / responses
+- `dataplane_router`(无 prefix,端点内含 `/v1/*`):数据面 —— 仅 messages(0.2.0 起单端点)
 
 分层约定:controller 负责 HTTP 协议(参数解析、状态码、错误映射);
 business 逻辑在 `chariot.server.agent` + `chariot.server.model.*`;
