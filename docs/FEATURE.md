@@ -88,7 +88,7 @@
 
 ## C. AnthropicModel
 
-### C.1 AnthropicModel 非流路径
+### ✅ C.1 AnthropicModel 非流路径
 
 - 新增 `chariot/server/model/anthropic.py`:类 + `from_config` + 非流 `respond`
 - httpx async client 持久化(`__init__` 建一次)

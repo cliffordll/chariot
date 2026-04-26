@@ -1,0 +1,176 @@
+"""`AnthropicModel` —— 透传到 Anthropic Messages API 的真实模型实现。
+
+0.2.0 起 chariot 单协议化,本 model 把客户端的 `/v1/messages` 请求经 httpx
+转发到上游 `<base_url>/v1/messages`,响应直接透传回去。chariot 自己只做两件事:
+1. 用配置里的 `model_id` 改写 body.model(client 写啥都按配置走)
+2. 注入 `x-api-key` / `anthropic-version` header
+
+错误映射(C.1 非流路径)
+----------------------
+- 上游 401 / 403 → 502(用户配置错,但本服务对上游不可用)
+- 上游 429 → 透传 429(rate limit)
+- 上游 4xx (其它) → 透传(让客户端拿到原始错误)
+- 上游 5xx → 502
+- httpx 网络异常(超时 / 连接拒绝) → 502 + error 文案带原因
+
+封装:client / model_id 都在实例字段里,模块级零自由函数。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, ClassVar, cast
+
+import httpx
+from fastapi.responses import Response
+
+from chariot.server.config import ConfigError
+from chariot.server.model.registry import ModelRegistry
+from chariot.server.service.exceptions import ServiceError
+
+_DEFAULT_BASE_URL = "https://api.anthropic.com"
+_DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
+_ANTHROPIC_VERSION = "2023-06-01"
+
+
+@ModelRegistry.register("anthropic")
+class AnthropicModel:
+    """走 Anthropic Messages API 的 Model 实现。
+
+    构造方式只能走 `from_config(options)`(由 ModelRegistry 调);手工构造
+    `__init__` 也允许,主要给测试 inject 自定义 httpx client 用。
+    """
+
+    name: str = "anthropic"
+
+    # 类级超时常量,测试可 monkeypatch
+    _CONNECT_TIMEOUT_SEC: ClassVar[float] = 10.0
+    _READ_TIMEOUT_SEC: ClassVar[float] = 300.0
+    _WRITE_TIMEOUT_SEC: ClassVar[float] = 30.0
+    _POOL_TIMEOUT_SEC: ClassVar[float] = 10.0
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_id: str,
+        base_url: str = _DEFAULT_BASE_URL,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        """构造 AnthropicModel。
+
+        - `client=None` → 自建 `httpx.AsyncClient`(生产路径);构造方负责后续 close
+          (这里没暴露 close —— 进程级单例,server lifespan 退出时随 GC 释放)
+        - `client=<注入>`:测试用,可塞 MockTransport
+        """
+        self._model_id = model_id
+        if client is not None:
+            self._client = client
+            return
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": _ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+            timeout=httpx.Timeout(
+                connect=self._CONNECT_TIMEOUT_SEC,
+                read=self._READ_TIMEOUT_SEC,
+                write=self._WRITE_TIMEOUT_SEC,
+                pool=self._POOL_TIMEOUT_SEC,
+            ),
+        )
+
+    # ---- ModelRegistry 构造契约 ----
+
+    @classmethod
+    def from_config(cls, options: dict[str, Any]) -> AnthropicModel:
+        """从 config options 构造;读环境变量取 api_key,缺关键字段 raise ConfigError。"""
+        model_id = options.get("model_id")
+        if not isinstance(model_id, str) or not model_id:
+            raise ConfigError("anthropic model 配置缺少 'model_id' 或类型不对")
+
+        env_name = options.get("api_key_env", _DEFAULT_API_KEY_ENV)
+        if not isinstance(env_name, str) or not env_name:
+            raise ConfigError("'api_key_env' 必须是非空字符串")
+        api_key = os.environ.get(env_name)
+        if not api_key:
+            raise ConfigError(f"环境变量 {env_name} 未设置")
+
+        base_url = options.get("base_url", _DEFAULT_BASE_URL)
+        if not isinstance(base_url, str) or not base_url:
+            raise ConfigError("'base_url' 必须是非空字符串")
+
+        return cls(api_key=api_key, model_id=model_id, base_url=base_url)
+
+    # ---- Model 接口 ----
+
+    async def respond(self, body: bytes, *, stream: bool) -> Response:
+        payload = self._rewrite_model_id(body)
+        if stream:
+            # C.2 才上;C.1 阶段流式调用先 raise,客户端会拿到 502
+            raise ServiceError(
+                status=502, code="not_implemented", message="anthropic 流式路径在 C.2 完成"
+            )
+        return await self._unary(payload)
+
+    # ---- 内部:body 改写 + 上游调用 ----
+
+    def _rewrite_model_id(self, body: bytes) -> bytes:
+        """把 body.model 字段改成配置里的 model_id;非法 JSON 直接 raise 400 给客户端。"""
+        try:
+            data: Any = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ServiceError(
+                status=400, code="invalid_json_body", message=f"非法 JSON: {e}"
+            ) from e
+        if not isinstance(data, dict):
+            raise ServiceError(status=400, code="invalid_json_body", message="顶层必须是对象")
+        body_dict = cast(dict[str, Any], data)
+        body_dict["model"] = self._model_id
+        return json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
+
+    async def _unary(self, payload: bytes) -> Response:
+        """非流式上游调用。"""
+        try:
+            upstream = await self._client.post("/v1/messages", content=payload)
+        except httpx.TimeoutException as e:
+            raise ServiceError(status=502, code="upstream_timeout", message=f"上游超时: {e}") from e
+        except httpx.HTTPError as e:
+            raise ServiceError(
+                status=502, code="upstream_unreachable", message=f"上游不可达: {e}"
+            ) from e
+        return self._map_upstream_response(upstream)
+
+    @staticmethod
+    def _map_upstream_response(upstream: httpx.Response) -> Response:
+        """把上游响应映射成 chariot 对客户端的响应。
+
+        - 401 / 403 → 502(用户配置错,本服务对上游不可用)
+        - 429 → 透传(rate limit 直接告诉客户端)
+        - 5xx → 502
+        - 其它 4xx → 透传 body
+        - 2xx → 透传 body
+        """
+        sc = upstream.status_code
+        body = upstream.content
+        if sc in (401, 403):
+            raise ServiceError(
+                status=502,
+                code="upstream_auth_failed",
+                message=f"上游认证失败({sc});检查 api_key / api_key_env 配置",
+            )
+        if 500 <= sc < 600:
+            raise ServiceError(
+                status=502,
+                code="upstream_server_error",
+                message=f"上游 {sc}: {body[:200]!r}",
+            )
+        # 200~299 / 429 / 其它 4xx 都透传
+        return Response(
+            content=body,
+            status_code=sc,
+            media_type=upstream.headers.get("content-type", "application/json"),
+        )
