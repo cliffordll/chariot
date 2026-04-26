@@ -147,6 +147,28 @@
 
 ---
 
+## 0.2.1 patch
+
+小步增量,不动架构。
+
+### ✅ P.1 `chariot config init / show` + 内置模板
+
+- 新增 `chariot/config.example.toml`(注释完整的模板,含 mock + anthropic 两个 entry 示例)
+- 新增 `chariot/cli/commands/config.py`:
+  - `chariot config init [--force]`:把内置模板复制到 `~/.chariot/config.toml`;
+    默认拒绝覆盖,`--force` 强行
+  - `chariot config show`:打默认路径 + env `CHARIOT_CONFIG`(若设)+ 当前内容,
+    排错用
+- 模板用 `importlib.resources.files("chariot")` 读;hatch wheel 自动收录 `.toml`
+- 测试 `tests/cli/test_config.py` 6 个用例:
+  - init 在缺失 / 已存在 / `--force` 三种情况下的行为
+  - show 报告默认 / 文件缺失 / env 覆盖
+- README "接 Anthropic" 步骤 2 改成 `chariot config init`,手写 toml 作为备选
+- pyproject + `__init__` 升 `0.2.0 → 0.2.1`
+- **验证**:`uv run ruff check . && uv run ruff format --check . && uv run pyright chariot/ && uv run pytest -q` 全套通过
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.0 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.1 收尾。

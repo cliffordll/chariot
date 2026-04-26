@@ -88,7 +88,14 @@ Controller  →  Agent.handle(body)
    export ANTHROPIC_API_KEY="sk-ant-..."
    ```
 
-2. 写 `~/.chariot/config.toml`(Windows:`%USERPROFILE%\.chariot\config.toml`):
+2. 把内置模板写到 `~/.chariot/config.toml`:
+
+   ```bash
+   uv run chariot config init       # 模板里默认 active = "mock";编辑改成 "claude"
+   uv run chariot config show       # 看当前生效路径 + 内容(排错用)
+   ```
+
+   不想用 CLI 也可以手写,模板内容(Windows 路径:`%USERPROFILE%\.chariot\config.toml`):
 
    ```toml
    [[models]]

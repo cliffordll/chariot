@@ -1,0 +1,35 @@
+# chariot 配置 —— ~/.chariot/config.toml
+#
+# 文档:docs/DESIGN.md §6 + README "接真实 Anthropic 模型" 一节
+#
+# 加新条目:写一段 [[models]] + [models.options];在 [active] 里指向想用的 name;
+# 重启 server 或调 POST /admin/models {"name": "..."} 切换(也可以用 chariot model use)。
+#
+# 没设 [active] 或整个文件不存在 → 自动 fallback 到 MockModel(开箱可用)。
+
+
+# ---------- 内置 Mock 模型(本地 echo,零外部依赖) ----------
+[[models]]
+name = "mock"
+type = "mock"
+[models.options]
+# mock 不消费任何 options;留空 table 也合法
+
+
+# ---------- Anthropic 真实 API ----------
+# 启用前 export ANTHROPIC_API_KEY="sk-ant-..."
+# (Windows PowerShell:$env:ANTHROPIC_API_KEY = "sk-ant-...")
+[[models]]
+name = "claude"
+type = "anthropic"
+[models.options]
+model_id = "claude-opus-4-5"
+# 以下两项可选,默认就是这俩:
+# api_key_env = "ANTHROPIC_API_KEY"   # 想换 env 名时改这里
+# base_url    = "https://api.anthropic.com"
+
+
+# ---------- 选哪个 ----------
+# 改成 "claude" 并 export ANTHROPIC_API_KEY 后重启 server 即走真实 Anthropic。
+[active]
+model = "mock"

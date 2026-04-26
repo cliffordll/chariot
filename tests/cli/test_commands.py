@@ -47,13 +47,13 @@ def test_root_help() -> None:
     assert result.exit_code == 0
     # 关键子命令名都出现
     out = _plain(result.output)
-    for sub in ("status", "start", "stop", "logs", "stats", "chat", "model"):
+    for sub in ("status", "start", "stop", "logs", "stats", "chat", "model", "config"):
         assert sub in out, f"--help 输出里缺少子命令 {sub!r}"
 
 
 @pytest.mark.parametrize(
     "sub",
-    ["status", "start", "stop", "logs", "stats", "chat", "model"],
+    ["status", "start", "stop", "logs", "stats", "chat", "model", "config"],
 )
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_subcommand_help(sub: str, flag: str) -> None:
@@ -73,6 +73,14 @@ def test_model_use_requires_name() -> None:
     """`chariot model use` 不带 name typer 报参数缺失。"""
     result = runner.invoke(app, ["model", "use"])
     assert result.exit_code != 0
+
+
+def test_config_subcommand_group_has_init_and_show() -> None:
+    result = runner.invoke(app, ["config", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "init" in out
+    assert "show" in out
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
