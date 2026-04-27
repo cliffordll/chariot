@@ -20,9 +20,6 @@ from chariot.cli.commands import (
     chat as chat_mod,
 )
 from chariot.cli.commands import (
-    config as config_mod,
-)
-from chariot.cli.commands import (
     logs as logs_mod,
 )
 from chariot.cli.commands import (
@@ -74,7 +71,6 @@ for mod in (
     stats_mod,
     chat_mod,
     model_mod,
-    config_mod,
 ):
     mod.register(app)
 

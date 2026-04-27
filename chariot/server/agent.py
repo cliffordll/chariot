@@ -86,10 +86,11 @@ class Agent:
     def install_from_config(cls, config: ChariotConfig) -> Agent:
         """按 `ChariotConfig` 注入 model 并安装为当前 agent。
 
-        - `config.active_entry()` 为 None(无配置 / 无 active)→ MockModel fallback
+        - `config.active_entry()` 为 None → MockModel fallback
         - 否则 `ModelRegistry.build(entry)` 构造对应实现
+        - 0.3.0 起 `config` 来源是 DB(`ChariotConfig.from_db(session)`);
+          0.2.x 是 TOML 文件。数据形态不变 —— Agent 不感知来源
         - lifespan startup 期 raise 的 `ConfigError` 直接上冒(让 server 不要起来)
-        - 同时记下 `_config` / `_active_name`,供 /admin/models 端点查询
         """
         entry = config.active_entry()
         if entry is None:
@@ -102,11 +103,24 @@ class Agent:
         return agent
 
     @classmethod
+    def refresh_config(cls, config: ChariotConfig) -> None:
+        """更新 `_config` 缓存(model 列表变了,但 active 实例不动)。
+
+        给 admin entries CRUD 用:create / update non-active / delete non-active /
+        duplicate 之后,只刷新可见 entries 列表,active model 实例保持不变避免
+        断流式连接。改 active 走 `switch_to`(rebuild 实例)。
+        """
+        cls._config = config
+
+    @classmethod
     def switch_to(cls, name: str) -> Agent:
-        """运行时切到名为 `name` 的 model;不改 config 文件,仅换内存里的 active。
+        """运行时切到名为 `name` 的 model;0.3.0 起调用方应同时持久化到 DB。
 
         在 `_config.models` 里按 name 找 entry,经 ModelRegistry 重建,覆盖 install。
         找不到 / build 失败 → `ConfigError`(由 controller 转 4xx/5xx)。
+
+        持久化由 controller 层负责:`POST /admin/models {name}` 走 `ModelRepo.set_active`
+        + 本方法(双写),controller 见 `controller/models.py`。
         """
         config = cls.config()
         for entry in config.models:

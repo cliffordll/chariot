@@ -11,28 +11,36 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from chariot import __version__
 from chariot.server.agent import Agent
-from chariot.server.config import ConfigLoader
+from chariot.server.config import ChariotConfig
 from chariot.server.controller import (
     admin_router,
     dataplane_router,
     register_exception_handlers,
 )
-from chariot.server.database.session import dispose_db, init_db
+from chariot.server.database.session import dispose_db, get_session_maker, init_db
+from chariot.server.repository.model_repo import ModelRepo
 
 _log = logging.getLogger("chariot.server.app")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """启动:init_db + 读 config + 装 agent;结束:卸 agent + dispose_db。
+    """启动:init_db + seed mock(若空)+ 装 agent;结束:卸 agent + dispose_db。
 
-    `ConfigLoader.load()` 找不到文件返 `ChariotConfig.empty()`,Agent 走 MockModel
-    fallback,行为兼容 0.1.0(零配置开箱可用)。配置 TOML 错或字段非法
-    `ConfigError` 会上冒,server 不会起来 —— 强制配置正确性。
+    0.3.0 起源数据从 DB 装载(`ChariotConfig.from_db(session)`)。空表会被
+    `ModelRepo.seed_if_empty()` 种入默认 mock entry,保证开箱可用。
+    `ConfigError` 一致性破坏会上冒,server 不会起来。
     """
-    _log.info("starting chariot v%s (init db + load config + install agent)", __version__)
+    _log.info("starting chariot v%s (init db + seed + install agent)", __version__)
     await init_db()
-    config = ConfigLoader.load()
+
+    sm = get_session_maker()
+    if sm is None:
+        raise RuntimeError("init_db 后 session_maker 仍为 None")
+    async with sm() as session:
+        await ModelRepo(session).seed_if_empty()
+        config: ChariotConfig = await ChariotConfig.from_db(session)
+
     agent = Agent.install_from_config(config)
     _log.info("startup complete (agent.model=%s)", agent.model.name)
     try:

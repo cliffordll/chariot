@@ -1,22 +1,24 @@
-"""ChariotConfig + ConfigLoader 测试。
+"""ChariotConfig 测试 —— 数据形态 + DB 装载路径。
 
-覆盖:
-- ChariotConfig.empty() / active_entry() / from_dict 正常路径
-- from_dict 各种校验错误(重复 name / 缺字段 / active 未知 / 类型错)
-- ConfigLoader 文件不存在 → empty;有效文件 → 解析
-- ConfigLoader 路径优先级:explicit > env > default
-- TOML 语法错误 → ConfigError
+0.3.0 起源数据从 DB 装载(`ChariotConfig.from_db(session)`),0.2.x 的
+TOML 装载(`ConfigLoader` / `from_dict`)整体删除。本文件只测剩下的:
+
+- `ChariotConfig.empty()` / `active_entry()` 数据形态
+- `ChariotConfig.from_db(session)` 装载 + active 一致性校验
+- `ModelEntry` 数据形态(冻结 dataclass)
+
+ModelRepo 自身的 CRUD 测试见 `test_model_repo.py`。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ChariotConfig, ConfigError, ConfigLoader, ModelEntry
+from chariot.server.config import ChariotConfig, ConfigError, ModelEntry
+from chariot.server.repository.model_repo import ModelRepo
 
-# ---------- ChariotConfig.empty / active_entry ----------
+# ---------- ChariotConfig.empty / active_entry(纯数据形态)----------
 
 
 def test_empty_config_via_classmethod() -> None:
@@ -34,184 +36,62 @@ def test_active_entry_returns_matching_entry() -> None:
     assert c.active_entry() is e2
 
 
-def test_active_entry_runtime_inconsistency_raises() -> None:
-    """绕过 from_dict 直接构造一个 active 指向未知 name 的实例 —— 一致性兜底。"""
-    c = ChariotConfig(models=(ModelEntry(name="a", type="mock", options={}),), active="ghost")
+def test_active_entry_inconsistency_raises() -> None:
+    """绕过 from_db 直接构造 active 指向未知 name 的实例 —— 一致性兜底。"""
+    c = ChariotConfig(
+        models=(ModelEntry(name="a", type="mock", options={}),),
+        active="ghost",
+    )
     with pytest.raises(ConfigError, match="active"):
         c.active_entry()
 
 
-# ---------- from_dict 正常路径 ----------
+# ---------- ChariotConfig.from_db ----------
 
 
-def test_from_dict_minimal_valid() -> None:
-    raw = {
-        "models": [
-            {
-                "name": "claude",
-                "type": "anthropic",
-                "options": {"model_id": "claude-opus-4-5"},
-            },
-        ],
-    }
-    c = ChariotConfig.from_dict(raw)
-    assert len(c.models) == 1
-    assert c.models[0].name == "claude"
-    assert c.models[0].type == "anthropic"
-    assert c.models[0].options == {"model_id": "claude-opus-4-5"}
-    assert c.active is None
+async def test_from_db_empty_session_returns_empty(session: AsyncSession) -> None:
+    """models 表空 → models=(),active=None。"""
+    c = await ChariotConfig.from_db(session)
+    assert c.is_empty()
 
 
-def test_from_dict_with_active() -> None:
-    raw = {
-        "models": [
-            {"name": "m1", "type": "mock"},
-            {"name": "m2", "type": "anthropic", "options": {"model_id": "x"}},
-        ],
-        "active": {"model": "m2"},
-    }
-    c = ChariotConfig.from_dict(raw)
-    assert c.active == "m2"
-    assert c.active_entry() is not None
+async def test_from_db_loads_entries_and_active(session: AsyncSession) -> None:
+    repo = ModelRepo(session)
+    await repo.create(name="m1", type="mock", options={})
+    await repo.create(
+        name="claude",
+        type="anthropic",
+        options={"model_id": "claude-opus-4-5", "api_key": "sk-x"},
+    )
+    await repo.set_active("claude")
+
+    c = await ChariotConfig.from_db(session)
+    names = [e.name for e in c.models]
+    assert names == ["m1", "claude"]
+    assert c.active == "claude"
     entry = c.active_entry()
     assert entry is not None
-    assert entry.name == "m2"
+    assert entry.type == "anthropic"
+    assert entry.options["model_id"] == "claude-opus-4-5"
 
 
-def test_from_dict_options_default_empty() -> None:
-    raw = {"models": [{"name": "m", "type": "mock"}]}
-    c = ChariotConfig.from_dict(raw)
-    assert c.models[0].options == {}
+async def test_from_db_active_pointing_to_missing_entry_raises(
+    session: AsyncSession,
+) -> None:
+    """settings.active_model 指向不存在的 entry → ConfigError(数据不一致)。"""
+    repo = ModelRepo(session)
+    await repo.create(name="m1", type="mock", options={})
+    await repo.set_active("m1")
+    # 删 m1 但不清 active(模拟数据损坏)
+    await repo.delete("m1")
+
+    with pytest.raises(ConfigError, match="active_model"):
+        await ChariotConfig.from_db(session)
 
 
-def test_from_dict_no_models_section_returns_empty() -> None:
-    """没 [[models]] 也合法 —— 等价于 empty()。"""
-    c = ChariotConfig.from_dict({})
-    assert c.is_empty()
-
-
-# ---------- from_dict 校验错误 ----------
-
-
-def test_from_dict_models_not_list_raises() -> None:
-    with pytest.raises(ConfigError, match="models"):
-        ChariotConfig.from_dict({"models": "not a list"})
-
-
-def test_from_dict_entry_not_table_raises() -> None:
-    with pytest.raises(ConfigError, match="必须是 table"):
-        ChariotConfig.from_dict({"models": ["string-not-table"]})
-
-
-def test_from_dict_missing_name_raises() -> None:
-    with pytest.raises(ConfigError, match="name"):
-        ChariotConfig.from_dict({"models": [{"type": "mock"}]})
-
-
-def test_from_dict_empty_name_raises() -> None:
-    with pytest.raises(ConfigError, match="name"):
-        ChariotConfig.from_dict({"models": [{"name": "", "type": "mock"}]})
-
-
-def test_from_dict_missing_type_raises() -> None:
-    with pytest.raises(ConfigError, match="type"):
-        ChariotConfig.from_dict({"models": [{"name": "x"}]})
-
-
-def test_from_dict_duplicate_names_raises() -> None:
-    raw = {
-        "models": [
-            {"name": "dup", "type": "mock"},
-            {"name": "dup", "type": "anthropic"},
-        ],
-    }
-    with pytest.raises(ConfigError, match="重复"):
-        ChariotConfig.from_dict(raw)
-
-
-def test_from_dict_options_not_table_raises() -> None:
-    raw = {"models": [{"name": "m", "type": "mock", "options": "not a table"}]}
-    with pytest.raises(ConfigError, match="options"):
-        ChariotConfig.from_dict(raw)
-
-
-def test_from_dict_active_unknown_name_raises() -> None:
-    raw = {
-        "models": [{"name": "m1", "type": "mock"}],
-        "active": {"model": "ghost"},
-    }
-    with pytest.raises(ConfigError, match="ghost"):
-        ChariotConfig.from_dict(raw)
-
-
-def test_from_dict_active_not_table_raises() -> None:
-    raw = {"models": [{"name": "m1", "type": "mock"}], "active": "not-a-table"}
-    with pytest.raises(ConfigError, match="active"):
-        ChariotConfig.from_dict(raw)
-
-
-# ---------- ConfigLoader ----------
-
-
-def test_loader_no_file_returns_empty(tmp_path: Path) -> None:
-    missing = tmp_path / "nonexistent.toml"
-    c = ConfigLoader.load(missing)
-    assert c.is_empty()
-
-
-def test_loader_explicit_path(tmp_path: Path) -> None:
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        '[[models]]\nname = "m"\ntype = "mock"\n\n[active]\nmodel = "m"\n',
-        encoding="utf-8",
-    )
-    c = ConfigLoader.load(cfg)
-    assert c.active == "m"
+async def test_from_db_no_active_returns_models_only(session: AsyncSession) -> None:
+    repo = ModelRepo(session)
+    await repo.create(name="m1", type="mock", options={})
+    c = await ChariotConfig.from_db(session)
+    assert c.active is None
     assert len(c.models) == 1
-    assert c.models[0].name == "m"
-
-
-def test_loader_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = tmp_path / "via-env.toml"
-    cfg.write_text('[[models]]\nname = "from_env"\ntype = "mock"\n', encoding="utf-8")
-    monkeypatch.setenv("CHARIOT_CONFIG", str(cfg))
-
-    c = ConfigLoader.load()  # 不传 path,走 env
-    assert len(c.models) == 1
-    assert c.models[0].name == "from_env"
-
-
-def test_loader_explicit_path_beats_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式 path 参数优先级高于环境变量。"""
-    env_cfg = tmp_path / "env.toml"
-    env_cfg.write_text('[[models]]\nname = "from_env"\ntype = "mock"\n', encoding="utf-8")
-    explicit_cfg = tmp_path / "explicit.toml"
-    explicit_cfg.write_text('[[models]]\nname = "from_explicit"\ntype = "mock"\n', encoding="utf-8")
-    monkeypatch.setenv("CHARIOT_CONFIG", str(env_cfg))
-
-    c = ConfigLoader.load(explicit_cfg)
-    assert c.models[0].name == "from_explicit"
-
-
-def test_loader_invalid_toml_raises(tmp_path: Path) -> None:
-    cfg = tmp_path / "bad.toml"
-    cfg.write_text("this is = not [valid toml", encoding="utf-8")
-    with pytest.raises(ConfigError, match="TOML"):
-        ConfigLoader.load(cfg)
-
-
-def test_loader_validation_error_propagates(tmp_path: Path) -> None:
-    """合法 TOML 但内容校验失败 —— ConfigError 透传。"""
-    cfg = tmp_path / "bad-content.toml"
-    cfg.write_text(
-        '[[models]]\nname = "m"\ntype = "mock"\n\n[active]\nmodel = "ghost"\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError, match="ghost"):
-        ConfigLoader.load(cfg)
-
-
-def test_loader_default_path_is_home_chariot_config_toml() -> None:
-    """sanity:默认路径在 ~/.chariot/config.toml,不是别的什么。"""
-    assert ConfigLoader.DEFAULT_PATH.name == "config.toml"
-    assert ConfigLoader.DEFAULT_PATH.parent.name == ".chariot"

@@ -47,13 +47,13 @@ def test_root_help() -> None:
     assert result.exit_code == 0
     # 关键子命令名都出现
     out = _plain(result.output)
-    for sub in ("status", "start", "stop", "logs", "stats", "chat", "model", "config"):
+    for sub in ("status", "start", "stop", "logs", "stats", "chat", "model"):
         assert sub in out, f"--help 输出里缺少子命令 {sub!r}"
 
 
 @pytest.mark.parametrize(
     "sub",
-    ["status", "start", "stop", "logs", "stats", "chat", "model", "config"],
+    ["status", "start", "stop", "logs", "stats", "chat", "model"],
 )
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_subcommand_help(sub: str, flag: str) -> None:
@@ -75,12 +75,10 @@ def test_model_use_requires_name() -> None:
     assert result.exit_code != 0
 
 
-def test_config_subcommand_group_has_init_and_show() -> None:
+def test_config_subcommand_removed() -> None:
+    """0.3.0 起 chariot config init/show 子命令组废弃(模型配置改 DB-backed)。"""
     result = runner.invoke(app, ["config", "--help"])
-    assert result.exit_code == 0
-    out = _plain(result.output)
-    assert "init" in out
-    assert "show" in out
+    assert result.exit_code != 0
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
