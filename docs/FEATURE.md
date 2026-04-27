@@ -12,7 +12,7 @@
 
 ## 0.3.0 patch 列表
 
-### 🔲 D.1 DB schema + ModelRepo + Agent 接 DB
+### ✅ D.1 DB schema + ModelRepo + Agent 接 DB
 
 - migration v2:建 `models` / `settings` 表;`ModelRepo.seed_if_empty` 首次跑写入 `('mock', 'mock', '{}')` + active=mock
 - ORM 类 `ModelRow` / `SettingRow`(`chariot/server/database/models.py`)
@@ -23,7 +23,7 @@
 - 新建 `tests/server/test_model_repo.py`;旧 `tests/server/test_config.py` 改写
 - **验证**:Python 全套 + server 启动 smoke
 
-### 🔲 D.2 admin API entries CRUD
+### ✅ D.2 admin API entries CRUD
 
 - `controller/models.py` 加 4 路由(POST/PUT/DELETE/POST duplicate)+ Pydantic schema
 - `POST /admin/models`(切 active)改成持久化到 `settings`
@@ -33,7 +33,7 @@
 - 扩展 `tests/server/test_admin_models.py`
 - **验证**:Python 全套
 
-### 🔲 D.3 SDK + CLI add/edit/rm/duplicate
+### ✅ D.3 SDK + CLI add/edit/rm/duplicate
 
 - `ProxyClient` 加 5 方法:`create_model / update_model / delete_model / duplicate_model`(get 复用 list)
 - CLI `chariot model add / edit / rm / duplicate` 子命令(`list` / `use` / `probe` 沿用)
@@ -41,7 +41,7 @@
 - **删除** `chariot/config.example.toml`(模板 obsolete)
 - **验证**:Python 全套 + 黑盒 CLI
 
-### 🔲 D.4 Models 页 CRUD UI + Duplicate
+### ✅ D.4 Models 页 CRUD UI + Duplicate
 
 - `Models.tsx` 大改:每行加 [Edit] / [Dup] / [Del] 按钮;顶部 [+ Add] 按钮
 - `AddEditDialog` 组件:type 下拉 → 按 type 切换字段表单(anthropic = model_id / api_key / api_key_env / base_url;mock = 无 options)
@@ -51,14 +51,14 @@
 - 切 active 仍在 Chat 页(决策 7A);Models 只读展示当前 active + 跳转链
 - **验证**:`bun run --filter=@chariot/app build`
 
-### 🔲 D.5 README + 残余清理
+### ✅ D.5 README + 残余清理
 
 - `README.md` 删 `chariot config init/show` 相关段落,加"在 Models 页加 model" 说明
 - `README.md` "接真实 Anthropic 模型"改成"启动 server → 浏览器开 Models 页 → [+ Add] 填字段"流程
 - 检查所有引用 `~/.chariot/config.toml` 的文档,改成"由 Models 页管理"
 - DESIGN.md §6 / §8 终稿(实现期间发现的细节回填)
 
-### 🔲 Z.1 0.3.0 收尾
+### ✅ Z.1 0.3.0 收尾
 
 - pyproject + `chariot/__init__` 升 `0.2.6 → 0.3.0`
 - FEATURE.md 全部 D.x 标 ✅,heading 改 "## 0.3.0 patch 列表"
