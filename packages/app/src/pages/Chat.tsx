@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, type ModelsListResponse } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 
 const FALLBACK_MODEL_LABEL = "(server)";
@@ -26,14 +32,25 @@ type DisplayMsg =
       errorMsg: string | null;
     };
 
+/**
+ * `models.active` 是 server 端切换用的友好名(配置文件 `[[models]] name`),
+ * 在 MockModel fallback 路径下为 null;此时退到 `/admin/status.model` 的技术标识
+ * (例如 `mock-echo-v1`),给 UI 一个非空字符串展示并塞进 body.model。
+ */
+type ModelsState =
+  | { kind: "loading" }
+  | { kind: "ok"; data: ModelsListResponse; activeLabel: string }
+  | { kind: "err"; message: string };
+
+type SwitchState =
+  | { kind: "idle" }
+  | { kind: "switching"; name: string }
+  | { kind: "err"; message: string };
+
 export default function Chat() {
-  /**
-   * server 当前 active model 的展示名;mount 时一次性拉取(从 /admin/models 优先取
-   * config 里的友好名,fallback 到 /admin/status.model 的技术标识)。
-   * 用作 body.model 字段(server 会按 active config 改写;影响 logs.model 显示)
-   * 与对话尾部 meta 行的 model 标签。
-   */
-  const [activeModel, setActiveModel] = useState<string>(FALLBACK_MODEL_LABEL);
+  const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
+  const [pendingChoice, setPendingChoice] = useState<string | null>(null);
+  const [switchState, setSwitchState] = useState<SwitchState>({ kind: "idle" });
 
   const [messages, setMessages] = useState<DisplayMsg[]>([]);
   const [input, setInput] = useState("");
@@ -42,28 +59,22 @@ export default function Chat() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // 拉 active model 名;切换在 Dashboard 做,这里只读
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const models = await api.listModels();
-        if (cancelled) return;
-        if (models.active) {
-          setActiveModel(models.active);
-          return;
-        }
-        // 无 active(MockModel fallback)→ 退到 /admin/status.model 的技术标识
-        const status = await api.status();
-        if (!cancelled) setActiveModel(status.model);
-      } catch {
-        // server 不可用就保留 fallback label;Send 时会再次失败给清晰错误
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadModels = useCallback(async () => {
+    setModelsState({ kind: "loading" });
+    try {
+      const [status, models] = await Promise.all([api.status(), api.listModels()]);
+      const activeLabel = models.active ?? status.model ?? FALLBACK_MODEL_LABEL;
+      setModelsState({ kind: "ok", data: models, activeLabel });
+      setPendingChoice(models.active);
+    } catch (e) {
+      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setModelsState({ kind: "err", message: msg });
+    }
   }, []);
+
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   // auto-scroll to bottom unless user is scrolled up
   useEffect(() => {
@@ -74,6 +85,9 @@ export default function Chat() {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
+
+  const activeLabel =
+    modelsState.kind === "ok" ? modelsState.activeLabel : FALLBACK_MODEL_LABEL;
 
   const canSend = !inFlight && input.trim().length > 0;
 
@@ -107,7 +121,7 @@ export default function Chat() {
 
     try {
       const result = await runTurn(history, {
-        model: activeModel,
+        model: activeLabel,
         maxTokens: MAX_TOKENS,
         signal: ctrl.signal,
         onToken: (tok) => {
@@ -130,7 +144,7 @@ export default function Chat() {
             ...last,
             status: result.aborted ? "aborted" : "done",
             meta: {
-              model: activeModel,
+              model: activeLabel,
               inputTokens: result.inputTokens,
               outputTokens: result.outputTokens,
               latencyMs: result.latencyMs,
@@ -154,7 +168,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, messages, activeModel]);
+  }, [input, inFlight, messages, activeLabel]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -181,30 +195,43 @@ export default function Chat() {
         break;
       }
     }
-    if (failedIdx < 1) return; // 没找到 user/assistant 对,略过
+    if (failedIdx < 1) return;
     const userMsg = copy[failedIdx - 1];
     if (userMsg.role !== "user") return;
     setMessages(copy.slice(0, failedIdx - 1));
     setInput(userMsg.content);
   }, [messages, inFlight]);
 
+  const runSwitch = useCallback(async () => {
+    if (!pendingChoice || switchState.kind === "switching") return;
+    if (modelsState.kind === "ok" && pendingChoice === modelsState.data.active) return;
+    setSwitchState({ kind: "switching", name: pendingChoice });
+    try {
+      await api.useModel(pendingChoice);
+      setSwitchState({ kind: "idle" });
+      await loadModels();
+    } catch (e) {
+      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setSwitchState({ kind: "err", message: msg });
+    }
+  }, [pendingChoice, switchState.kind, modelsState, loadModels]);
+
   return (
     <section className="flex h-full flex-col">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Chat</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            active model:{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{activeModel}</code>{" "}
-            <Link to="/" className="ml-1 underline-offset-2 hover:underline">
-              在 Dashboard 切换
-            </Link>
-          </p>
-        </div>
+      <div className="mb-3 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Chat</h1>
         <Button variant="outline" size="sm" onClick={handleNewChat}>
           New chat
         </Button>
       </div>
+
+      <ActiveModelRow
+        modelsState={modelsState}
+        pendingChoice={pendingChoice}
+        onChoose={setPendingChoice}
+        switchState={switchState}
+        onSwitch={() => void runSwitch()}
+      />
 
       <div
         ref={scrollRef}
@@ -257,6 +284,89 @@ export default function Chat() {
         )}
       </div>
     </section>
+  );
+}
+
+function ActiveModelRow({
+  modelsState,
+  pendingChoice,
+  onChoose,
+  switchState,
+  onSwitch,
+}: {
+  modelsState: ModelsState;
+  pendingChoice: string | null;
+  onChoose: (name: string) => void;
+  switchState: SwitchState;
+  onSwitch: () => void;
+}) {
+  if (modelsState.kind === "loading") {
+    return (
+      <div className="mb-3 text-xs text-muted-foreground">读取 model 列表…</div>
+    );
+  }
+
+  if (modelsState.kind === "err") {
+    return (
+      <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        无法读取 model 列表:{modelsState.message}
+      </div>
+    );
+  }
+
+  const { data, activeLabel } = modelsState;
+  const isSwitching = switchState.kind === "switching";
+
+  if (data.available.length === 0) {
+    return (
+      <div className="mb-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        当前走 MockModel fallback(<code className="font-mono">{activeLabel}</code>)。
+        在 <code className="font-mono">~/.chariot/config.toml</code> 加{" "}
+        <code className="rounded bg-muted px-1 py-0.5">[[models]]</code> 后重启 server 即可切换。
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+          active model
+        </span>
+        <Select
+          value={pendingChoice ?? undefined}
+          onValueChange={onChoose}
+          disabled={isSwitching}
+        >
+          <SelectTrigger className="h-8 w-56">
+            <SelectValue placeholder="选 model" />
+          </SelectTrigger>
+          <SelectContent>
+            {data.available.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+                {name === data.active && (
+                  <span className="ml-2 text-xs text-muted-foreground">(current)</span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          onClick={onSwitch}
+          disabled={isSwitching || !pendingChoice || pendingChoice === data.active}
+        >
+          {isSwitching ? "切换中…" : "切换"}
+        </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          切换影响 server 全局 active model,所有会话共享。
+        </span>
+      </div>
+      {switchState.kind === "err" && (
+        <p className="mt-1 text-xs text-destructive">切换失败:{switchState.message}</p>
+      )}
+    </div>
   );
 }
 

@@ -198,6 +198,28 @@
 
 ---
 
+---
+
+## 0.2.3 patch
+
+### ✅ P.3 Model 切换 UI 从 Dashboard 挪到 Chat 页
+
+- P.2 仍把 model 切换面板留在 Dashboard,Chat 页只读展示 + "在 Dashboard 切换"
+  跳转。但 model 选择本质上是"发消息前的上下文设置",每次跳页才能切既反直觉
+  又增加摩擦。本步把切换 UI 移到 Chat 页顶部、原地切换;Dashboard 保留只读卡片
+  作为 server 状态总览的一部分。
+- `packages/app/src/pages/Chat.tsx`:加 `ActiveModelRow`,
+  Select 下拉 + 切换按钮 + "切换影响 server 全局 active model,所有会话共享"
+  的提示文案(消除 per-chat 设置歧义)。
+- `packages/app/src/pages/Dashboard.tsx`:`ActiveModelCard` 简化成只读 ——
+  展示 active / available / registered types,底部加 "在 Chat 页切换 model →"
+  链接。删除 `pendingChoice` / `switchState` / `runSwitch`、移除 Select 控件 import。
+- pyproject + `chariot/__init__` 升 `0.2.2 → 0.2.3`。
+- **验证**:`bun run --filter=@chariot/app build` 通过;Python 全套保持全绿
+  (本步纯前端)。
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.2 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.3 收尾。

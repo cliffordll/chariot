@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   api,
   type ApiError,
@@ -32,16 +26,9 @@ type ModelsState =
   | { kind: "ok"; data: ModelsListResponse }
   | { kind: "err"; message: string };
 
-type SwitchState =
-  | { kind: "idle" }
-  | { kind: "switching"; name: string }
-  | { kind: "err"; message: string };
-
 export default function Dashboard() {
   const [state, setState] = useState<FetchState>({ kind: "loading" });
   const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
-  const [pendingChoice, setPendingChoice] = useState<string | null>(null);
-  const [switchState, setSwitchState] = useState<SwitchState>({ kind: "idle" });
   const [updateState, setUpdateState] = useState<
     | { kind: "idle" }
     | { kind: "checking" }
@@ -58,7 +45,6 @@ export default function Dashboard() {
       const [status, models] = await Promise.all([api.status(), api.listModels()]);
       setState({ kind: "ok", status });
       setModelsState({ kind: "ok", data: models });
-      setPendingChoice(models.active);
     } catch (e) {
       const msg =
         e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -66,21 +52,6 @@ export default function Dashboard() {
       setModelsState({ kind: "err", message: msg });
     }
   }, []);
-
-  const runSwitch = useCallback(async () => {
-    if (!pendingChoice) return;
-    setSwitchState({ kind: "switching", name: pendingChoice });
-    try {
-      await api.useModel(pendingChoice);
-      setSwitchState({ kind: "idle" });
-      // 切换成功后刷新 status + models 显示
-      await load();
-    } catch (e) {
-      const msg =
-        e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setSwitchState({ kind: "err", message: msg });
-    }
-  }, [pendingChoice, load]);
 
   const runCheckUpdate = useCallback(async () => {
     setUpdateState({ kind: "checking" });
@@ -199,32 +170,19 @@ export default function Dashboard() {
             />
           </div>
 
-          <ActiveModelCard
-            modelsState={modelsState}
-            pendingChoice={pendingChoice}
-            onChoose={setPendingChoice}
-            switchState={switchState}
-            onSwitch={() => void runSwitch()}
-          />
+          <ActiveModelCard modelsState={modelsState} />
         </>
       )}
     </section>
   );
 }
 
-function ActiveModelCard({
-  modelsState,
-  pendingChoice,
-  onChoose,
-  switchState,
-  onSwitch,
-}: {
-  modelsState: ModelsState;
-  pendingChoice: string | null;
-  onChoose: (name: string) => void;
-  switchState: SwitchState;
-  onSwitch: () => void;
-}) {
+/**
+ * 0.2.3 起切换 UI 移到 Chat 页(切换是发消息前的"上下文设置",在 Chat 顶部
+ * 原地切比跳页自然)。Dashboard 上这块只读展示 active + available,引导用户
+ * 去 Chat 页操作。
+ */
+function ActiveModelCard({ modelsState }: { modelsState: ModelsState }) {
   if (modelsState.kind === "loading") {
     return (
       <div className="max-w-2xl rounded-lg border border-border p-4 text-sm text-muted-foreground">
@@ -242,59 +200,50 @@ function ActiveModelCard({
   }
 
   const { data } = modelsState;
-  const isSwitching = switchState.kind === "switching";
 
   return (
     <div className="max-w-2xl rounded-lg border border-border p-4">
       <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-        active model
+        models
+      </div>
+
+      <div className="mb-2 text-sm">
+        active:{" "}
+        {data.active ? (
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{data.active}</code>
+        ) : (
+          <span className="text-muted-foreground">(none — MockModel fallback)</span>
+        )}
       </div>
 
       {data.available.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          配置文件里没有 model —— 当前走 MockModel fallback。{" "}
-          <span className="font-mono">~/.chariot/config.toml</span> 里加{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5">[[models]]</code> 后重启 server。
+        <p className="text-xs text-muted-foreground">
+          配置文件里没有 model。在{" "}
+          <code className="font-mono">~/.chariot/config.toml</code> 加{" "}
+          <code className="rounded bg-muted px-1 py-0.5">[[models]]</code> 后重启 server。
         </p>
       ) : (
-        <div className="flex items-center gap-3">
-          <Select
-            value={pendingChoice ?? undefined}
-            onValueChange={onChoose}
-            disabled={isSwitching}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="选 model" />
-            </SelectTrigger>
-            <SelectContent>
-              {data.available.map((name) => (
-                <SelectItem key={name} value={name}>
-                  {name}
-                  {name === data.active && (
-                    <span className="ml-2 text-xs text-muted-foreground">(current)</span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button
-            size="sm"
-            onClick={onSwitch}
-            disabled={isSwitching || !pendingChoice || pendingChoice === data.active}
-          >
-            {isSwitching ? "切换中…" : "切换"}
-          </Button>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          available:{" "}
+          {data.available.map((name, i) => (
+            <span key={name}>
+              {i > 0 && ", "}
+              <code className="font-mono">{name}</code>
+            </span>
+          ))}
+        </p>
       )}
 
-      {switchState.kind === "err" && (
-        <p className="mt-2 text-xs text-destructive">切换失败:{switchState.message}</p>
-      )}
-
-      <div className="mt-3 text-xs text-muted-foreground">
-        已注册 type:{data.types.join(", ")}
+      <div className="mt-1 text-xs text-muted-foreground">
+        registered types: {data.types.join(", ")}
       </div>
+
+      <Link
+        to="/chat"
+        className="mt-3 inline-block text-xs text-muted-foreground underline-offset-2 hover:underline"
+      >
+        在 Chat 页切换 model →
+      </Link>
     </div>
   );
 }
