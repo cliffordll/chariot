@@ -71,6 +71,14 @@ export interface ProbeResult {
   error: ProbeError | null;
 }
 
+/** 0.3.0:`models` 表 CRUD 接口的 entry payload(对齐 `EntryResponse`)。 */
+export interface ModelEntry {
+  name: string;
+  type: string;
+  /** 按 type schema 形态的 dict;mock 为 {}。 */
+  options: Record<string, unknown>;
+}
+
 export class ApiError extends Error {
   status: number;
   body: string;
@@ -150,6 +158,56 @@ export const api = {
   probeModel(name: string): Promise<ProbeResult> {
     return request(`/admin/models/${encodeURIComponent(name)}/probe`, {
       method: "POST",
+    });
+  },
+
+  // ---------- entries CRUD(0.3.0)----------
+
+  /**
+   * 新建 entry。错误:`name_exists` 409 / `unknown_type` 400 / `bad_request` 400。
+   */
+  createModel(req: {
+    name: string;
+    type: string;
+    options: Record<string, unknown>;
+  }): Promise<ModelEntry> {
+    return request("/admin/models/entries", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  },
+
+  /**
+   * 编辑 entry。改 active entry 时 server 端会自动 rebuild 当前 model 实例。
+   * 错误:`model_not_found` 404 / `unknown_type` 400 / `rebuild_failed` 502。
+   */
+  updateModel(
+    name: string,
+    req: { type?: string; options?: Record<string, unknown> },
+  ): Promise<ModelEntry> {
+    return request(`/admin/models/entries/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+  },
+
+  /**
+   * 删 entry。active 不许删 → `cannot_delete_active` 400。`model_not_found` 404。
+   */
+  deleteModel(name: string): Promise<void> {
+    return request(`/admin/models/entries/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  },
+
+  /**
+   * 复制 entry。`as` 缺省 `<name>_copy`,碰撞自动 `_copy_2 / _3`。
+   * 错误:`model_not_found` 404(src 不存在)/ `name_exists` 409(指定 as 冲突)。
+   */
+  duplicateModel(name: string, as_?: string): Promise<ModelEntry> {
+    return request(`/admin/models/entries/${encodeURIComponent(name)}/duplicate`, {
+      method: "POST",
+      body: JSON.stringify(as_ !== undefined ? { as: as_ } : {}),
     });
   },
 };
