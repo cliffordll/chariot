@@ -107,7 +107,7 @@ async def test_probe_anthropic_missing_api_key_returns_config_error(
     entry = ModelEntry(
         name="claude",
         type="anthropic",
-        options={"model_id": "claude-opus-4-5"},
+        options={"model": "claude-opus-4-5"},
     )
     result = await ModelProber.probe(entry)
     assert result.ok is False

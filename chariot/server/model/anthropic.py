@@ -2,7 +2,7 @@
 
 0.2.0 起 chariot 单协议化,本 model 把客户端的 `/v1/messages` 请求经 httpx
 转发到上游 `<base_url>/v1/messages`,响应直接透传回去。chariot 自己只做两件事:
-1. 用配置里的 `model_id` 改写 body.model(client 写啥都按配置走)
+1. 用配置里的 `model` 改写 body.model(client 写啥都按配置走)
 2. 注入 `x-api-key` / `anthropic-version` header
 
 错误映射(非流 + 流首响应已收前同等行为)
@@ -18,7 +18,7 @@
 首响应 200 已发回客户端后,后续上游异常 / 客户端断开 → 只能断 TCP,不伪造
 SSE 事件、不重写状态码(沿用 0.1.0 流式契约)。
 
-封装:client / model_id 都在实例字段里,模块级零自由函数。
+封装:client / model 都在实例字段里,模块级零自由函数。
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class AnthropicModel:
         self,
         *,
         api_key: str,
-        model_id: str,
+        model: str,
         base_url: str = _DEFAULT_BASE_URL,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -70,7 +70,7 @@ class AnthropicModel:
           (这里没暴露 close —— 进程级单例,server lifespan 退出时随 GC 释放)
         - `client=<注入>`:测试用,可塞 MockTransport
         """
-        self._model_id = model_id
+        self._model = model
         if client is not None:
             self._client = client
             return
@@ -100,9 +100,9 @@ class AnthropicModel:
         2. `options["api_key_env"]`(默认 `ANTHROPIC_API_KEY`)指向的环境变量
         两者都给 → 1 优先;都没拿到非空值 → ConfigError。
         """
-        model_id = options.get("model_id")
-        if not isinstance(model_id, str) or not model_id:
-            raise ConfigError("anthropic model 配置缺少 'model_id' 或类型不对")
+        model = options.get("model")
+        if not isinstance(model, str) or not model:
+            raise ConfigError("anthropic model 配置缺少 'model' 或类型不对")
 
         api_key = cls._resolve_api_key(options)
 
@@ -110,7 +110,7 @@ class AnthropicModel:
         if not isinstance(base_url, str) or not base_url:
             raise ConfigError("'base_url' 必须是非空字符串")
 
-        return cls(api_key=api_key, model_id=model_id, base_url=base_url)
+        return cls(api_key=api_key, model=model, base_url=base_url)
 
     @staticmethod
     def _resolve_api_key(options: dict[str, Any]) -> str:
@@ -132,15 +132,15 @@ class AnthropicModel:
     # ---- Model 接口 ----
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:
-        payload = self._rewrite_model_id(body)
+        payload = self._rewrite_model(body)
         if stream:
             return await self._stream(payload)
         return await self._unary(payload)
 
     # ---- 内部:body 改写 + 上游调用 ----
 
-    def _rewrite_model_id(self, body: bytes) -> bytes:
-        """把 body.model 字段改成配置里的 model_id;非法 JSON 直接 raise 400 给客户端。"""
+    def _rewrite_model(self, body: bytes) -> bytes:
+        """把 body.model 字段改成配置里的 model;非法 JSON 直接 raise 400 给客户端。"""
         try:
             data: Any = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -150,7 +150,7 @@ class AnthropicModel:
         if not isinstance(data, dict):
             raise ServiceError(status=400, code="invalid_json_body", message="顶层必须是对象")
         body_dict = cast(dict[str, Any], data)
-        body_dict["model"] = self._model_id
+        body_dict["model"] = self._model
         return json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
 
     async def _unary(self, payload: bytes) -> Response:

@@ -32,7 +32,7 @@ async def _drain_streaming_response(resp: StreamingResponse) -> bytes:
 def _build_model(
     *,
     handler: Callable[[httpx.Request], httpx.Response],
-    model_id: str = "claude-haiku-4-5",
+    model: str = "claude-haiku-4-5",
 ) -> AnthropicModel:
     """构造一个绑定 MockTransport 的 AnthropicModel,handler 自定义上游响应。"""
     transport = httpx.MockTransport(handler)
@@ -41,7 +41,7 @@ def _build_model(
         base_url="http://upstream.test",
         headers={"x-api-key": "fake", "anthropic-version": "2023-06-01"},
     )
-    return AnthropicModel(api_key="fake", model_id=model_id, client=client)
+    return AnthropicModel(api_key="fake", model=model, client=client)
 
 
 # ---------- from_config 校验 ----------
@@ -49,38 +49,38 @@ def _build_model(
 
 def test_from_config_minimal_valid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5"})
+    m = AnthropicModel.from_config({"model": "claude-opus-4-5"})
     assert isinstance(m, AnthropicModel)
     assert m.name == "anthropic"
 
 
 def test_from_config_custom_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MY_KEY", "sk-x")
-    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5", "api_key_env": "MY_KEY"})
+    m = AnthropicModel.from_config({"model": "claude-opus-4-5", "api_key_env": "MY_KEY"})
     assert isinstance(m, AnthropicModel)
 
 
-def test_from_config_missing_model_id_raises() -> None:
-    with pytest.raises(ConfigError, match="model_id"):
+def test_from_config_missing_model_raises() -> None:
+    with pytest.raises(ConfigError, match="model"):
         AnthropicModel.from_config({})
 
 
 def test_from_config_missing_api_key_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
-        AnthropicModel.from_config({"model_id": "claude-opus-4-5"})
+        AnthropicModel.from_config({"model": "claude-opus-4-5"})
 
 
 def test_from_config_missing_custom_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MISSING_KEY", raising=False)
     with pytest.raises(ConfigError, match="MISSING_KEY"):
-        AnthropicModel.from_config({"model_id": "x", "api_key_env": "MISSING_KEY"})
+        AnthropicModel.from_config({"model": "x", "api_key_env": "MISSING_KEY"})
 
 
 def test_from_config_inline_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """直接在 config 写 api_key,不依赖 env。"""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5", "api_key": "sk-inline"})
+    m = AnthropicModel.from_config({"model": "claude-opus-4-5", "api_key": "sk-inline"})
     assert isinstance(m, AnthropicModel)
 
 
@@ -89,25 +89,25 @@ def test_from_config_inline_api_key_takes_priority_over_env(
 ) -> None:
     """两者都给时 inline api_key 优先(env 应被忽略)。"""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
-    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5", "api_key": "sk-from-config"})
+    m = AnthropicModel.from_config({"model": "claude-opus-4-5", "api_key": "sk-from-config"})
     # 验证落到 httpx 客户端 header 的 key 是 inline 那条,不是 env 那条
     assert m._client.headers["x-api-key"] == "sk-from-config"
 
 
 def test_from_config_empty_inline_api_key_raises() -> None:
     with pytest.raises(ConfigError, match="api_key"):
-        AnthropicModel.from_config({"model_id": "x", "api_key": ""})
+        AnthropicModel.from_config({"model": "x", "api_key": ""})
 
 
 def test_from_config_non_string_inline_api_key_raises() -> None:
     with pytest.raises(ConfigError, match="api_key"):
-        AnthropicModel.from_config({"model_id": "x", "api_key": 12345})  # type: ignore[dict-item]
+        AnthropicModel.from_config({"model": "x", "api_key": 12345})  # type: ignore[dict-item]
 
 
-# ---------- model_id 改写 ----------
+# ---------- model 改写 ----------
 
 
-async def test_respond_rewrites_model_id() -> None:
+async def test_respond_rewrites_model() -> None:
     captured: dict[str, bytes] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -124,7 +124,7 @@ async def test_respond_rewrites_model_id() -> None:
             },
         )
 
-    m = _build_model(handler=handler, model_id="claude-opus-4-5")
+    m = _build_model(handler=handler, model="claude-opus-4-5")
     body = json.dumps({"model": "client-wrote-this", "messages": []}).encode("utf-8")
     resp = await m.respond(body, stream=False)
 
@@ -307,7 +307,7 @@ async def test_respond_stream_2xx_forwards_chunks() -> None:
     assert b"message_stop" in raw
 
 
-async def test_respond_stream_rewrites_model_id() -> None:
+async def test_respond_stream_rewrites_model() -> None:
     captured: dict[str, bytes] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -320,7 +320,7 @@ async def test_respond_stream_rewrites_model_id() -> None:
             200, content=stream_body(), headers={"content-type": "text/event-stream"}
         )
 
-    m = _build_model(handler=handler, model_id="claude-opus-4-5")
+    m = _build_model(handler=handler, model="claude-opus-4-5")
     body = json.dumps({"model": "client-x", "stream": True, "messages": []}).encode("utf-8")
     resp = await m.respond(body, stream=True)
     # 必须把流消费掉,handler 才会被调

@@ -31,7 +31,7 @@ def test_empty_config_via_classmethod() -> None:
 
 def test_active_entry_returns_matching_entry() -> None:
     e1 = ModelEntry(name="a", type="mock", options={})
-    e2 = ModelEntry(name="b", type="anthropic", options={"model_id": "x"})
+    e2 = ModelEntry(name="b", type="anthropic", options={"model": "x"})
     c = ChariotConfig(models=(e1, e2), active="b")
     assert c.active_entry() is e2
 
@@ -61,7 +61,7 @@ async def test_from_db_loads_entries_and_active(session: AsyncSession) -> None:
     await repo.create(
         name="claude",
         type="anthropic",
-        options={"model_id": "claude-opus-4-5", "api_key": "sk-x"},
+        options={"model": "claude-opus-4-5", "api_key": "sk-x"},
     )
     await repo.set_active("claude")
 
@@ -72,7 +72,7 @@ async def test_from_db_loads_entries_and_active(session: AsyncSession) -> None:
     entry = c.active_entry()
     assert entry is not None
     assert entry.type == "anthropic"
-    assert entry.options["model_id"] == "claude-opus-4-5"
+    assert entry.options["model"] == "claude-opus-4-5"
 
 
 async def test_from_db_active_pointing_to_missing_entry_raises(

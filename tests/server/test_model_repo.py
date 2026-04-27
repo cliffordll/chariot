@@ -19,11 +19,11 @@ async def test_create_and_get_entry(session: AsyncSession) -> None:
     entry = await repo.create(
         name="claude",
         type="anthropic",
-        options={"model_id": "claude-opus-4-5", "api_key": "sk-x"},
+        options={"model": "claude-opus-4-5", "api_key": "sk-x"},
     )
     assert entry.name == "claude"
     assert entry.type == "anthropic"
-    assert entry.options == {"model_id": "claude-opus-4-5", "api_key": "sk-x"}
+    assert entry.options == {"model": "claude-opus-4-5", "api_key": "sk-x"}
 
     got = await repo.get_entry("claude")
     assert got is not None
@@ -81,10 +81,10 @@ async def test_update_changes_type_and_options(session: AsyncSession) -> None:
     updated = await repo.update(
         "x",
         type="anthropic",
-        options={"model_id": "claude-haiku-4-5"},
+        options={"model": "claude-haiku-4-5"},
     )
     assert updated.type == "anthropic"
-    assert updated.options == {"model_id": "claude-haiku-4-5"}
+    assert updated.options == {"model": "claude-haiku-4-5"}
 
 
 async def test_update_only_options(session: AsyncSession) -> None:
@@ -140,10 +140,10 @@ async def test_duplicate_collision_increments_suffix(session: AsyncSession) -> N
 
 async def test_duplicate_explicit_as_name(session: AsyncSession) -> None:
     repo = ModelRepo(session)
-    await repo.create(name="src", type="anthropic", options={"model_id": "x"})
+    await repo.create(name="src", type="anthropic", options={"model": "x"})
     dup = await repo.duplicate("src", as_name="my-custom")
     assert dup.name == "my-custom"
-    assert dup.options == {"model_id": "x"}
+    assert dup.options == {"model": "x"}
 
 
 async def test_duplicate_explicit_name_collision_raises(session: AsyncSession) -> None:

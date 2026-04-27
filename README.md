@@ -97,7 +97,7 @@ bun run --filter=@chariot/app dev         # 或者 Tauri 桌面壳:见上面 Qui
 打开 Models tab → `[+ Add]` → 表单填 :
 - name: `claude`(任意 user-friendly id)
 - type: `anthropic`
-- model_id: `claude-opus-4-5`
+- model: `claude-opus-4-5`
 - api_key: `sk-ant-...`(或留空走 env)
 - api_key_env: `ANTHROPIC_API_KEY`(默认,可省)
 - base_url: 留空默认 `https://api.anthropic.com`
@@ -110,7 +110,7 @@ entry 点 `[Test]` 跑探针,看到具体错码(`upstream_auth_failed` / `upstre
 
 ```bash
 uv run chariot model add --name claude --type anthropic \
-    -o model_id=claude-opus-4-5 \
+    -o model=claude-opus-4-5 \
     -o api_key=sk-ant-...
 
 uv run chariot model use claude          # 切 active(持久化到 DB)
@@ -121,13 +121,13 @@ uv run chariot model probe claude        # 探针验通断
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."     # PowerShell:$env:ANTHROPIC_API_KEY="..."
-uv run chariot model add --name claude --type anthropic -o model_id=claude-opus-4-5
+uv run chariot model add --name claude --type anthropic -o model=claude-opus-4-5
 uv run chariot model use claude
 ```
 
 ### 行为细节
 
-- 客户端 body 里写啥 `model` 都会被替换成 entry 的 `model_id`(chariot 是单一身份代理)
+- 客户端 body 里写啥 `model` 都会被替换成 entry 的 `options.model`(chariot 是单一身份代理)
 - 上游 401 / 403 → 502 `upstream_auth_failed`(检查 entry 的 api_key);429 透传;5xx → 502
 - 流式:`stream: true` 直接透传上游 SSE 字节,中途断开靠断 TCP 通知客户端
 - 没切 active(seed 后默认 mock)/ entry 不存在 → 走 MockModel fallback(开箱可用)

@@ -44,7 +44,7 @@
 ### ✅ D.4 Models 页 CRUD UI + Duplicate
 
 - `Models.tsx` 大改:每行加 [Edit] / [Dup] / [Del] 按钮;顶部 [+ Add] 按钮
-- `AddEditDialog` 组件:type 下拉 → 按 type 切换字段表单(anthropic = model_id / api_key / api_key_env / base_url;mock = 无 options)
+- `AddEditDialog` 组件:type 下拉 → 按 type 切换字段表单(anthropic = model / api_key / api_key_env / base_url;mock = 无 options)
 - Delete 走 confirm dialog;active entry 提示先切走
 - Duplicate 弹 Dialog 字段预填,name 默认 `<name>_copy`
 - `api.ts` 加 `createModel / updateModel / deleteModel / duplicateModel`

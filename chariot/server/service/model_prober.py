@@ -58,7 +58,7 @@ class ProbeResult(BaseModel):
 class ModelProber:
     """探针工具类 —— 给一条 ModelEntry,临时 build + 发最小请求 + 报结果。"""
 
-    # 最小合法 Messages 请求体;model 字段会被 AnthropicModel 按 entry.options.model_id
+    # 最小合法 Messages 请求体;model 字段会被 AnthropicModel 按 entry.options.model
     # 改写,这里写啥都行。
     _PROBE_BODY: ClassVar[bytes] = json.dumps(
         {
