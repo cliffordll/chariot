@@ -25,7 +25,24 @@ if TYPE_CHECKING:
 
 
 class ConfigError(Exception):
-    """配置层错误;startup 时 raise(不是 HTTP 错误)。"""
+    """配置层错误;startup 时 raise(不是 HTTP 错误)。
+
+    子类用于让 controller 精确映射 HTTP 状态码,不靠 message 文本子串判断。
+    """
+
+
+class ModelNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好,语义明显是异常
+    """指定 name 在 DB 里找不到(update / delete / duplicate src / set_active)。
+
+    Controller 转 HTTP 404。
+    """
+
+
+class DuplicateModelName(ConfigError):  # noqa: N818 — 同上
+    """name 已存在(create / duplicate 目标名冲突)。
+
+    Controller 转 HTTP 409。
+    """
 
 
 @dataclass(frozen=True)

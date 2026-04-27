@@ -25,7 +25,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError, ModelEntry
+from chariot.server.config import (
+    ConfigError,
+    DuplicateModelName,
+    ModelEntry,
+    ModelNotFound,
+)
 from chariot.server.database.models import ModelRow, SettingRow
 
 # settings 表里存 active model name 的 key
@@ -73,7 +78,7 @@ class ModelRepo:
             await self.session.commit()
         except IntegrityError as e:
             await self.session.rollback()
-            raise ConfigError(f"model name {name!r} 已存在") from e
+            raise DuplicateModelName(f"model name {name!r} 已存在") from e
         await self.session.refresh(row)
         return self._row_to_entry(row)
 
@@ -87,7 +92,7 @@ class ModelRepo:
         """改 type / options(不允许改 name —— 用 duplicate + delete 模式)。"""
         row = await self._find_row(name)
         if row is None:
-            raise ConfigError(f"未知 model name: {name!r}")
+            raise ModelNotFound(f"未知 model name: {name!r}")
         if type is not None:
             self._check_type(type)
             row.type = type
@@ -100,7 +105,7 @@ class ModelRepo:
     async def delete(self, name: str) -> None:
         row = await self._find_row(name)
         if row is None:
-            raise ConfigError(f"未知 model name: {name!r}")
+            raise ModelNotFound(f"未知 model name: {name!r}")
         await self.session.delete(row)
         await self.session.commit()
 
@@ -108,7 +113,7 @@ class ModelRepo:
         """复制 entry。`as_name` 缺省 `<name>_copy`,碰撞自动加序号 `_copy_2 / _3 / ...`。"""
         src = await self._find_row(name)
         if src is None:
-            raise ConfigError(f"未知 model name: {name!r}")
+            raise ModelNotFound(f"未知 model name: {name!r}")
         target = as_name if as_name is not None else await self._next_copy_name(name)
         self._check_name(target)
         return await self.create(
@@ -126,7 +131,7 @@ class ModelRepo:
     async def set_active(self, name: str) -> None:
         """设置 active model。校验 name 存在 —— 不允许把 active 指到不存在的 entry。"""
         if await self._find_row(name) is None:
-            raise ConfigError(f"未知 model name: {name!r}")
+            raise ModelNotFound(f"未知 model name: {name!r}")
         row = await self.session.get(SettingRow, _ACTIVE_KEY)
         if row is None:
             self.session.add(SettingRow(key=_ACTIVE_KEY, value=name))

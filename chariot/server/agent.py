@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 
 from fastapi.responses import Response
 
-from chariot.server.config import ChariotConfig, ConfigError
+from chariot.server.config import ChariotConfig, ModelNotFound
 from chariot.server.model.base import Model
 from chariot.server.model.mock import mock_model
 from chariot.server.model.registry import ModelRegistry
@@ -130,7 +130,7 @@ class Agent:
                 cls._active_name = name
                 return agent
         known = ", ".join(e.name for e in config.models) or "(空)"
-        raise ConfigError(f"未知 model name: {name!r};可选:{known}")
+        raise ModelNotFound(f"未知 model name: {name!r};可选:{known}")
 
     @classmethod
     def current(cls) -> Agent:
