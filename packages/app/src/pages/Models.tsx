@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +45,7 @@ import {
  * - 改 active 在 Chat 页(决策 7A:per-tab 切 active 仍在 Chat)
  *
  * 字段 schema 按 type 切表单(`TYPE_SCHEMAS`):mock 无字段,anthropic 给
- * model_id / api_key / api_key_env / base_url。未知 type 提示用 CLI -o 参数。
+ * model / api_key / api_key_env / base_url。未知 type 提示用 CLI -o 参数。
  */
 
 interface FieldSchema {
@@ -61,8 +60,8 @@ const TYPE_SCHEMAS: Record<string, FieldSchema[]> = {
   mock: [],
   anthropic: [
     {
-      key: "model_id",
-      label: "model_id",
+      key: "model",
+      label: "model",
       required: true,
       placeholder: "claude-opus-4-5",
     },
@@ -84,6 +83,38 @@ const TYPE_SCHEMAS: Record<string, FieldSchema[]> = {
     },
   ],
 };
+
+/**
+ * Add 模式下的快速预设。点击 chip → 自动填 name + model。
+ * 用户仍需自己填 api_key(或留空用 env)。其它 type 暂不预设。
+ */
+interface ModelTemplate {
+  id: string;        // 即 model;同时作 name 默认值
+  label: string;     // 显示名
+  type: string;      // 注入的 type
+  options: Record<string, string>;
+}
+
+const TEMPLATES: ModelTemplate[] = [
+  {
+    id: "claude-opus-4-5",
+    label: "Claude Opus 4.5",
+    type: "anthropic",
+    options: { model: "claude-opus-4-5" },
+  },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6",
+    type: "anthropic",
+    options: { model: "claude-sonnet-4-6" },
+  },
+  {
+    id: "claude-haiku-4-5",
+    label: "Claude Haiku 4.5",
+    type: "anthropic",
+    options: { model: "claude-haiku-4-5" },
+  },
+];
 
 type ModelsState =
   | { kind: "loading" }
@@ -109,31 +140,27 @@ export default function Models() {
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
   const [dialog, setDialog] = useState<DialogMode>({ kind: "closed" });
   const [del, setDel] = useState<DeleteState>({ open: false });
-  const [entryDetails, setEntryDetails] = useState<Record<string, ModelEntry>>({});
+  /** 哪些行处于展开状态(name set);点击行头切换。 */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setModelsState({ kind: "loading" });
     try {
       const data = await api.listModels();
       setModelsState({ kind: "ok", data });
-      // 拉每条 entry 的完整 detail(name 列表外还要 type / options)
-      // listModels 当前只返 name 列表;edit/duplicate 时需要 options,改下面分开请求
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setModelsState({ kind: "err", message: msg });
     }
   }, []);
 
-  /**
-   * 从 server 缓存的 ChariotConfig 拿不到 options(GET /admin/models 只返 name 列表),
-   * edit / duplicate 需要 options,临时方案:用 probe 也要先 build entry,这条信息其实在
-   * server 内部已有。0.3.0 简化:edit / duplicate 时调一次 server 拿 entry 详情;
-   * 但当前没单独的 GET /entries/{name} 端点。短期方案:让 listModels 一并返 entries
-   * 详情(0.3.1 改),0.3.0 先用本地缓存(create / update / duplicate 后塞进
-   * entryDetails,edit 时若没有则 fallback 弹空表单 + 提示)。
-   */
-  const cacheEntry = useCallback((entry: ModelEntry) => {
-    setEntryDetails((prev) => ({ ...prev, [entry.name]: entry }));
+  const toggleExpand = useCallback((name: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   }, []);
 
   const runProbe = useCallback(async (name: string) => {
@@ -160,43 +187,37 @@ export default function Models() {
     }
   }, []);
 
-  const onCreated = useCallback(
-    (entry: ModelEntry) => {
-      cacheEntry(entry);
-      void load();
-    },
-    [cacheEntry, load],
-  );
+  const onCreated = useCallback(() => {
+    void load();
+  }, [load]);
 
   const onDeleted = useCallback(() => {
     void load();
   }, [load]);
 
+  /** 从 modelsState.data.entries 找 entry;0.3.0 起 listModels 直接返完整数据。 */
+  const findEntry = useCallback(
+    (name: string): ModelEntry | undefined => {
+      if (modelsState.kind !== "ok") return undefined;
+      return modelsState.data.entries.find((e) => e.name === name);
+    },
+    [modelsState],
+  );
+
   const openEdit = useCallback(
     (name: string) => {
-      const cached = entryDetails[name];
-      // 如果没缓存(刷新后),传一个最小占位 — 用户可以重新填字段
-      const source: ModelEntry = cached ?? {
-        name,
-        type: modelsState.kind === "ok" ? guessTypeFromAvailable() : "mock",
-        options: {},
-      };
-      setDialog({ kind: "edit", source });
+      const source = findEntry(name);
+      if (source) setDialog({ kind: "edit", source });
     },
-    [entryDetails, modelsState],
+    [findEntry],
   );
 
   const openDuplicate = useCallback(
     (name: string) => {
-      const cached = entryDetails[name];
-      const source: ModelEntry = cached ?? {
-        name,
-        type: "mock",
-        options: {},
-      };
-      setDialog({ kind: "duplicate", source });
+      const source = findEntry(name);
+      if (source) setDialog({ kind: "duplicate", source });
     },
-    [entryDetails],
+    [findEntry],
   );
 
   useEffect(() => {
@@ -220,6 +241,8 @@ export default function Models() {
       <ModelsCard
         modelsState={modelsState}
         probeStates={probeStates}
+        expanded={expanded}
+        onToggleExpand={toggleExpand}
         onProbe={runProbe}
         onEdit={openEdit}
         onDuplicate={openDuplicate}
@@ -250,15 +273,13 @@ export default function Models() {
   );
 }
 
-function guessTypeFromAvailable(): string {
-  return "mock";
-}
-
 // ---------- 列表卡片 ----------
 
 function ModelsCard({
   modelsState,
   probeStates,
+  expanded,
+  onToggleExpand,
   onProbe,
   onEdit,
   onDuplicate,
@@ -266,6 +287,8 @@ function ModelsCard({
 }: {
   modelsState: ModelsState;
   probeStates: Record<string, ProbeState>;
+  expanded: Set<string>;
+  onToggleExpand: (name: string) => void;
   onProbe: (name: string) => void;
   onEdit: (name: string) => void;
   onDuplicate: (name: string) => void;
@@ -298,12 +321,6 @@ function ModelsCard({
         ) : (
           <span className="text-muted-foreground">(none — MockModel fallback)</span>
         )}
-        <Link
-          to="/chat"
-          className="ml-3 text-xs text-muted-foreground underline-offset-2 hover:underline"
-        >
-          切 active 在 Chat 页 →
-        </Link>
       </div>
 
       <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
@@ -319,16 +336,18 @@ function ModelsCard({
             Test 会真打上游一次,消耗 ~1 token;mock 模型走本地零费用。
           </div>
           <ul className="mb-4 divide-y divide-border rounded-md border border-border">
-            {data.available.map((name) => (
+            {data.entries.map((entry) => (
               <ModelRow
-                key={name}
-                name={name}
-                isActive={name === data.active}
-                state={probeStates[name] ?? { kind: "idle" }}
-                onProbe={() => onProbe(name)}
-                onEdit={() => onEdit(name)}
-                onDuplicate={() => onDuplicate(name)}
-                onDelete={() => onDelete(name, name === data.active)}
+                key={entry.name}
+                entry={entry}
+                isActive={entry.name === data.active}
+                state={probeStates[entry.name] ?? { kind: "idle" }}
+                isExpanded={expanded.has(entry.name)}
+                onToggleExpand={() => onToggleExpand(entry.name)}
+                onProbe={() => onProbe(entry.name)}
+                onEdit={() => onEdit(entry.name)}
+                onDuplicate={() => onDuplicate(entry.name)}
+                onDelete={() => onDelete(entry.name, entry.name === data.active)}
               />
             ))}
           </ul>
@@ -349,64 +368,128 @@ function ModelsCard({
 }
 
 function ModelRow({
-  name,
+  entry,
   isActive,
   state,
+  isExpanded,
+  onToggleExpand,
   onProbe,
   onEdit,
   onDuplicate,
   onDelete,
 }: {
-  name: string;
+  entry: ModelEntry;
   isActive: boolean;
   state: ProbeState;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
   onProbe: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
   return (
-    <li className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-      <code className="font-mono">{name}</code>
-      {isActive && <Badge className="h-5 px-1.5 text-[10px]">active</Badge>}
-      <ProbeStatus state={state} />
-      <div className="ml-auto flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={onProbe}
-          disabled={state.kind === "probing"}
+    <li>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+        {/* 行头(可点击切换展开) */}
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex items-center gap-2 text-left hover:text-foreground"
+          aria-expanded={isExpanded}
         >
-          {state.kind === "probing" ? "Testing…" : "Test"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={onDuplicate}
-        >
-          Dup
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={onEdit}
-        >
-          Edit
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
-          onClick={onDelete}
-        >
-          Del
-        </Button>
+          <span className="text-xs text-muted-foreground select-none">
+            {isExpanded ? "▾" : "▸"}
+          </span>
+          <code className="font-mono">{entry.name}</code>
+          <span className="text-xs text-muted-foreground">{entry.type}</span>
+        </button>
+        {isActive && <Badge className="h-5 px-1.5 text-[10px]">active</Badge>}
+        <ProbeStatus state={state} />
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={onProbe}
+            disabled={state.kind === "probing"}
+          >
+            {state.kind === "probing" ? "Testing…" : "Test"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={onDuplicate}
+          >
+            Dup
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={onEdit}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
+            onClick={onDelete}
+          >
+            Del
+          </Button>
+        </div>
       </div>
+      {isExpanded && <ExpandedDetails entry={entry} />}
     </li>
   );
+}
+
+/**
+ * 展开行的详情:type + options KV 表。`api_key` 字段值脱敏(只显示前后几位)。
+ */
+function ExpandedDetails({ entry }: { entry: ModelEntry }) {
+  const optEntries = Object.entries(entry.options);
+
+  return (
+    <div className="border-t border-border bg-muted/20 px-3 py-3 text-xs">
+      <KvRow label="type" value={<code className="font-mono">{entry.type}</code>} />
+      {optEntries.length === 0 ? (
+        <KvRow label="options" value={<span className="text-muted-foreground">(empty)</span>} />
+      ) : (
+        optEntries.map(([k, v]) => (
+          <KvRow
+            key={k}
+            label={k}
+            value={
+              <code className="font-mono break-all">{maskOptionValue(k, v)}</code>
+            }
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function KvRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[8rem_1fr] gap-2 py-0.5">
+      <span className="text-muted-foreground">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+/** 把 api_key 这类 secret 字段值脱敏(保留前后几位辨识 + 中间 ***)。 */
+function maskOptionValue(key: string, value: unknown): string {
+  if (typeof value !== "string") return JSON.stringify(value);
+  if (key === "api_key" && value.length > 0) {
+    if (value.length <= 12) return "***";
+    return value.slice(0, 7) + "***...***" + value.slice(-4);
+  }
+  return value;
 }
 
 function ProbeStatus({ state }: { state: ProbeState }) {
@@ -442,7 +525,7 @@ function AddEditDialog({
   mode: Exclude<DialogMode, { kind: "closed" }>;
   knownTypes: string[];
   onClose: () => void;
-  onSuccess: (entry: ModelEntry) => void;
+  onSuccess: () => void;
 }) {
   const isEdit = mode.kind === "edit";
   const isDup = mode.kind === "duplicate";
@@ -491,16 +574,15 @@ function AddEditDialog({
     }
     setSubmitting(true);
     try {
-      let entry: ModelEntry;
       if (mode.kind === "add") {
-        entry = await api.createModel({ name: name.trim(), type, options: cleanOptions });
+        await api.createModel({ name: name.trim(), type, options: cleanOptions });
       } else if (mode.kind === "edit") {
-        entry = await api.updateModel(initial!.name, { type, options: cleanOptions });
+        await api.updateModel(initial!.name, { type, options: cleanOptions });
       } else {
         // duplicate: server 复制源 entry,as=new-name;type/options 不在请求里
-        entry = await api.duplicateModel(initial!.name, name.trim());
+        await api.duplicateModel(initial!.name, name.trim());
       }
-      onSuccess(entry);
+      onSuccess();
       onClose();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -523,6 +605,35 @@ function AddEditDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          {/* 模板预设(只在 add 模式显示;edit/duplicate 已有现成 entry,不需要)*/}
+          {mode.kind === "add" && (
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                quick templates
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {TEMPLATES.map((tpl) => (
+                  <Button
+                    key={tpl.id}
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setName(tpl.id);
+                      setType(tpl.type);
+                      setOptions((prev) => ({ ...prev, ...tpl.options }));
+                    }}
+                  >
+                    {tpl.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                点击模板自动填 name / type / model;api_key 仍需自己填(或留空走 env)。
+              </p>
+            </div>
+          )}
+
           <FieldRow label="name">
             <Input
               value={name}

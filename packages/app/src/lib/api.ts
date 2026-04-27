@@ -43,12 +43,14 @@ export interface ListLogsParams {
 
 /** `GET /admin/models` 响应。对齐 `chariot.server.controller.models.ModelsListResponse`。 */
 export interface ModelsListResponse {
-  /** 配置文件里的 model name 列表(`[[models]] name = ...`)。 */
+  /** entry name 列表(0.2.x 兼容字段)。 */
   available: string[];
   /** 当前激活的 model name;MockModel fallback 时为 null。 */
   active: string | null;
   /** ModelRegistry 已注册的 type key 列表(mock / anthropic / ...)。 */
   types: string[];
+  /** 0.3.0 起返完整 entries(name / type / options),省掉单独拉每条详情。 */
+  entries: ModelEntry[];
 }
 
 /** `POST /admin/models` 响应。对齐 `chariot.server.controller.models.SwitchModelResponse`。 */

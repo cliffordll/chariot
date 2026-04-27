@@ -61,22 +61,42 @@ __all__ = [
 router = APIRouter()
 
 
+# ---------- 共享 Pydantic 形态(EntryResponse 被 GET /admin/models 和 entries CRUD 复用)----------
+
+
+class EntryResponse(BaseModel):
+    """单条 model entry 的对外形态(name / type / options)。"""
+
+    name: str
+    type: str
+    options: dict[str, Any]
+
+
 # ---------- /admin/models GET ----------
 
 
 class ModelsListResponse(BaseModel):
+    """`GET /admin/models` 响应。0.3.0 起加 entries 字段返完整数据(name/type/options)。
+
+    `available` 仍是 name 列表(0.2.x 兼容);`entries` 是 0.3.0 新增的全量数组,
+    UI / SDK 可以一次拿到 type 和 options 详情,不用再单独拉每条。
+    """
+
     available: list[str]
     active: str | None
     types: list[str]
+    entries: list[EntryResponse]
 
 
 @router.get("/models", response_model=ModelsListResponse)
 async def list_models() -> ModelsListResponse:
     config = Agent.config()
+    entries = [EntryResponse(name=e.name, type=e.type, options=e.options) for e in config.models]
     return ModelsListResponse(
         available=[e.name for e in config.models],
         active=Agent.active_name(),
         types=ModelRegistry.known_types(),
+        entries=entries,
     )
 
 
@@ -143,12 +163,6 @@ async def probe_model(name: str) -> ProbeResult:
 
 
 # ---------- /admin/models/entries CRUD ----------
-
-
-class EntryResponse(BaseModel):
-    name: str
-    type: str
-    options: dict[str, Any]
 
 
 class CreateEntryRequest(BaseModel):
