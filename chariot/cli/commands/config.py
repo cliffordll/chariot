@@ -50,7 +50,10 @@ def init_cmd(
     target.write_text(template, encoding="utf-8")
 
     Renderer.out(f"模板写入 {target}")
-    Renderer.out("编辑该文件后,export ANTHROPIC_API_KEY 并重启 server 即可。")
+    Renderer.out(
+        "编辑该文件:在 [models.options] 填 api_key,或保留 api_key_env 并 export 该 env;"
+        "改完重启 server 即可。"
+    )
 
 
 # ---------- show ----------

@@ -142,7 +142,9 @@ def from_config(cls, options: dict[str, Any]) -> Self: ...
 name = "claude-opus"
 type = "anthropic"
 [models.options]
-api_key_env = "ANTHROPIC_API_KEY"
+# api_key 来源二选一(都给 → api_key 优先):
+api_key     = "sk-ant-..."          # (a) 直填,密钥落地配置文件
+api_key_env = "ANTHROPIC_API_KEY"   # (b) 间接,从 env 读;默认值就是这个,可省
 base_url    = "https://api.anthropic.com"
 model_id    = "claude-opus-4-5"
 
@@ -256,10 +258,9 @@ class AnthropicModel:
 
     @classmethod
     def from_config(cls, options: dict[str, Any]) -> AnthropicModel:
-        env_name = options.get("api_key_env", "ANTHROPIC_API_KEY")
-        api_key = os.environ.get(env_name)
-        if not api_key:
-            raise ConfigError(f"环境变量 {env_name} 未设置")
+        # api_key 优先用 options["api_key"]; 否则 fallback 到 options["api_key_env"]
+        # (默认 "ANTHROPIC_API_KEY")指向的环境变量;两者都拿不到非空值 → ConfigError
+        api_key = cls._resolve_api_key(options)
         return cls(
             api_key=api_key,
             base_url=options.get("base_url", "https://api.anthropic.com"),

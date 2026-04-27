@@ -93,23 +93,41 @@ class AnthropicModel:
 
     @classmethod
     def from_config(cls, options: dict[str, Any]) -> AnthropicModel:
-        """从 config options 构造;读环境变量取 api_key,缺关键字段 raise ConfigError。"""
+        """从 config options 构造;两条来源取 api_key,缺关键字段 raise ConfigError。
+
+        api_key 来源(优先级):
+        1. `options["api_key"]` —— 直接写在配置文件里(便捷,但密钥落地)
+        2. `options["api_key_env"]`(默认 `ANTHROPIC_API_KEY`)指向的环境变量
+        两者都给 → 1 优先;都没拿到非空值 → ConfigError。
+        """
         model_id = options.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             raise ConfigError("anthropic model 配置缺少 'model_id' 或类型不对")
 
-        env_name = options.get("api_key_env", _DEFAULT_API_KEY_ENV)
-        if not isinstance(env_name, str) or not env_name:
-            raise ConfigError("'api_key_env' 必须是非空字符串")
-        api_key = os.environ.get(env_name)
-        if not api_key:
-            raise ConfigError(f"环境变量 {env_name} 未设置")
+        api_key = cls._resolve_api_key(options)
 
         base_url = options.get("base_url", _DEFAULT_BASE_URL)
         if not isinstance(base_url, str) or not base_url:
             raise ConfigError("'base_url' 必须是非空字符串")
 
         return cls(api_key=api_key, model_id=model_id, base_url=base_url)
+
+    @staticmethod
+    def _resolve_api_key(options: dict[str, Any]) -> str:
+        """按优先级 (inline api_key) → (api_key_env 指向的 env) 解析 key。"""
+        inline = options.get("api_key")
+        if inline is not None:
+            if not isinstance(inline, str) or not inline:
+                raise ConfigError("'api_key' 必须是非空字符串(留空请整条删掉)")
+            return inline
+
+        env_name = options.get("api_key_env", _DEFAULT_API_KEY_ENV)
+        if not isinstance(env_name, str) or not env_name:
+            raise ConfigError("'api_key_env' 必须是非空字符串")
+        env_value = os.environ.get(env_name)
+        if not env_value:
+            raise ConfigError(f"未拿到 api_key:配置里没填 'api_key',且环境变量 {env_name} 也未设置")
+        return env_value
 
     # ---- Model 接口 ----
 
@@ -209,7 +227,7 @@ class AnthropicModel:
             raise ServiceError(
                 status=502,
                 code="upstream_auth_failed",
-                message=f"上游认证失败({sc});检查 api_key / api_key_env 配置",
+                message=f"上游认证失败({sc});检查 config 里的 api_key / api_key_env",
             )
         if 500 <= sc < 600:
             raise ServiceError(

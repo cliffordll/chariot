@@ -17,19 +17,23 @@ type = "mock"
 
 
 # ---------- Anthropic 真实 API ----------
-# 启用前 export ANTHROPIC_API_KEY="sk-ant-..."
-# (Windows PowerShell:$env:ANTHROPIC_API_KEY = "sk-ant-...")
+# api_key 两种填法,二选一(都给 → api_key 优先):
+#   (a) 直接写 api_key = "sk-ant-..."(便捷,⚠️ 密钥明文落地此文件)
+#   (b) 留空 api_key,export ANTHROPIC_API_KEY="sk-ant-..."(更安全,默认行为)
+# ⚠️ 选 (a) 时务必把 ~/.chariot/config.toml 排除在版本库 / 备份 / 同步之外
 [[models]]
 name = "claude"
 type = "anthropic"
 [models.options]
 model_id = "claude-opus-4-5"
+# 选 (a) 时取消下一行注释并填值;选 (b) 留注释即可:
+# api_key = "sk-ant-..."
 # 以下两项可选,默认就是这俩:
-# api_key_env = "ANTHROPIC_API_KEY"   # 想换 env 名时改这里
+# api_key_env = "ANTHROPIC_API_KEY"   # 选 (b) 想换 env 名时改这里
 # base_url    = "https://api.anthropic.com"
 
 
 # ---------- 选哪个 ----------
-# 改成 "claude" 并 export ANTHROPIC_API_KEY 后重启 server 即走真实 Anthropic。
+# 改成 "claude"(并按上面 (a) 或 (b) 准备好 key)后重启 server 即走真实 Anthropic。
 [active]
 model = "mock"

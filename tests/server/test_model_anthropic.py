@@ -77,6 +77,33 @@ def test_from_config_missing_custom_env_var(monkeypatch: pytest.MonkeyPatch) -> 
         AnthropicModel.from_config({"model_id": "x", "api_key_env": "MISSING_KEY"})
 
 
+def test_from_config_inline_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """直接在 config 写 api_key,不依赖 env。"""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5", "api_key": "sk-inline"})
+    assert isinstance(m, AnthropicModel)
+
+
+def test_from_config_inline_api_key_takes_priority_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两者都给时 inline api_key 优先(env 应被忽略)。"""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    m = AnthropicModel.from_config({"model_id": "claude-opus-4-5", "api_key": "sk-from-config"})
+    # 验证落到 httpx 客户端 header 的 key 是 inline 那条,不是 env 那条
+    assert m._client.headers["x-api-key"] == "sk-from-config"
+
+
+def test_from_config_empty_inline_api_key_raises() -> None:
+    with pytest.raises(ConfigError, match="api_key"):
+        AnthropicModel.from_config({"model_id": "x", "api_key": ""})
+
+
+def test_from_config_non_string_inline_api_key_raises() -> None:
+    with pytest.raises(ConfigError, match="api_key"):
+        AnthropicModel.from_config({"model_id": "x", "api_key": 12345})  # type: ignore[dict-item]
+
+
 # ---------- model_id 改写 ----------
 
 

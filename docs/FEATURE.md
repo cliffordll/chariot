@@ -220,6 +220,37 @@
 
 ---
 
+## 0.2.4 patch
+
+### ✅ S.1 anthropic api_key 支持配置文件直填
+
+- 0.2.0 ~ 0.2.3 anthropic model 的 api_key 只能从环境变量取(`api_key_env`
+  指向的 env)。某些场景(打包给同事用 / 多 key 切换 / Windows 用户怕设
+  env)会希望直接写在配置文件里。本步加 `[models.options].api_key`
+  字段;两条来源同时给 → inline `api_key` 优先,env 兜底。
+- `chariot/server/model/anthropic.py`:`from_config` 抽出
+  `_resolve_api_key(options)` static 方法,优先级 inline → env;两条都拿不到
+  非空值 → ConfigError 文案点明"配置里没填,env 也未设"。校验空串 / 非字符串
+  inline 值。`upstream_auth_failed` 错误文案同步改成"检查 config 里的
+  api_key / api_key_env"。
+- `chariot/config.example.toml`:模板加 (a) 直填 / (b) env 二选一说明 +
+  ⚠️ 安全警告(直填模式务必把 `~/.chariot/config.toml` 排除在版本库 / 备份
+  / 同步之外)。
+- `tests/server/test_model_anthropic.py`:加
+  `test_from_config_inline_api_key`、
+  `test_from_config_inline_api_key_takes_priority_over_env`(验证 httpx
+  client header 落到 inline 值)、`test_from_config_empty_inline_api_key_raises`、
+  `test_from_config_non_string_inline_api_key_raises`。原 4 个 env 路径测试不动。
+- `docs/DESIGN.md` §6.2 / §10:schema 与代码示例同步加 `api_key` 字段。
+- `README.md`:"接真实 Anthropic 模型"改成"二选一",错误码段同步;
+  CLI `chariot config init` 提示文案改成"填 api_key 或 export env"。
+- pyproject + `chariot/__init__` 升 `0.2.3 → 0.2.4`。
+- **验证**:`uv run ruff check .` / `uv run ruff format --check .` /
+  `uv run pyright chariot/`(0 errors)/ `uv run pytest -q`
+  (140 passed, 2 skipped)全绿。
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.3 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.4 收尾。
