@@ -296,6 +296,38 @@
 
 ---
 
+## 0.2.6 patch
+
+### ✅ S.3 Chat 页高级采样参数 UI
+
+- 0.2.5 之前 Chat 页只能调 `max_tokens`(还是个写死的常量 1024);
+  `temperature` / `top_p` 完全没暴露,用户没办法做"更确定 / 更发散"这类
+  常见调节。本步加可视化采样参数面板。
+- **纯前端**,不动 server —— AnthropicModel 是协议透传,这些字段在 body 里
+  自然透到上游。
+- `packages/app/src/lib/chat.ts`:`ChatTurnOpts` 加可选 `temperature` /
+  `topP`;`runTurn` 拼 body 时只在 ≠ 1 时附,遵循 Anthropic 文档"两者建议
+  二选一"的语义,默认 1.0 时不污染 body。
+- `packages/app/src/pages/Chat.tsx`:
+  - 删掉 `MAX_TOKENS = 1024` 常量,改成 `AdvancedParams` state(temperature
+    1.0 / top_p 1.0 / max_tokens 1024,与 Anthropic 默认对齐)
+  - 新建 `AdvancedParamsPanel` 折叠组件(`<details>`):折叠时摘要
+    `T=1 · top_p=1 · max=1024`,改过非默认值时尾部加"已改"指示
+  - 展开后 3 行 `ParamRow`:label / range 滑杆 / number 输入(step 0.05
+    或 1);浮点用 `round2` 防滑杆累积误差(0.30000000000000004 之类)
+  - 底部说明 + Reset 按钮(已是默认时禁用)
+  - inFlight 时整体禁用面板,避免改值 race 已发请求
+  - 状态在 tab 内 useState 持有,刷新丢失;localStorage 持久化等真有人提
+    需求再加(简化 design)
+- **不在范围**:server 端校验(参数非法值现在靠上游报 400 透传,UI 上
+  range/number 已经有 min/max 兜底);per-model 默认值预设(0.3.0+
+  考虑)。
+- pyproject + `chariot/__init__` 升 `0.2.5 → 0.2.6`。
+- **验证**:Python 全套(0.2.5 改的后端不动)+ `bun run --filter=@chariot/app build`
+  (tsc 严格类型 + vite)。
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.5 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.6 收尾。

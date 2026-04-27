@@ -13,7 +13,23 @@ import { ApiError, api, type ModelsListResponse } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 
 const FALLBACK_MODEL_LABEL = "(server)";
-const MAX_TOKENS = 1024;
+
+/**
+ * 高级采样参数(0.2.6)。值随每次请求附在 body 上,server 协议透传给上游。
+ * 默认与 Anthropic 默认对齐(temperature=1, top_p=1, max_tokens=1024)。状态在 tab
+ * 内持有,刷新会丢失 —— 简化设计,localStorage 持久化等真有人提需求再加。
+ */
+interface AdvancedParams {
+  temperature: number;
+  topP: number;
+  maxTokens: number;
+}
+
+const DEFAULT_PARAMS: AdvancedParams = {
+  temperature: 1,
+  topP: 1,
+  maxTokens: 1024,
+};
 
 interface MetaInfo {
   model: string;
@@ -52,6 +68,7 @@ export default function Chat() {
   const [pendingChoice, setPendingChoice] = useState<string | null>(null);
   const [switchState, setSwitchState] = useState<SwitchState>({ kind: "idle" });
 
+  const [params, setParams] = useState<AdvancedParams>(DEFAULT_PARAMS);
   const [messages, setMessages] = useState<DisplayMsg[]>([]);
   const [input, setInput] = useState("");
   const [inFlight, setInFlight] = useState(false);
@@ -122,7 +139,9 @@ export default function Chat() {
     try {
       const result = await runTurn(history, {
         model: activeLabel,
-        maxTokens: MAX_TOKENS,
+        maxTokens: params.maxTokens,
+        temperature: params.temperature,
+        topP: params.topP,
         signal: ctrl.signal,
         onToken: (tok) => {
           setMessages((cur) => {
@@ -168,7 +187,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, messages, activeLabel]);
+  }, [input, inFlight, messages, activeLabel, params]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -231,6 +250,12 @@ export default function Chat() {
         onChoose={setPendingChoice}
         switchState={switchState}
         onSwitch={() => void runSwitch()}
+      />
+
+      <AdvancedParamsPanel
+        params={params}
+        onChange={setParams}
+        disabled={inFlight}
       />
 
       <div
@@ -368,6 +393,135 @@ function ActiveModelRow({
       )}
     </div>
   );
+}
+
+/**
+ * 折叠的高级参数面板。折叠时摘要展示当前值;展开后 3 行滑杆 + 数值输入 + Reset。
+ *
+ * 数值校验:数字输入框接受空串 / 非法值时不更新 state(只读 onBlur 校正)。inFlight
+ * 时整体禁用 —— 避免改值 race 已发请求(那条请求保留旧参数,符合直觉)。
+ */
+function AdvancedParamsPanel({
+  params,
+  onChange,
+  disabled,
+}: {
+  params: AdvancedParams;
+  onChange: (next: AdvancedParams) => void;
+  disabled: boolean;
+}) {
+  const summary = `T=${params.temperature} · top_p=${params.topP} · max=${params.maxTokens}`;
+  const isDefault =
+    params.temperature === DEFAULT_PARAMS.temperature &&
+    params.topP === DEFAULT_PARAMS.topP &&
+    params.maxTokens === DEFAULT_PARAMS.maxTokens;
+
+  return (
+    <details className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2 text-xs">
+      <summary className="cursor-pointer select-none text-muted-foreground">
+        高级参数 <span className="ml-1 font-mono text-foreground/80">{summary}</span>
+        {!isDefault && <span className="ml-2 text-amber-600 dark:text-amber-400">(已改)</span>}
+      </summary>
+      <div className="mt-3 space-y-2">
+        <ParamRow
+          label="temperature"
+          min={0}
+          max={1}
+          step={0.05}
+          value={params.temperature}
+          onChange={(v) => onChange({ ...params, temperature: round2(v) })}
+          disabled={disabled}
+        />
+        <ParamRow
+          label="top_p"
+          min={0}
+          max={1}
+          step={0.05}
+          value={params.topP}
+          onChange={(v) => onChange({ ...params, topP: round2(v) })}
+          disabled={disabled}
+        />
+        <ParamRow
+          label="max_tokens"
+          min={1}
+          max={8192}
+          step={1}
+          value={params.maxTokens}
+          onChange={(v) => onChange({ ...params, maxTokens: Math.max(1, Math.round(v)) })}
+          disabled={disabled}
+          isInt
+        />
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-[11px] text-muted-foreground">
+            Anthropic 文档建议 temperature / top_p 只调一项;两者均为 1 时不发到 body。
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => onChange(DEFAULT_PARAMS)}
+            disabled={disabled || isDefault}
+          >
+            Reset
+          </Button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ParamRow({
+  label,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  disabled,
+  isInt,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (v: number) => void;
+  disabled: boolean;
+  isInt?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-24 font-mono text-muted-foreground">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        disabled={disabled}
+        className="flex-1"
+      />
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) onChange(isInt ? Math.round(v) : v);
+        }}
+        disabled={disabled}
+        className="w-20 rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+      />
+    </div>
+  );
+}
+
+/** 浮点数保留两位,避免滑杆步进累积出 0.30000000000000004 这种值。 */
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 function MessageBubble({ msg, onRetry }: { msg: DisplayMsg; onRetry?: () => void }) {

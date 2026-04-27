@@ -19,6 +19,12 @@ export interface ChatTurnOpts {
   /** 仅用于 `body.model` 字段(server 会按 active config 改写;影响 `logs.model` 显示)。 */
   model: string;
   maxTokens: number;
+  /**
+   * Anthropic 采样参数。两者默认 1.0(等同不调);只在 ≠ 1 时才发到 body,以遵循
+   * Anthropic 文档"建议两者只挑一个"的语义,避免显式传 1 干扰。
+   */
+  temperature?: number;
+  topP?: number;
   signal: AbortSignal;
   onToken: (t: string) => void;
 }
@@ -47,12 +53,18 @@ export async function runTurn(
   messages: ChatTurnMsg[],
   opts: ChatTurnOpts,
 ): Promise<ChatTurnResult> {
-  const body = {
+  const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: opts.maxTokens,
     stream: true,
     messages,
   };
+  if (opts.temperature !== undefined && opts.temperature !== 1) {
+    body.temperature = opts.temperature;
+  }
+  if (opts.topP !== undefined && opts.topP !== 1) {
+    body.top_p = opts.topP;
+  }
 
   const base = await apiBase();
   const t0 = performance.now();
