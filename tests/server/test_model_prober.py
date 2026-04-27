@@ -5,38 +5,31 @@
 - 上游 raise ServiceError(模拟 401 / 502 / 网络错)→ ok=False, error 透传
 - 兜底:respond raise 非 ServiceError 异常 → code=probe_internal_error
 
-注册表用 `registry_isolation` fixture snapshot/restore 隔离,避免污染其它用例。
+注册表的隔离由 conftest 的 `isolate_model_registry` autouse fixture 负责,
+本文件用例可以放心 register fake type。
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from fastapi.responses import Response
 
 from chariot.server.config import ModelEntry
+from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 from chariot.server.service.model_prober import ModelProber
 
-
-@pytest.fixture
-def registry_isolation() -> Iterator[None]:
-    snap = ModelRegistry.snapshot()
-    yield
-    ModelRegistry.restore(snap)
-
-
 # ---------- 测试用 model 实现 ----------
 
 
-class _AlwaysOkModel:
+class _AlwaysOkModel(Model):
     name = "fake-ok"
 
     @classmethod
-    def from_config(cls, options: dict[str, Any]) -> _AlwaysOkModel:
+    def from_config(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -45,11 +38,11 @@ class _AlwaysOkModel:
         return Response(content=b'{"ok":1}', status_code=200, media_type="application/json")
 
 
-class _ServiceErrorModel:
+class _ServiceErrorModel(Model):
     name = "fake-svc-err"
 
     @classmethod
-    def from_config(cls, options: dict[str, Any]) -> _ServiceErrorModel:
+    def from_config(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -62,11 +55,11 @@ class _ServiceErrorModel:
         )
 
 
-class _UnexpectedErrorModel:
+class _UnexpectedErrorModel(Model):
     name = "fake-boom"
 
     @classmethod
-    def from_config(cls, options: dict[str, Any]) -> _UnexpectedErrorModel:
+    def from_config(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -116,11 +109,9 @@ async def test_probe_anthropic_missing_api_key_returns_config_error(
     assert "api_key" in result.error.message
 
 
-async def test_probe_upstream_service_error_propagates_code(
-    registry_isolation: None,
-) -> None:
+async def test_probe_upstream_service_error_propagates_code() -> None:
     """respond raise ServiceError → ok=False,code/message 直接透传。"""
-    ModelRegistry.register("fake_svc_err")(_ServiceErrorModel)
+    ModelRegistry.register("fake_svc_err", _ServiceErrorModel)
     entry = ModelEntry(name="x", type="fake_svc_err", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is False
@@ -131,11 +122,9 @@ async def test_probe_upstream_service_error_propagates_code(
     assert result.latency_ms >= 0
 
 
-async def test_probe_unexpected_exception_caught_as_internal_error(
-    registry_isolation: None,
-) -> None:
+async def test_probe_unexpected_exception_caught_as_internal_error() -> None:
     """respond raise 非 ServiceError 异常 → 兜底成 probe_internal_error,不上抛。"""
-    ModelRegistry.register("fake_boom")(_UnexpectedErrorModel)
+    ModelRegistry.register("fake_boom", _UnexpectedErrorModel)
     entry = ModelEntry(name="x", type="fake_boom", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is False
@@ -144,9 +133,9 @@ async def test_probe_unexpected_exception_caught_as_internal_error(
     assert "意料外错误" in result.error.message
 
 
-async def test_probe_ok_model_returns_ok(registry_isolation: None) -> None:
+async def test_probe_ok_model_returns_ok() -> None:
     """正常 respond 返 200 → ok=True。"""
-    ModelRegistry.register("fake_ok")(_AlwaysOkModel)
+    ModelRegistry.register("fake_ok", _AlwaysOkModel)
     entry = ModelEntry(name="x", type="fake_ok", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is True

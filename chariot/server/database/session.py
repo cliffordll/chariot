@@ -92,14 +92,21 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
                 await conn.execute(text(stmt))
 
 
-async def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    """建目录 + engine + 跑 migrations + 绑 session_maker。"""
+async def init_db(db_path: Path = DEFAULT_DB_PATH) -> async_sessionmaker[AsyncSession]:
+    """建目录 + engine + 跑 migrations + 绑 session_maker;返回 session_maker。
+
+    返回值给 lifespan 等"已确定 init 完成"的调用方拿到非 None 的 sm,免去
+    `if sm is None: raise` 防御。后台路径(log_writer 等)仍走 `get_session_maker()`
+    取 Optional —— 那里 None 是合法状态(server 还没起来)。
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_async_engine(_db_url(db_path))
     await _maybe_run_migrations(engine)
     _state.engine = engine
     # expire_on_commit=False:commit 后对象属性不失效,避免响应序列化时 lazy reload
-    _state.session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    sm = async_sessionmaker(engine, expire_on_commit=False)
+    _state.session_maker = sm
+    return sm
 
 
 async def dispose_db() -> None:

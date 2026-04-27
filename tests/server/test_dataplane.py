@@ -9,7 +9,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from typing import Any, Self
 
 import pytest_asyncio
 from fastapi import FastAPI
@@ -21,15 +22,23 @@ from chariot.server.agent import Agent
 from chariot.server.config import ChariotConfig, ModelEntry
 from chariot.server.controller import dataplane_router, register_exception_handlers
 from chariot.server.database.session import get_session
+from chariot.server.model.base import Model
+
+MakeTestAgent = Callable[[dict[str, Model]], Agent]
 
 
-class _CapturingModel:
+class _CapturingModel(Model):
     """记录最近一次 respond 调用的参数。"""
 
     name = "capturing"
 
     def __init__(self) -> None:
         self.last: tuple[bytes, bool] | None = None
+
+    @classmethod
+    def from_config(cls, options: dict[str, Any]) -> Self:
+        del options
+        return cls()  # 测试 spy,不走 ModelRegistry,仅为满足 ABC 契约
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:
         self.last = (body, stream)
@@ -43,11 +52,12 @@ class _CapturingModel:
 @pytest_asyncio.fixture
 async def client_and_model(
     session: AsyncSession,
+    make_test_agent: MakeTestAgent,
 ) -> AsyncIterator[tuple[AsyncClient, _CapturingModel]]:
     model = _CapturingModel()
-    Agent.uninstall()
-    # 注入 spy model 到 name="spy" 路由项
-    Agent.install_test_models({"spy": model})  # type: ignore[arg-type]
+    # 注入 spy model 到 name="spy" 路由项;Agent 单例 cleanup 由 conftest 的
+    # clean_agent_state autouse fixture 接管
+    make_test_agent({"spy": model})
 
     app = FastAPI()
     register_exception_handlers(app)
@@ -60,8 +70,6 @@ async def client_and_model(
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         yield c, model
-
-    Agent.uninstall()
 
 
 # ---------- 唯一端点 → Agent.handle ----------
@@ -160,7 +168,6 @@ async def test_non_stream_when_flag_missing(
 
 async def test_mock_entry_end_to_end(session: AsyncSession) -> None:
     """seed 一条 mock entry,验证 echo 文本一路打到 HTTP 响应。"""
-    Agent.uninstall()
     Agent.install_from_config(
         ChariotConfig(models=(ModelEntry(name="mock", type="mock", options={}),))
     )
@@ -187,5 +194,3 @@ async def test_mock_entry_end_to_end(session: AsyncSession) -> None:
     data = r.json()
     assert data["content"][0]["text"].startswith("[mock echo]")
     assert data["content"][0]["text"].endswith("marco")
-
-    Agent.uninstall()

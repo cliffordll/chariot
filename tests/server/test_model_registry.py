@@ -1,30 +1,24 @@
 """ModelRegistry 测试 —— 注册 / 构造 / 错误路径 / 已知 type。
 
-注册表是类级单例(ClassVar)。每个用例用 `registry_isolation` fixture 在 setup
-里 snapshot,teardown 里 restore,避免污染其它用例(尤其是已注册的 "mock")。
+注册表是类级单例(ClassVar)。conftest 的 `isolate_model_registry` autouse fixture
+负责每个用例前后 snapshot/restore,所以本文件的用例可以放心改 `_builders`,不会
+污染其它用例(包括默认注册的 "mock" / "anthropic")。
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from fastapi.responses import Response
 
 from chariot.server.config import ConfigError, ModelEntry
+from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 
 
-@pytest.fixture
-def registry_isolation() -> Iterator[None]:
-    snap = ModelRegistry.snapshot()
-    yield
-    ModelRegistry.restore(snap)
-
-
-class _StubModel:
-    """测试用 model;最小满足 Model 协议 + from_config 契约。"""
+class _StubModel(Model):
+    """测试用 model;最小满足 Model ABC 契约。"""
 
     name = "stub"
 
@@ -32,7 +26,7 @@ class _StubModel:
         self.options = options or {}
 
     @classmethod
-    def from_config(cls, options: dict[str, Any]) -> _StubModel:
+    def from_config(cls, options: dict[str, Any]) -> Self:
         return cls(options=options)
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:  # pragma: no cover
@@ -43,17 +37,17 @@ class _StubModel:
 # ---------- 注册 + 构造正常路径 ----------
 
 
-def test_register_and_build_returns_model_instance(registry_isolation: None) -> None:
-    ModelRegistry.register("stub")(_StubModel)
+def test_register_and_build_returns_model_instance() -> None:
+    ModelRegistry.register("stub", _StubModel)
     entry = ModelEntry(name="x", type="stub", options={"foo": "bar"})
     inst = ModelRegistry.build(entry)
     assert isinstance(inst, _StubModel)
     assert inst.options == {"foo": "bar"}
 
 
-def test_known_types_lists_registered(registry_isolation: None) -> None:
-    ModelRegistry.register("aaa")(_StubModel)
-    ModelRegistry.register("bbb")(_StubModel)
+def test_known_types_lists_registered() -> None:
+    ModelRegistry.register("aaa", _StubModel)
+    ModelRegistry.register("bbb", _StubModel)
     types = ModelRegistry.known_types()
     assert "aaa" in types
     assert "bbb" in types
@@ -63,60 +57,47 @@ def test_known_types_lists_registered(registry_isolation: None) -> None:
 # ---------- 错误路径 ----------
 
 
-def test_register_duplicate_type_raises(registry_isolation: None) -> None:
-    ModelRegistry.register("dup")(_StubModel)
+def test_register_duplicate_type_raises() -> None:
+    ModelRegistry.register("dup", _StubModel)
     with pytest.raises(ValueError, match="重复"):
-        ModelRegistry.register("dup")(_StubModel)
+        ModelRegistry.register("dup", _StubModel)
 
 
-def test_register_class_without_from_config_fails(registry_isolation: None) -> None:
-    class _NoFromConfig:
-        name = "no"
+def test_subclass_missing_abstractmethod_cant_instantiate() -> None:
+    """Model 是 ABC,子类必须实现 from_config / respond,否则实例化即 TypeError。
+    register 不再做运行期校验,契约由 ABC 承载。"""
 
-    with pytest.raises(TypeError, match="from_config"):
-        ModelRegistry.register("no_fc")(_NoFromConfig)  # type: ignore[arg-type]
+    class _Incomplete(Model):
+        name = "x"
+        # 故意不实现 from_config / respond
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete()  # type: ignore[abstract]
 
 
-def test_build_unknown_type_raises_config_error(registry_isolation: None) -> None:
+def test_build_unknown_type_raises_config_error() -> None:
     entry = ModelEntry(name="x", type="ghost", options={})
     with pytest.raises(ConfigError, match="ghost"):
         ModelRegistry.build(entry)
 
 
-def test_build_unknown_type_message_lists_known_types(registry_isolation: None) -> None:
+def test_build_unknown_type_message_lists_known_types() -> None:
     """错误消息把已注册的 type 列出来,方便排错。"""
-    ModelRegistry.register("alpha")(_StubModel)
+    ModelRegistry.register("alpha", _StubModel)
     entry = ModelEntry(name="x", type="ghost", options={})
     with pytest.raises(ConfigError, match="alpha"):
         ModelRegistry.build(entry)
 
 
-# ---------- mock 模块 import 的副作用 ----------
+# ---------- 内置 model 注册检验 ----------
 
 
-def test_mock_model_registered_on_module_import() -> None:
-    """`chariot.server.model.mock` 已在 conftest 阶段被加载,'mock' type 应可用。
-
-    本用例不用 registry_isolation —— 故意验真实注册状态。
-    """
+def test_mock_model_registered_via_package_init() -> None:
+    """`chariot.server.model.__init__` 显式注册 'mock' / 'anthropic',autouse
+    fixture 的 snapshot 应包含它们。"""
     from chariot.server.model.mock import MockModel
 
     assert "mock" in ModelRegistry.known_types()
     entry = ModelEntry(name="default", type="mock", options={})
     inst = ModelRegistry.build(entry)
     assert isinstance(inst, MockModel)
-
-
-# ---------- snapshot / restore 自身 ----------
-
-
-def test_snapshot_restore_round_trip(registry_isolation: None) -> None:
-    ModelRegistry.register("temp")(_StubModel)
-    assert "temp" in ModelRegistry.known_types()
-
-    saved = ModelRegistry.snapshot()
-    ModelRegistry.restore({})
-    assert "temp" not in ModelRegistry.known_types()
-
-    ModelRegistry.restore(saved)
-    assert "temp" in ModelRegistry.known_types()

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chariot.server import app as app_module
 from chariot.server.agent import Agent
@@ -31,8 +32,8 @@ async def isolated_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncI
     """把 lifespan 里的 init_db 重定向到 tmp_path,避免污染 ~/.chariot/chariot.db。"""
     db_path = tmp_path / "test.db"
 
-    async def patched_init_db() -> None:
-        await _real_init_db(db_path)
+    async def patched_init_db() -> async_sessionmaker[AsyncSession]:
+        return await _real_init_db(db_path)
 
     monkeypatch.setattr(app_module, "init_db", patched_init_db)
     yield db_path

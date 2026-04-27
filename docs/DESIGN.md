@@ -83,8 +83,8 @@ model list` 或 `GET /admin/models` 看可用)。缺失 / 空串 / 未知 → 40
 
 1. **无状态**;**不碰 DB**;**不感知"上游"**
 2. `name: str` 属性 + `async respond(body, *, stream) -> Response` 方法
-3. 注册到 ModelRegistry 用 `@register("type")` 装饰 + 实现 `from_config(options)`
-   classmethod
+3. 实现 `from_config(options)` classmethod;在 `chariot/server/model/__init__.py`
+   显式调用 `ModelRegistry.register("type", ModelClass)`(非装饰器副作用)
 
 `AnthropicModel` 仍按 `options.model` 改写 body 里的 model 字段(0.3.0 已把 key
 从 `model_id` 重命名为 `model`)再转上游。chariot 这一层"客户端写 entry name →

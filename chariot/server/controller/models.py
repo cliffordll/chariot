@@ -86,8 +86,8 @@ class ModelsListResponse(BaseModel):
 
 
 @router.get("/models", response_model=ModelsListResponse)
-async def list_models() -> ModelsListResponse:
-    config = Agent.config()
+async def list_models(session: SessionDep) -> ModelsListResponse:
+    config = await ChariotConfig.from_db(session)
     entries = [
         EntryResponse(name=e.name, type=e.type, options=e.options, params=e.params)
         for e in config.models
@@ -103,14 +103,14 @@ async def list_models() -> ModelsListResponse:
 
 
 @router.post("/models/{name}/probe", response_model=ProbeResult)
-async def probe_model(name: str) -> ProbeResult:
+async def probe_model(name: str, session: SessionDep) -> ProbeResult:
     """探针:临时 build entry,发 1 条最小 messages 请求,报通不通 + 耗时。
 
     name 不存在 → 404(`model_not_found`)。其它任何失败(build 失败 / 上游 4xx /
     网络错)都不 raise,由 `ModelProber.probe` 包成 `ProbeResult(ok=False, error=...)`
     返回。
     """
-    config = Agent.config()
+    config = await ChariotConfig.from_db(session)
     for entry in config.models:
         if entry.name == name:
             return await ModelProber.probe(entry)
@@ -156,7 +156,7 @@ def _check_known_type(type_name: str) -> None:
 
 
 async def _refresh_agent(session: SessionDep) -> None:
-    """从 DB 重读 ChariotConfig + 触发 Agent 重建 Model 字典。
+    """从 DB 重读 ChariotConfig + 全量重建 Agent。
 
     0.3.1 后任何 entry CRUD 都直接 rebuild,因为 active 概念删除了,
     每条 entry 都对应一个 Model 实例。如果某条 entry options 改了,
@@ -164,7 +164,7 @@ async def _refresh_agent(session: SessionDep) -> None:
     """
     config = await ChariotConfig.from_db(session)
     try:
-        Agent.refresh_config(config)
+        Agent.install_from_config(config)
     except ConfigError as e:
         raise ServiceError(
             status=502,

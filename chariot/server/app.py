@@ -1,4 +1,14 @@
-"""FastAPI app 工厂。"""
+"""FastAPI app 工厂 + lifespan。
+
+启动序列(`_startup`)
+- init_db(目录 / engine / migrations / session_maker)
+- seed mock entry(若 DB 空)
+- 从 DB 装载 `ChariotConfig` → `Agent.install_from_config(config)`
+
+关闭序列(`_shutdown`)
+- `Agent.uninstall()`
+- `dispose_db()`(释放连接池;SQLite WAL checkpoint 在最后一个连接关闭时触发)
+"""
 
 from __future__ import annotations
 
@@ -17,38 +27,40 @@ from chariot.server.controller import (
     dataplane_router,
     register_exception_handlers,
 )
-from chariot.server.database.session import dispose_db, get_session_maker, init_db
+from chariot.server.database.session import dispose_db, init_db
 from chariot.server.repository.model_repo import ModelRepo
 
 _log = logging.getLogger("chariot.server.app")
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """启动:init_db + seed mock(若空)+ 装 agent;结束:卸 agent + dispose_db。
+async def _startup() -> Agent:
+    """启动序列:init_db → seed mock(若空)→ 装 agent。返回当前 agent。
 
-    0.3.0 起源数据从 DB 装载(`ChariotConfig.from_db(session)`)。空表会被
-    `ModelRepo.seed_if_empty()` 种入默认 mock entry,保证开箱可用。
-    `ConfigError` 一致性破坏会上冒,server 不会起来。
+    `ConfigError`(配置一致性破坏)直接上冒,server 不会起来。
     """
-    _log.info("starting chariot v%s (init db + seed + install agent)", __version__)
-    await init_db()
-
-    sm = get_session_maker()
-    if sm is None:
-        raise RuntimeError("init_db 后 session_maker 仍为 None")
+    sm = await init_db()
     async with sm() as session:
         await ModelRepo(session).seed_if_empty()
-        config: ChariotConfig = await ChariotConfig.from_db(session)
+        config = await ChariotConfig.from_db(session)
+    return Agent.install_from_config(config)
 
-    agent = Agent.install_from_config(config)
+
+async def _shutdown() -> None:
+    """关闭序列:卸 agent + dispose db。"""
+    Agent.uninstall()
+    await dispose_db()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    _log.info("starting chariot v%s", __version__)
+    agent = await _startup()
     _log.info("startup complete (entries=%d)", len(agent.models))
     try:
         yield
     finally:
-        _log.info("shutdown: disposing db + resetting agent")
-        Agent.uninstall()
-        await dispose_db()
+        _log.info("shutdown begin")
+        await _shutdown()
         _log.info("shutdown complete")
 
 

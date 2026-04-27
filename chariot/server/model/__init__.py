@@ -6,17 +6,23 @@
 Agent 持有一个 Model 实例完成实际响应生成;Model 层**无状态**,不碰 DB
 也不记 log —— 那是 Agent 和外层 service 的活。
 
-加新 model:
-- 写一个新文件 `chariot/server/model/<name>.py`
-- 类上挂 `@ModelRegistry.register("type_name")`
-- 在本 __init__.py 里 import 一下,触发模块加载 → 装饰器执行 → 注册生效
+注册集中在本文件(显式调用,非 import 副作用):
+
+    ModelRegistry.register("mock", MockModel)
+    ModelRegistry.register("anthropic", AnthropicModel)
+
+加新 model:写一个新文件 `chariot/server/model/<name>.py` + 在本文件加一行
+`ModelRegistry.register("type_name", NewModel)`。
 """
 
 from __future__ import annotations
 
-# 顺序无关,但都需要 import 让 @ModelRegistry.register 在模块加载时跑
 from chariot.server.model.anthropic import AnthropicModel
 from chariot.server.model.base import Model
 from chariot.server.model.mock import MockModel, mock_model
+from chariot.server.model.registry import ModelRegistry
 
-__all__ = ["AnthropicModel", "MockModel", "Model", "mock_model"]
+ModelRegistry.register("mock", MockModel)
+ModelRegistry.register("anthropic", AnthropicModel)
+
+__all__ = ["AnthropicModel", "MockModel", "Model", "ModelRegistry", "mock_model"]

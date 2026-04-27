@@ -16,14 +16,13 @@ from typing import Any, ClassVar, cast
 
 from fastapi.responses import Response, StreamingResponse
 
-from chariot.server.model.registry import ModelRegistry
+from chariot.server.model.base import Model
 from chariot.server.service.exceptions import ServiceError
 
 _MOCK_MODEL_NAME = "mock-echo-v1"
 
 
-@ModelRegistry.register("mock")
-class MockModel:
+class MockModel(Model):
     """内置本地模型。生成 Anthropic Messages 协议的 echo 响应(非流 + SSE)。
 
     类承担三件事:

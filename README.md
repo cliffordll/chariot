@@ -203,5 +203,5 @@ SQLite 替代。Models tab 提供 add / edit / delete / duplicate UI;CLI 同步�
 + Chat 页高级采样参数 UI(temperature / top_p / max_tokens 滑杆)。
 
 **0.4.0+** 方向:Agent 层加多轮对话记忆 / 工具调用 / 自我进化循环 —— 详见
-[`docs/ROADMAP.md`](docs/ROADMAP.md)。新加真实后端只需写一个 `chariot/server/model/<name>.py`
-+ `@ModelRegistry.register("xxx")` 一行装饰器。
+[`docs/ROADMAP.md`](docs/ROADMAP.md)。新加真实后端 = 写一个 `chariot/server/model/<name>.py`
++ 在 `chariot/server/model/__init__.py` 加一行 `ModelRegistry.register("xxx", NewModel)`。

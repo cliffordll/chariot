@@ -32,7 +32,7 @@ import httpx
 from fastapi.responses import Response, StreamingResponse
 
 from chariot.server.config import ConfigError
-from chariot.server.model.registry import ModelRegistry
+from chariot.server.model.base import Model
 from chariot.server.service.exceptions import ServiceError
 
 _DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -40,8 +40,7 @@ _DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
 _ANTHROPIC_VERSION = "2023-06-01"
 
 
-@ModelRegistry.register("anthropic")
-class AnthropicModel:
+class AnthropicModel(Model):
     """走 Anthropic Messages API 的 Model 实现。
 
     构造方式只能走 `from_config(options)`(由 ModelRegistry 调);手工构造
