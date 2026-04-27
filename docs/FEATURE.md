@@ -251,6 +251,51 @@
 
 ---
 
+## 0.2.5 patch
+
+### ✅ S.2 模型连通性探针
+
+- 用户配 `[[models]]` 之后,真正能不能通(api_key 对不对、上游可达不、网关
+  header 配齐没)在没发第一条消息前完全不知道,只能"发一条然后看错码"。本步
+  加显式探针:对任意 entry 跑 1 条最小 messages 请求(`max_tokens=1`),返
+  `{ok, latency_ms, error?}`。
+- **新增** `chariot/server/service/model_prober.py`:`ModelProber.probe(entry)`
+  classmethod,临时 `ModelRegistry.build(entry)` + 发探针 body
+  (`messages=[{role:"user",content:"ping"}], max_tokens=1`)。永不 raise
+  —— build 失败包成 `code=config_error`、`ServiceError` 透传 code/message、
+  其它异常兜底成 `probe_internal_error`。`ProbeResult` / `ProbeError` Pydantic。
+- **后端路由** `chariot/server/controller/models.py`:加
+  `POST /admin/models/{name}/probe`;name 不在 config.models 里 → 404
+  `model_not_found`。**不副作用** —— 不改 active、不写 logs 流水(避免污染
+  统计)。
+- **SDK** `chariot/sdk/client.py`:加 `ProxyClient.probe_model(name)`,
+  `_PROBE_TIMEOUT=60s connect=10s`(比 admin 宽,但比 chat 短)。
+- **CLI** `chariot/cli/commands/model.py`:加 `chariot model probe <name>`,
+  输出 `✓ name OK (Nms)` 或 `✗ name FAIL (Nms) [code] message`(失败 exit≠0)。
+- **前端**:模型管理独立成 `Models` tab(`/models` 路由),不再挤在 Dashboard。
+  - 新建 `packages/app/src/pages/Models.tsx`:列出 active + available + 已注册
+    type;available 行式 `<ul>`,每行 `[Test]` 按钮 + 状态(probing / ✓ Nms /
+    ✗ Nms · code,失败 hover 看完整 message)。顶部 disclaimer "Test 会真打
+    上游一次,消耗 ~1 token,mock 模型零费用"
+  - `Dashboard.tsx` 简化:删 ActiveModelCard / ProbeRow / ProbeStatus,删
+    `api.listModels()` 调用与 modelsState;保留 server status grid;底部加
+    "模型管理 →" 跳转 `/models`
+  - `routes.tsx` 加 `/models` Route + NAV_ITEMS 项,Nav 自动展开
+  - `api.ts` 加 `probeModel` + `ProbeResult` / `ProbeError` interface
+- **测试**:
+  - 新增 `tests/server/test_model_prober.py`:6 用例覆盖 mock 直 ok / unknown
+    type config_error / anthropic 缺 key / ServiceError 透传 / 兜底 / 正常
+    fake model
+  - `tests/server/test_admin_models.py` 加 3 用例:probe mock ok / 未知 name
+    404 / probe 不影响 active
+- **不在范围**:Chat 页探针 UI(管理操作放 Dashboard 即可);probe 入 logs
+  流水(0.2.5 显式跳过,避免污染 `/admin/stats`)。
+- pyproject + `chariot/__init__` 升 `0.2.4 → 0.2.5`。
+- **验证**:`uv run ruff check .` / `format` / `pyright chariot/` /
+  `pytest -q`;`bun run --filter=@chariot/app build`(tsc + vite)全绿。
+
+---
+
 ## 0.3.0+ 路标
 
-详见 `docs/ROADMAP.md`。本表只到 0.2.4 收尾。
+详见 `docs/ROADMAP.md`。本表只到 0.2.5 收尾。

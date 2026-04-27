@@ -3,9 +3,11 @@ import { Navigate, Route, Routes } from "react-router";
 import Chat from "@/pages/Chat";
 import Dashboard from "@/pages/Dashboard";
 import Logs from "@/pages/Logs";
+import Models from "@/pages/Models";
 
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
+  { path: "/models", label: "Models" },
   { path: "/logs", label: "Logs" },
   { path: "/chat", label: "Chat" },
 ] as const;
@@ -15,6 +17,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/models" element={<Models />} />
       <Route path="/logs" element={<Logs />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

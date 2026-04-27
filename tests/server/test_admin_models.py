@@ -156,3 +156,53 @@ def test_switch_to_unknown_name_raises_config_error() -> None:
     # active 不变
     assert Agent.active_name() == "a"
     Agent.uninstall()
+
+
+# ---------- /admin/models/{name}/probe POST ----------
+
+
+async def test_probe_mock_entry_returns_ok(admin_client: AsyncClient) -> None:
+    """probe 走 mock entry,本地零费用,必返 ok=True。"""
+    config = ChariotConfig(
+        models=(ModelEntry(name="m1", type="mock", options={}),),
+        active="m1",
+    )
+    Agent.install_from_config(config)
+
+    r = await admin_client.post("/admin/models/m1/probe")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["error"] is None
+    assert body["latency_ms"] >= 0
+
+
+async def test_probe_unknown_name_returns_404(admin_client: AsyncClient) -> None:
+    """name 不在 config.models 里 → 404 model_not_found(走 ServiceError 全局 handler)。"""
+    config = ChariotConfig(
+        models=(ModelEntry(name="m1", type="mock", options={}),),
+        active="m1",
+    )
+    Agent.install_from_config(config)
+
+    r = await admin_client.post("/admin/models/ghost/probe")
+    assert r.status_code == 404
+    assert "ghost" in r.text
+
+
+async def test_probe_does_not_affect_active(admin_client: AsyncClient) -> None:
+    """probe 是临时 build,不能改 Agent 的 active model。"""
+    config = ChariotConfig(
+        models=(
+            ModelEntry(name="m1", type="mock", options={}),
+            ModelEntry(name="m2", type="mock", options={}),
+        ),
+        active="m1",
+    )
+    Agent.install_from_config(config)
+
+    r = await admin_client.post("/admin/models/m2/probe")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    # active 应仍为 m1,probe 不副作用切换
+    assert Agent.active_name() == "m1"

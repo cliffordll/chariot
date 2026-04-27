@@ -57,6 +57,20 @@ export interface SwitchModelResponse {
   model: string;
 }
 
+/** 探针失败时的错误结构。对齐 `chariot.server.service.model_prober.ProbeError`。 */
+export interface ProbeError {
+  /** "config_error" | "upstream_auth_failed" | "upstream_unreachable" | "upstream_timeout" | "upstream_server_error" | ... */
+  code: string;
+  message: string;
+}
+
+/** `POST /admin/models/{name}/probe` 响应。对齐 `chariot.server.service.model_prober.ProbeResult`。 */
+export interface ProbeResult {
+  ok: boolean;
+  latency_ms: number;
+  error: ProbeError | null;
+}
+
 export class ApiError extends Error {
   status: number;
   body: string;
@@ -127,6 +141,15 @@ export const api = {
     return request("/admin/models", {
       method: "POST",
       body: JSON.stringify({ name }),
+    });
+  },
+  /**
+   * 对指定 model 跑一次探针。**真打上游一次,消耗 ~1 token 费用**(MockModel 零费用)。
+   * name 不存在 → 404 ApiError;其它情况服务端一律包成 ProbeResult,error=null 表示通。
+   */
+  probeModel(name: string): Promise<ProbeResult> {
+    return request(`/admin/models/${encodeURIComponent(name)}/probe`, {
+      method: "POST",
     });
   },
 };

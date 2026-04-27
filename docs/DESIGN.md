@@ -203,14 +203,16 @@ GET  /admin/status     → {version, uptime_ms, model, url}
 POST /admin/shutdown   → graceful shutdown
 GET  /admin/logs       → list LogOut(limit / offset / since)
 GET  /admin/stats      → {period, total_requests, success_rate, avg_latency_ms}
-GET  /admin/models     → 新增:列出可选 model + 当前 active + 可用 type
-POST /admin/models     → 新增:切换 active(body: {name})
+GET  /admin/models           → 列出可选 model + 当前 active + 可用 type
+POST /admin/models           → 切换 active(body: {name})
+POST /admin/models/{name}/probe → 0.2.5 新增:对指定 entry 跑 1 条最小请求,验通断
 ```
 
 `/admin/models` 行为:
 
 - GET → `{available: ["claude-opus", "local-llama"], active: "claude-opus", types: ["mock", "anthropic", "llama_local"]}`
 - POST `{name}` → 用对应 entry rebuild Model → `Agent.install(model=...)` 覆盖 → 返回新 active
+- POST `{name}/probe` → `ModelProber.probe(entry)` 临时 build + 发 `messages=[{role:"user",content:"ping"}], max_tokens=1` → `{ok, latency_ms, error?}`。**不副作用**:不改 active、不写 logs 流水。错误码透传 ServiceError.code(`upstream_auth_failed` / `upstream_unreachable` / `config_error` / ...)。MockModel 走本地零费用;真后端消耗 ~1 token
 
 ---
 

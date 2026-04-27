@@ -3,12 +3,7 @@ import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  api,
-  type ApiError,
-  type ModelsListResponse,
-  type StatusResponse,
-} from "@/lib/api";
+import { api, type ApiError, type StatusResponse } from "@/lib/api";
 import {
   checkForUpdate,
   installUpdate,
@@ -21,14 +16,8 @@ type FetchState =
   | { kind: "ok"; status: StatusResponse }
   | { kind: "err"; message: string };
 
-type ModelsState =
-  | { kind: "loading" }
-  | { kind: "ok"; data: ModelsListResponse }
-  | { kind: "err"; message: string };
-
 export default function Dashboard() {
   const [state, setState] = useState<FetchState>({ kind: "loading" });
-  const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
   const [updateState, setUpdateState] = useState<
     | { kind: "idle" }
     | { kind: "checking" }
@@ -40,16 +29,13 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
-    setModelsState({ kind: "loading" });
     try {
-      const [status, models] = await Promise.all([api.status(), api.listModels()]);
+      const status = await api.status();
       setState({ kind: "ok", status });
-      setModelsState({ kind: "ok", data: models });
     } catch (e) {
       const msg =
         e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setState({ kind: "err", message: msg });
-      setModelsState({ kind: "err", message: msg });
     }
   }, []);
 
@@ -170,81 +156,15 @@ export default function Dashboard() {
             />
           </div>
 
-          <ActiveModelCard modelsState={modelsState} />
+          <Link
+            to="/models"
+            className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+          >
+            模型管理(列表 + 探针)→
+          </Link>
         </>
       )}
     </section>
-  );
-}
-
-/**
- * 0.2.3 起切换 UI 移到 Chat 页(切换是发消息前的"上下文设置",在 Chat 顶部
- * 原地切比跳页自然)。Dashboard 上这块只读展示 active + available,引导用户
- * 去 Chat 页操作。
- */
-function ActiveModelCard({ modelsState }: { modelsState: ModelsState }) {
-  if (modelsState.kind === "loading") {
-    return (
-      <div className="max-w-2xl rounded-lg border border-border p-4 text-sm text-muted-foreground">
-        Loading models…
-      </div>
-    );
-  }
-
-  if (modelsState.kind === "err") {
-    return (
-      <div className="max-w-2xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        无法读取 model 列表:{modelsState.message}
-      </div>
-    );
-  }
-
-  const { data } = modelsState;
-
-  return (
-    <div className="max-w-2xl rounded-lg border border-border p-4">
-      <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-        models
-      </div>
-
-      <div className="mb-2 text-sm">
-        active:{" "}
-        {data.active ? (
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{data.active}</code>
-        ) : (
-          <span className="text-muted-foreground">(none — MockModel fallback)</span>
-        )}
-      </div>
-
-      {data.available.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          配置文件里没有 model。在{" "}
-          <code className="font-mono">~/.chariot/config.toml</code> 加{" "}
-          <code className="rounded bg-muted px-1 py-0.5">[[models]]</code> 后重启 server。
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          available:{" "}
-          {data.available.map((name, i) => (
-            <span key={name}>
-              {i > 0 && ", "}
-              <code className="font-mono">{name}</code>
-            </span>
-          ))}
-        </p>
-      )}
-
-      <div className="mt-1 text-xs text-muted-foreground">
-        registered types: {data.types.join(", ")}
-      </div>
-
-      <Link
-        to="/chat"
-        className="mt-3 inline-block text-xs text-muted-foreground underline-offset-2 hover:underline"
-      >
-        在 Chat 页切换 model →
-      </Link>
-    </div>
   );
 }
 

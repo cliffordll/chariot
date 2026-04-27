@@ -30,12 +30,18 @@ import httpx
 from chariot.sdk.chat import ChatResult
 from chariot.sdk.discover import ServerDiscovery
 from chariot.server.controller.logs import LogOut
-from chariot.server.controller.models import ModelsListResponse, SwitchModelResponse
+from chariot.server.controller.models import (
+    ModelsListResponse,
+    ProbeResult,
+    SwitchModelResponse,
+)
 from chariot.server.controller.runtime import StatusResponse
 from chariot.server.controller.stats import Period, StatsOut
 
 _DATA_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 _ADMIN_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+# 探针要等真上游响应,比 admin 操作宽,但比 chat 短(只发 1 token)
+_PROBE_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 _MESSAGES_PATH = "/v1/messages"
 
 
@@ -122,6 +128,22 @@ class ProxyClient:
         )
         resp.raise_for_status()
         return SwitchModelResponse.model_validate(resp.json())
+
+    async def probe_model(self, name: str) -> ProbeResult:
+        """对指定 model 跑一次探针(发 1 条最小请求验通断)。
+
+        返回 `ProbeResult(ok, latency_ms, error?)`;ok=False 时 error 透传上游错因
+        (`upstream_auth_failed` / `upstream_unreachable` / 配置错 ...)。
+        name 不存在 → httpx.HTTPStatusError(404);其它情况一律包成 ProbeResult。
+
+        **真打上游一次,产生 ~1 token 费用**(MockModel 走本地零费用)。
+        """
+        resp = await self.http.post(
+            f"{self.base_url}/admin/models/{name}/probe",
+            timeout=_PROBE_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ProbeResult.model_validate(resp.json())
 
     # ---------- data plane ----------
 
