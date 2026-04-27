@@ -1,19 +1,21 @@
 # Chariot 路线图
 
-0.1.0 ~ 0.3.0 已落地的范围见 `docs/FEATURE.md` + `docs/history/`。本文档记录
+0.1.0 ~ 0.3.1 已落地的范围见 `docs/FEATURE.md` + `docs/history/`。本文档记录
 **未来方向**(0.4.0 起)。
 
 ---
 
-## v1:真实模型接入 / 选型 ✅(0.2.0 ~ 0.3.0 完成)
+## v1:真实模型接入 / 选型 ✅(0.2.0 ~ 0.3.1 完成)
 
 - ✅ **Model 配置体系**:0.2.x 用 `~/.chariot/config.toml`,0.3.0 起改 DB-backed
-  (`models` / `settings` 表);Models 页 / `chariot model` CLI / admin API CRUD
+  (`models` 表);0.3.1 加 `params` 列承载 runtime sampling 默认值
 - ✅ **AnthropicModel**:透传到 Anthropic Messages API,错误映射 + 流式 SSE
 - 🟡 **OpenAIAdapterModel** / **LocalLlamaModel**:暂未上(用 LiteLLM 等外部转换器
   接 chariot 当 Anthropic 后端即可)
-- ✅ **Model 切换**:Chat 页下拉 + 设为 active(0.3.0 持久化到 DB);
-  CLI `chariot model list / use / probe / add / edit / rm / duplicate`
+- ✅ **Model 路由**:0.3.1 路由模型重构 —— active 概念退役,client 在 body.model 写
+  entry name 直接路由;Chat 页 entry 选择 + localStorage 持久化;Models 页行内拆开
+  options 主键 + 行展开 ParamsEditor;CLI `chariot model list / probe / add / edit /
+  rm / duplicate`
 
 ## v2:Agent 进化(chariot 的核心方向)
 
