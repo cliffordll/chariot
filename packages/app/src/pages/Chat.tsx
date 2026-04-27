@@ -9,27 +9,64 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api, type ModelsListResponse } from "@/lib/api";
+import { ApiError, api, type ModelEntry, type ModelsListResponse } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 
-const FALLBACK_MODEL_LABEL = "(server)";
-
 /**
- * 高级采样参数(0.2.6)。值随每次请求附在 body 上,server 协议透传给上游。
- * 默认与 Anthropic 默认对齐(temperature=1, top_p=1, max_tokens=1024)。状态在 tab
- * 内持有,刷新会丢失 —— 简化设计,localStorage 持久化等真有人提需求再加。
+ * Chat 页(0.3.1):极简化 —— 只剩 entry 选择 + 输入框。
+ *
+ * sampling 参数(temperature / top_p / max_tokens)不在 Chat 页配置,从 selected
+ * entry 的 `params` 字段直接读;要改去 Models 页编辑 entry 的 params。这样"参数
+ * 配置"只有一个归属(entry-level),Chat 页保持轻量。
+ *
+ * Anthropic 默认兜底:temperature=1, top_p=1, max_tokens=1024。
  */
-interface AdvancedParams {
-  temperature: number;
-  topP: number;
+
+/** 兜底 sampling:entry.params 没设这些字段时用。 */
+const DEFAULT_MAX_TOKENS = 1024;
+
+interface SamplingValues {
   maxTokens: number;
+  /** 不设(或 entry.params 没值)→ undefined,runTurn 不会发 temperature 字段。 */
+  temperature: number | undefined;
+  /** 同上。 */
+  topP: number | undefined;
 }
 
-const DEFAULT_PARAMS: AdvancedParams = {
-  temperature: 1,
-  topP: 1,
-  maxTokens: 1024,
-};
+/** 从 entry.params 读 sampling;兜底 max_tokens=1024,temperature/top_p 缺失就不传。 */
+function samplingFromEntry(entry: ModelEntry | undefined): SamplingValues {
+  const p = entry?.params ?? {};
+  const mt = p.max_tokens;
+  const t = p.temperature;
+  const tp = p.top_p;
+  return {
+    maxTokens: typeof mt === "number" && mt > 0 ? Math.round(mt) : DEFAULT_MAX_TOKENS,
+    temperature: typeof t === "number" ? t : undefined,
+    topP: typeof tp === "number" ? tp : undefined,
+  };
+}
+
+/** localStorage key:per-browser 持久化"上次选了哪个 entry"。 */
+const STORAGE_KEY = "chariot.chat.selected_entry";
+
+function loadStoredEntry(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistEntry(name: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (name) window.localStorage.setItem(STORAGE_KEY, name);
+    else window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* localStorage 不可用 → 忽略 */
+  }
+}
 
 interface MetaInfo {
   model: string;
@@ -48,27 +85,15 @@ type DisplayMsg =
       errorMsg: string | null;
     };
 
-/**
- * `models.active` 是 server 端切换用的友好名(配置文件 `[[models]] name`),
- * 在 MockModel fallback 路径下为 null;此时退到 `/admin/status.model` 的技术标识
- * (例如 `mock-echo-v1`),给 UI 一个非空字符串展示并塞进 body.model。
- */
 type ModelsState =
   | { kind: "loading" }
-  | { kind: "ok"; data: ModelsListResponse; activeLabel: string }
-  | { kind: "err"; message: string };
-
-type SwitchState =
-  | { kind: "idle" }
-  | { kind: "switching"; name: string }
+  | { kind: "ok"; data: ModelsListResponse }
   | { kind: "err"; message: string };
 
 export default function Chat() {
   const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
-  const [pendingChoice, setPendingChoice] = useState<string | null>(null);
-  const [switchState, setSwitchState] = useState<SwitchState>({ kind: "idle" });
+  const [selectedEntry, setSelectedEntryState] = useState<string | null>(() => loadStoredEntry());
 
-  const [params, setParams] = useState<AdvancedParams>(DEFAULT_PARAMS);
   const [messages, setMessages] = useState<DisplayMsg[]>([]);
   const [input, setInput] = useState("");
   const [inFlight, setInFlight] = useState(false);
@@ -76,13 +101,16 @@ export default function Chat() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  const setSelectedEntry = useCallback((name: string | null) => {
+    setSelectedEntryState(name);
+    persistEntry(name);
+  }, []);
+
   const loadModels = useCallback(async () => {
     setModelsState({ kind: "loading" });
     try {
-      const [status, models] = await Promise.all([api.status(), api.listModels()]);
-      const activeLabel = models.active ?? status.model ?? FALLBACK_MODEL_LABEL;
-      setModelsState({ kind: "ok", data: models, activeLabel });
-      setPendingChoice(models.active);
+      const models = await api.listModels();
+      setModelsState({ kind: "ok", data: models });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setModelsState({ kind: "err", message: msg });
@@ -92,6 +120,18 @@ export default function Chat() {
   useEffect(() => {
     void loadModels();
   }, [loadModels]);
+
+  /** 收到 entries 后修复 selectedEntry:没选 / 选的 entry 不在 → 自动落到第一条。 */
+  useEffect(() => {
+    if (modelsState.kind !== "ok") return;
+    const { data } = modelsState;
+    if (data.available.length === 0) {
+      if (selectedEntry !== null) setSelectedEntry(null);
+      return;
+    }
+    const valid = selectedEntry !== null && data.available.includes(selectedEntry);
+    if (!valid) setSelectedEntry(data.available[0]);
+  }, [modelsState, selectedEntry, setSelectedEntry]);
 
   // auto-scroll to bottom unless user is scrolled up
   useEffect(() => {
@@ -103,14 +143,11 @@ export default function Chat() {
     }
   }, [messages]);
 
-  const activeLabel =
-    modelsState.kind === "ok" ? modelsState.activeLabel : FALLBACK_MODEL_LABEL;
-
-  const canSend = !inFlight && input.trim().length > 0;
+  const canSend = !inFlight && input.trim().length > 0 && selectedEntry !== null;
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || inFlight) return;
+    if (!text || inFlight || !selectedEntry) return;
     setInput("");
 
     const nextMsgs: DisplayMsg[] = [
@@ -136,12 +173,20 @@ export default function Chat() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
+    // 发请求前从当前 entry 现取 sampling;每次发都读最新值,Models 页改了
+    // params 后下一条消息立刻生效。
+    const entry =
+      modelsState.kind === "ok"
+        ? modelsState.data.entries.find((e) => e.name === selectedEntry)
+        : undefined;
+    const sampling = samplingFromEntry(entry);
+
     try {
       const result = await runTurn(history, {
-        model: activeLabel,
-        maxTokens: params.maxTokens,
-        temperature: params.temperature,
-        topP: params.topP,
+        model: selectedEntry,
+        maxTokens: sampling.maxTokens,
+        temperature: sampling.temperature,
+        topP: sampling.topP,
         signal: ctrl.signal,
         onToken: (tok) => {
           setMessages((cur) => {
@@ -163,7 +208,7 @@ export default function Chat() {
             ...last,
             status: result.aborted ? "aborted" : "done",
             meta: {
-              model: activeLabel,
+              model: selectedEntry,
               inputTokens: result.inputTokens,
               outputTokens: result.outputTokens,
               latencyMs: result.latencyMs,
@@ -187,7 +232,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, messages, activeLabel, params]);
+  }, [input, inFlight, messages, selectedEntry, modelsState]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -221,28 +266,6 @@ export default function Chat() {
     setInput(userMsg.content);
   }, [messages, inFlight]);
 
-  /**
-   * Select onValueChange 直接触发,Select 改值即切 active,无单独"切换"按钮。
-   * 选回当前 active(name === data.active)直接 noop;切换中重复触发也 noop。
-   */
-  const runSwitch = useCallback(
-    async (name: string) => {
-      if (switchState.kind === "switching") return;
-      if (modelsState.kind === "ok" && name === modelsState.data.active) return;
-      setPendingChoice(name);
-      setSwitchState({ kind: "switching", name });
-      try {
-        await api.useModel(name);
-        setSwitchState({ kind: "idle" });
-        await loadModels();
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        setSwitchState({ kind: "err", message: msg });
-      }
-    },
-    [switchState.kind, modelsState, loadModels],
-  );
-
   return (
     <section className="flex h-full flex-col">
       <div className="mb-3 flex items-center justify-between">
@@ -252,17 +275,10 @@ export default function Chat() {
         </Button>
       </div>
 
-      <ActiveModelRow
+      <EntryRow
         modelsState={modelsState}
-        pendingChoice={pendingChoice}
-        switchState={switchState}
-        onSwitch={(name) => void runSwitch(name)}
-      />
-
-      <AdvancedParamsPanel
-        params={params}
-        onChange={setParams}
-        disabled={inFlight}
+        selectedEntry={selectedEntry}
+        onSelect={setSelectedEntry}
       />
 
       <div
@@ -270,9 +286,7 @@ export default function Chat() {
         className="mb-3 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/20 p-4"
       >
         {messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            输入消息开始对话;流式逐 token 渲染。
-          </p>
+          <p className="text-sm text-muted-foreground">输入消息开始对话;流式逐 token 渲染。</p>
         ) : (
           <ul className="space-y-4">
             {messages.map((m, i) => {
@@ -319,40 +333,34 @@ export default function Chat() {
   );
 }
 
-function ActiveModelRow({
+function EntryRow({
   modelsState,
-  pendingChoice,
-  switchState,
-  onSwitch,
+  selectedEntry,
+  onSelect,
 }: {
   modelsState: ModelsState;
-  pendingChoice: string | null;
-  switchState: SwitchState;
-  onSwitch: (name: string) => void;
+  selectedEntry: string | null;
+  onSelect: (name: string) => void;
 }) {
   if (modelsState.kind === "loading") {
-    return (
-      <div className="mb-3 text-xs text-muted-foreground">读取 model 列表…</div>
-    );
+    return <div className="mb-3 text-xs text-muted-foreground">读取 entries…</div>;
   }
 
   if (modelsState.kind === "err") {
     return (
       <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-        无法读取 model 列表:{modelsState.message}
+        无法读取 entries:{modelsState.message}
       </div>
     );
   }
 
-  const { data, activeLabel } = modelsState;
-  const isSwitching = switchState.kind === "switching";
+  const { data } = modelsState;
 
   if (data.available.length === 0) {
     return (
       <div className="mb-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        当前走 MockModel fallback(<code className="font-mono">{activeLabel}</code>)。
-        在 Models 页 <code className="rounded bg-muted px-1 py-0.5">+ Add</code>{" "}
-        新建 entry 后,在这里下拉切换。
+        DB 里没有 entry。在 Models 页 <code className="rounded bg-muted px-1 py-0.5">+ Add</code>{" "}
+        新建一条后再来发消息(client 必须在 body.model 写 entry name 才能路由到上游)。
       </div>
     );
   }
@@ -360,169 +368,25 @@ function ActiveModelRow({
   return (
     <div className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          active model
-        </span>
-        <Select
-          value={pendingChoice ?? undefined}
-          onValueChange={onSwitch}
-          disabled={isSwitching}
-        >
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">model</span>
+        <Select value={selectedEntry ?? undefined} onValueChange={onSelect}>
           <SelectTrigger className="h-8 w-56">
-            <SelectValue placeholder="选 model" />
+            <SelectValue placeholder="选 entry" />
           </SelectTrigger>
           <SelectContent>
             {data.available.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
-                {name === data.active && (
-                  <span className="ml-2 text-xs text-muted-foreground">(current)</span>
-                )}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {isSwitching && (
-          <span className="text-xs text-muted-foreground">切换中…</span>
-        )}
         <span className="ml-auto text-xs text-muted-foreground">
-          选中即切;影响 server 全局 active model,所有会话共享。
+          sampling 参数随 entry.params 走;改去 Models 页编辑该 entry。
         </span>
       </div>
-      {switchState.kind === "err" && (
-        <p className="mt-1 text-xs text-destructive">切换失败:{switchState.message}</p>
-      )}
     </div>
   );
-}
-
-/**
- * 折叠的高级参数面板。折叠时摘要展示当前值;展开后 3 行滑杆 + 数值输入 + Reset。
- *
- * 数值校验:数字输入框接受空串 / 非法值时不更新 state(只读 onBlur 校正)。inFlight
- * 时整体禁用 —— 避免改值 race 已发请求(那条请求保留旧参数,符合直觉)。
- */
-function AdvancedParamsPanel({
-  params,
-  onChange,
-  disabled,
-}: {
-  params: AdvancedParams;
-  onChange: (next: AdvancedParams) => void;
-  disabled: boolean;
-}) {
-  const summary = `T=${params.temperature} · top_p=${params.topP} · max=${params.maxTokens}`;
-  const isDefault =
-    params.temperature === DEFAULT_PARAMS.temperature &&
-    params.topP === DEFAULT_PARAMS.topP &&
-    params.maxTokens === DEFAULT_PARAMS.maxTokens;
-
-  return (
-    <details className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2 text-xs">
-      <summary className="cursor-pointer select-none text-muted-foreground">
-        高级参数 <span className="ml-1 font-mono text-foreground/80">{summary}</span>
-        {!isDefault && <span className="ml-2 text-amber-600 dark:text-amber-400">(已改)</span>}
-      </summary>
-      <div className="mt-3 space-y-2">
-        <ParamRow
-          label="temperature"
-          min={0}
-          max={1}
-          step={0.05}
-          value={params.temperature}
-          onChange={(v) => onChange({ ...params, temperature: round2(v) })}
-          disabled={disabled}
-        />
-        <ParamRow
-          label="top_p"
-          min={0}
-          max={1}
-          step={0.05}
-          value={params.topP}
-          onChange={(v) => onChange({ ...params, topP: round2(v) })}
-          disabled={disabled}
-        />
-        <ParamRow
-          label="max_tokens"
-          min={1}
-          max={8192}
-          step={1}
-          value={params.maxTokens}
-          onChange={(v) => onChange({ ...params, maxTokens: Math.max(1, Math.round(v)) })}
-          disabled={disabled}
-          isInt
-        />
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-[11px] text-muted-foreground">
-            Anthropic 文档建议 temperature / top_p 只调一项;两者均为 1 时不发到 body。
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => onChange(DEFAULT_PARAMS)}
-            disabled={disabled || isDefault}
-          >
-            Reset
-          </Button>
-        </div>
-      </div>
-    </details>
-  );
-}
-
-function ParamRow({
-  label,
-  min,
-  max,
-  step,
-  value,
-  onChange,
-  disabled,
-  isInt,
-}: {
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (v: number) => void;
-  disabled: boolean;
-  isInt?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-24 font-mono text-muted-foreground">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        disabled={disabled}
-        className="flex-1"
-      />
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v)) onChange(isInt ? Math.round(v) : v);
-        }}
-        disabled={disabled}
-        className="w-20 rounded border border-border bg-background px-2 py-1 font-mono text-xs"
-      />
-    </div>
-  );
-}
-
-/** 浮点数保留两位,避免滑杆步进累积出 0.30000000000000004 这种值。 */
-function round2(v: number): number {
-  return Math.round(v * 100) / 100;
 }
 
 function MessageBubble({ msg, onRetry }: { msg: DisplayMsg; onRetry?: () => void }) {

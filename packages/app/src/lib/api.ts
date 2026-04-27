@@ -7,8 +7,8 @@
  *   拿 base URL,之后所有 fetch 都 prepend
  * - 类型手写,对齐 `chariot/server/controller/*.py` 的 Pydantic schema
  *
- * 0.2.0 起 chariot 单协议化(只接 Anthropic Messages),client 不再需要
- * Protocol 枚举 / 三协议 model 候选;active model 在 server 端切换。
+ * 0.3.1 路由模型重构:active 概念删除;client 在 body.model 写 entry name
+ * 直接路由,server 不再持有 active 状态。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -16,8 +16,8 @@ import { invoke } from "@tauri-apps/api/core";
 export interface StatusResponse {
   version: string;
   uptime_ms: number;
-  /** 当前 agent 的 model 标识(默认 `mock-echo-v1`,真模型如 `anthropic`)。 */
-  model: string;
+  /** 0.3.1 起返已注册 entries 数量(active 退役)。 */
+  entries_count: number;
   /** 客户端抵达 server 的 base URL(含 scheme + host + port)。 */
   url: string;
 }
@@ -45,18 +45,10 @@ export interface ListLogsParams {
 export interface ModelsListResponse {
   /** entry name 列表(0.2.x 兼容字段)。 */
   available: string[];
-  /** 当前激活的 model name;MockModel fallback 时为 null。 */
-  active: string | null;
   /** ModelRegistry 已注册的 type key 列表(mock / anthropic / ...)。 */
   types: string[];
-  /** 0.3.0 起返完整 entries(name / type / options),省掉单独拉每条详情。 */
+  /** 完整 entries(name / type / options / params)。 */
   entries: ModelEntry[];
-}
-
-/** `POST /admin/models` 响应。对齐 `chariot.server.controller.models.SwitchModelResponse`。 */
-export interface SwitchModelResponse {
-  active: string;
-  model: string;
 }
 
 /** 探针失败时的错误结构。对齐 `chariot.server.service.model_prober.ProbeError`。 */
@@ -73,12 +65,14 @@ export interface ProbeResult {
   error: ProbeError | null;
 }
 
-/** 0.3.0:`models` 表 CRUD 接口的 entry payload(对齐 `EntryResponse`)。 */
+/** `models` 表 CRUD 接口的 entry payload(对齐 `EntryResponse`)。 */
 export interface ModelEntry {
   name: string;
   type: string;
-  /** 按 type schema 形态的 dict;mock 为 {}。 */
+  /** 按 type schema 形态的 dict;build Model 实例所需(model / api_key / ...)。 */
   options: Record<string, unknown>;
+  /** 0.3.1 加。runtime 默认 sampling 参数(temperature / top_p / max_tokens 等);前端切到该 entry 时填充 Chat 高级参数面板。 */
+  params: Record<string, unknown>;
 }
 
 export class ApiError extends Error {
@@ -147,12 +141,6 @@ export const api = {
   listModels(): Promise<ModelsListResponse> {
     return request("/admin/models");
   },
-  useModel(name: string): Promise<SwitchModelResponse> {
-    return request("/admin/models", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-  },
   /**
    * 对指定 model 跑一次探针。**真打上游一次,消耗 ~1 token 费用**(MockModel 零费用)。
    * name 不存在 → 404 ApiError;其它情况服务端一律包成 ProbeResult,error=null 表示通。
@@ -172,6 +160,7 @@ export const api = {
     name: string;
     type: string;
     options: Record<string, unknown>;
+    params?: Record<string, unknown>;
   }): Promise<ModelEntry> {
     return request("/admin/models/entries", {
       method: "POST",
@@ -180,12 +169,17 @@ export const api = {
   },
 
   /**
-   * 编辑 entry。改 active entry 时 server 端会自动 rebuild 当前 model 实例。
+   * 编辑 entry。改 options 后 server 立即 rebuild 该 entry 的 Model 实例;改 params
+   * 不触发 rebuild(params 只读暴露给前端用,不影响 build)。
    * 错误:`model_not_found` 404 / `unknown_type` 400 / `rebuild_failed` 502。
    */
   updateModel(
     name: string,
-    req: { type?: string; options?: Record<string, unknown> },
+    req: {
+      type?: string;
+      options?: Record<string, unknown>;
+      params?: Record<string, unknown>;
+    },
   ): Promise<ModelEntry> {
     return request(`/admin/models/entries/${encodeURIComponent(name)}`, {
       method: "PUT",
@@ -194,7 +188,7 @@ export const api = {
   },
 
   /**
-   * 删 entry。active 不许删 → `cannot_delete_active` 400。`model_not_found` 404。
+   * 删 entry。0.3.1 起 active 概念删除,任意 entry 都能删。`model_not_found` 404。
    */
   deleteModel(name: string): Promise<void> {
     return request(`/admin/models/entries/${encodeURIComponent(name)}`, {

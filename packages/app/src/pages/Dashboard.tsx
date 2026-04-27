@@ -145,7 +145,10 @@ export default function Dashboard() {
             <Stat label="status" value={<Badge>running</Badge>} />
             <Stat label="version" value={state.status.version} />
             <Stat label="uptime" value={formatUptime(state.status.uptime_ms)} />
-            <Stat label="model" value={<code className="font-mono text-sm">{state.status.model}</code>} />
+            <Stat
+              label="entries"
+              value={<code className="font-mono text-sm">{state.status.entries_count}</code>}
+            />
             <Stat
               label="server url"
               value={
