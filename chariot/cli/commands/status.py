@@ -24,7 +24,7 @@ async def _run() -> None:
                     "server": client.base_url,
                     "version": st.version,
                     "uptime_ms": st.uptime_ms,
-                    "model": st.model,
+                    "entries": st.entries_count,
                     "url": st.url,
                 }
             )

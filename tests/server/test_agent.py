@@ -1,4 +1,8 @@
-"""Agent 测试 —— 覆盖 handle() 流程 + log 落地 + 单例管理。"""
+"""Agent 测试 —— handle() 路由 + 日志落地 + 单例管理。
+
+0.3.1 路由模型重构后 Agent 不再持有单一 active model,而是 `name → Model` 字典。
+请求路径:client 在 body.model 写 entry name → Agent 查字典 → 调 model.respond。
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chariot.server.agent import Agent
 from chariot.server.config import ChariotConfig, ModelEntry
 from chariot.server.database.models import LogEntry
-from chariot.server.model.mock import MockModel, mock_model
+from chariot.server.model.mock import MockModel
 from chariot.server.service.exceptions import ServiceError
 
 
@@ -32,20 +36,7 @@ class _SpyModel:
         return Response(content=b'{"ok": true}', status_code=200, media_type="application/json")
 
 
-# ---------- 构造 + 单例管理 ----------
-
-
-def test_constructor_defaults_to_mock() -> None:
-    """`Agent()` 不传 model 时 fallback 到 MockModel 单例。"""
-    a = Agent()
-    assert isinstance(a.model, MockModel)
-    assert a.model is mock_model
-
-
-def test_constructor_accepts_explicit_model() -> None:
-    spy = _SpyModel()
-    a = Agent(model=spy)
-    assert a.model is spy
+# ---------- 单例管理 ----------
 
 
 def test_current_without_install_raises() -> None:
@@ -54,116 +45,123 @@ def test_current_without_install_raises() -> None:
         Agent.current()
 
 
-def test_install_and_current() -> None:
-    Agent.uninstall()
-    a = Agent.install()
-    assert Agent.current() is a
-    Agent.uninstall()
-
-
-def test_install_replaces_previous() -> None:
-    Agent.uninstall()
-    a1 = Agent.install()
-    a2 = Agent.install(model=_SpyModel())
-    assert Agent.current() is a2
-    assert a2 is not a1
-    Agent.uninstall()
-
-
-def test_install_with_explicit_model() -> None:
-    Agent.uninstall()
-    spy = _SpyModel()
-    a = Agent.install(model=spy)
-    assert a.model is spy
-    assert Agent.current().model is spy
-    Agent.uninstall()
-
-
-# ---------- install_from_config ----------
-
-
-def test_install_from_config_empty_uses_mock() -> None:
-    """空配置 → MockModel fallback。"""
+def test_install_from_empty_config() -> None:
+    """空配置 → models 字典空。"""
     Agent.uninstall()
     a = Agent.install_from_config(ChariotConfig.empty())
-    assert isinstance(a.model, MockModel)
-    Agent.uninstall()
-
-
-def test_install_from_config_active_uses_registry() -> None:
-    """有 active entry → 走 ModelRegistry.build,本例 type="mock" 仍然返 MockModel。"""
-    Agent.uninstall()
-    config = ChariotConfig(
-        models=(ModelEntry(name="m", type="mock", options={}),),
-        active="m",
-    )
-    a = Agent.install_from_config(config)
-    assert isinstance(a.model, MockModel)
+    assert a.models == {}
     assert Agent.current() is a
     Agent.uninstall()
 
 
-def test_install_from_config_no_active_uses_mock() -> None:
-    """有 models 但没设 active → 也走 fallback。"""
+def test_install_from_config_builds_dict() -> None:
+    """有 entry → ModelRegistry.build,字典 keyed by name。"""
     Agent.uninstall()
     config = ChariotConfig(
-        models=(ModelEntry(name="m", type="mock", options={}),),
-        active=None,
+        models=(
+            ModelEntry(name="m1", type="mock", options={}),
+            ModelEntry(name="m2", type="mock", options={}),
+        ),
     )
     a = Agent.install_from_config(config)
-    assert isinstance(a.model, MockModel)
+    assert set(a.models.keys()) == {"m1", "m2"}
+    assert isinstance(a.models["m1"], MockModel)
     Agent.uninstall()
 
 
-# ---------- handle() 转发契约 ----------
+def test_refresh_config_rebuilds_dict() -> None:
+    """refresh_config 全量 rebuild;删除的 entry 清出字典。"""
+    Agent.uninstall()
+    Agent.install_from_config(
+        ChariotConfig(
+            models=(
+                ModelEntry(name="a", type="mock", options={}),
+                ModelEntry(name="b", type="mock", options={}),
+            )
+        )
+    )
+    Agent.refresh_config(ChariotConfig(models=(ModelEntry(name="a", type="mock", options={}),)))
+    a = Agent.current()
+    assert set(a.models.keys()) == {"a"}
+    Agent.uninstall()
 
 
-async def test_handle_calls_model_with_body(session: AsyncSession) -> None:
-    spy = _SpyModel()
-    agent = Agent(model=spy)
-    body = json.dumps({"model": "foo", "messages": []}).encode("utf-8")
+# ---------- handle() 路由契约 ----------
+
+
+def _agent_with_models(models: dict[str, _SpyModel]) -> Agent:
+    """直接注入 spy models;不走 ModelRegistry.build。"""
+    Agent.uninstall()
+    return Agent.install_test_models(models)  # type: ignore[arg-type]
+
+
+async def test_handle_routes_to_model_by_body_name(session: AsyncSession) -> None:
+    spy_a = _SpyModel()
+    spy_b = _SpyModel()
+    agent = _agent_with_models({"a": spy_a, "b": spy_b})
+    body = json.dumps({"model": "b", "messages": []}).encode("utf-8")
 
     resp = await agent.handle(body)
 
     assert resp.status_code == 200
-    assert len(spy.calls) == 1
-    called_body, called_stream = spy.calls[0]
+    assert len(spy_b.calls) == 1
+    assert len(spy_a.calls) == 0
+    called_body, called_stream = spy_b.calls[0]
     assert called_body is body
-    assert called_stream is False  # body 里没 stream: True
+    assert called_stream is False
+    Agent.uninstall()
+
+
+async def test_handle_unknown_model_name_raises_400(session: AsyncSession) -> None:
+    agent = _agent_with_models({"mock": _SpyModel()})
+    body = json.dumps({"model": "ghost", "messages": []}).encode("utf-8")
+
+    with pytest.raises(ServiceError) as exc:
+        await agent.handle(body)
+    assert exc.value.status == 400
+    assert exc.value.code == "unknown_model_name"
+    Agent.uninstall()
+
+
+async def test_handle_missing_body_model_raises_400(session: AsyncSession) -> None:
+    """body 没 model 字段 → 400。"""
+    agent = _agent_with_models({"mock": _SpyModel()})
+    body = json.dumps({"messages": []}).encode("utf-8")
+
+    with pytest.raises(ServiceError) as exc:
+        await agent.handle(body)
+    assert exc.value.status == 400
+    assert exc.value.code == "unknown_model_name"
+    Agent.uninstall()
+
+
+async def test_handle_invalid_json_raises_400(session: AsyncSession) -> None:
+    agent = _agent_with_models({"mock": _SpyModel()})
+    with pytest.raises(ServiceError) as exc:
+        await agent.handle(b"not json")
+    assert exc.value.status == 400
+    Agent.uninstall()
 
 
 async def test_handle_detects_stream_flag(session: AsyncSession) -> None:
     """body 里 stream=true 时 Agent 透传 stream=True 给 Model。"""
     spy = _SpyModel()
-    agent = Agent(model=spy)
-    body = json.dumps({"model": "x", "stream": True, "messages": []}).encode("utf-8")
+    agent = _agent_with_models({"m": spy})
+    body = json.dumps({"model": "m", "stream": True, "messages": []}).encode("utf-8")
 
     await agent.handle(body)
     _, is_stream = spy.calls[0]
     assert is_stream is True
-
-
-async def test_handle_invalid_json_still_forwards_with_stream_false(
-    session: AsyncSession,
-) -> None:
-    """非法 JSON 不在 Agent 层 raise —— 让 Model 自己决定怎么处理。"""
-    spy = _SpyModel()
-    agent = Agent(model=spy)
-    body = b"not json"
-
-    resp = await agent.handle(body)
-    assert resp.status_code == 200
-    _, is_stream = spy.calls[0]
-    assert is_stream is False  # 探测失败默认 False
+    Agent.uninstall()
 
 
 # ---------- 日志落地 ----------
 
 
 async def test_handle_writes_log_on_success(session: AsyncSession) -> None:
-    """成功请求落一条 logs 记录,status=ok,抽出 body.model。"""
-    agent = Agent(model=_SpyModel())
-    body = json.dumps({"model": "claude-haiku-4-5", "messages": []}).encode("utf-8")
+    """成功请求落一条 logs 记录,status=ok,model=客户端写的 entry name。"""
+    agent = _agent_with_models({"claude-prod": _SpyModel()})
+    body = json.dumps({"model": "claude-prod", "messages": []}).encode("utf-8")
 
     await agent.handle(body)
 
@@ -171,15 +169,32 @@ async def test_handle_writes_log_on_success(session: AsyncSession) -> None:
     assert len(rows) == 1
     log = rows[0]
     assert log.status == "ok"
-    assert log.model == "claude-haiku-4-5"
+    assert log.model == "claude-prod"
     assert log.error is None
     assert log.latency_ms is not None and log.latency_ms >= 0
+    Agent.uninstall()
 
 
-async def test_handle_writes_log_on_service_error(session: AsyncSession) -> None:
-    """ServiceError 被 re-raise,但日志照记一条 status=error。"""
-    err = ServiceError(status=400, code="bad_body", message="bad")
-    agent = Agent(model=_SpyModel(raise_exc=err))
+async def test_handle_writes_log_on_unknown_model(session: AsyncSession) -> None:
+    """unknown_model_name 也记 error 日志。"""
+    agent = _agent_with_models({"mock": _SpyModel()})
+    body = json.dumps({"model": "ghost"}).encode("utf-8")
+
+    with pytest.raises(ServiceError):
+        await agent.handle(body)
+
+    rows = (await session.execute(select(LogEntry))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].status == "error"
+    assert rows[0].error is not None
+    assert "unknown_model_name" in rows[0].error
+    Agent.uninstall()
+
+
+async def test_handle_writes_log_on_model_service_error(session: AsyncSession) -> None:
+    """Model 抛 ServiceError → re-raise + 落 error 日志。"""
+    err = ServiceError(status=502, code="upstream_unreachable", message="boom")
+    agent = _agent_with_models({"m": _SpyModel(raise_exc=err)})
     body = json.dumps({"model": "m"}).encode("utf-8")
 
     with pytest.raises(ServiceError):
@@ -189,12 +204,12 @@ async def test_handle_writes_log_on_service_error(session: AsyncSession) -> None
     assert len(rows) == 1
     assert rows[0].status == "error"
     assert rows[0].error is not None
-    assert "bad_body" in rows[0].error
+    assert "upstream_unreachable" in rows[0].error
+    Agent.uninstall()
 
 
 async def test_handle_writes_log_on_generic_exception(session: AsyncSession) -> None:
-    """非 ServiceError 也记 error 日志 + re-raise。"""
-    agent = Agent(model=_SpyModel(raise_exc=RuntimeError("boom")))
+    agent = _agent_with_models({"m": _SpyModel(raise_exc=RuntimeError("boom"))})
     body = json.dumps({"model": "m"}).encode("utf-8")
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -204,3 +219,4 @@ async def test_handle_writes_log_on_generic_exception(session: AsyncSession) -> 
     assert len(rows) == 1
     assert rows[0].status == "error"
     assert rows[0].error == "boom"
+    Agent.uninstall()

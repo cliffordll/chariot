@@ -3,7 +3,7 @@
 三者都是"对 server 进程自身的控制/探测",没有业务语义,合在一个文件便于维护。
 
 - `/admin/ping`:最轻量健康检查(不进 DB)
-- `/admin/status`:版本 + 启动时长 + agent model 名(用于 CLI `chariot status`)
+- `/admin/status`:版本 + 启动时长 + entries count(用于 CLI `chariot status`)
 - `/admin/shutdown`:触发 uvicorn graceful shutdown
   - 响应先发,后台任务再置 `server.should_exit = True`
   - CLI `chariot stop` 优先调这里;兜底用 psutil.kill(pid)
@@ -43,7 +43,7 @@ async def ping() -> PingResponse:
 class StatusResponse(BaseModel):
     version: str
     uptime_ms: int
-    model: str  # 当前 agent 的 model 标识,如 "mock-echo-v1"
+    entries_count: int  # 0.3.1:已注册 entries 数量;active 概念退役后不再返单一 model
     url: str  # 客户端抵达 server 的 base URL(含 scheme + host + port)
 
 
@@ -60,7 +60,7 @@ async def status(request: Request) -> StatusResponse:
     return StatusResponse(
         version=__version__,
         uptime_ms=uptime_ms,
-        model=agent.model.name,
+        entries_count=len(agent.models),
         url=url,
     )
 

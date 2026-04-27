@@ -1,21 +1,21 @@
-"""`chariot model list / use / probe / add / edit / rm / duplicate` —— 模型 CRUD。
+"""`chariot model list / probe / add / edit / rm / duplicate` —— 模型 CRUD。
 
 二级子命令组(typer.Typer 嵌套):
 
 只读:
-- `chariot model list`:列出 available + active 标记 + 已注册 type
+- `chariot model list`:列出 entries(name / type)+ 已注册 type
 - `chariot model probe <name>`:发 1 条最小请求验通断(**~1 token 费用**;mock 零费用)
 
-切 active:
-- `chariot model use <name>`:切 active(0.3.0 起持久化到 DB)
-
-CRUD(0.3.0 新增):
-- `chariot model add --name X --type Y [-o k=v]`:新建 entry
-- `chariot model edit <name> [--type T] [-o k=v]`:改 entry(active 自动 rebuild)
-- `chariot model rm <name>`:删 entry(active 不许删)
+CRUD(0.3.0 加,0.3.1 加 --params):
+- `chariot model add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
+- `chariot model edit <name> [--type T] [-o k=v] [-p k=v]`:改 entry
+- `chariot model rm <name>`:删 entry
 - `chariot model duplicate <name> [--as new-name]`:复制(碰撞自动 _copy_N)
 
-`-o key=value` 可重复;value 全部按字符串处理(0.3.0 不支持嵌套)。
+0.3.1 路由模型重构后 `chariot model use` 删除(active 概念退役);
+client 在请求 body.model 写 entry name 直接路由。
+
+`-o key=value` / `-p key=value` 都可重复;value 全部按字符串处理(0.3.1 不支持嵌套)。
 server 未运行 → 错误退出(不自动 spawn,这些都是对运行中 server 的操作)。
 """
 
@@ -32,7 +32,7 @@ from chariot.sdk.client import ProxyClient
 
 model_app = typer.Typer(
     name="model",
-    help="管理 model entries(0.3.0 起住 chariot 内置 SQLite,不再读 config.toml)",
+    help="管理 model entries(0.3.1 起按 entry name 路由)",
     no_args_is_help=True,
 )
 
@@ -40,7 +40,7 @@ model_app = typer.Typer(
 # ---------- list ----------
 
 
-@model_app.command("list", help="列出可用 model + 当前 active")
+@model_app.command("list", help="列出 entries(name / type)")
 def list_cmd() -> None:
     asyncio.run(_list())
 
@@ -53,38 +53,13 @@ async def _list() -> None:
         Renderer.die("server 未运行;先 `chariot start` 起一份")
         return
 
-    if not data.available:
-        Renderer.out("(配置里没有 model — 当前走 MockModel fallback)")
+    if not data.entries:
+        Renderer.out("(DB 里没有 entry — `chariot model add` 加一条)")
     else:
-        rows = [("✓" if name == data.active else " ", name) for name in data.available]
-        Renderer.table(["", "model"], rows, title="可用 model")
+        rows = [(e.name, e.type) for e in data.entries]
+        Renderer.table(["name", "type"], rows, title="entries")
 
     Renderer.out(f"已注册 type:{', '.join(data.types)}")
-
-
-# ---------- use ----------
-
-
-@model_app.command("use", help="切到指定 model name")
-def use_cmd(
-    name: Annotated[str, typer.Argument(help="model name(必须在 config.toml 里定义)")],
-) -> None:
-    asyncio.run(_use(name))
-
-
-async def _use(name: str) -> None:
-    try:
-        async with ProxyClient.discover_session(spawn_if_missing=False) as client:
-            try:
-                result = await client.use_model(name)
-            except httpx.HTTPStatusError as e:
-                Renderer.die(f"切换失败 (HTTP {e.response.status_code}): {e.response.text}")
-                return
-    except RuntimeError:
-        Renderer.die("server 未运行;先 `chariot start` 起一份")
-        return
-
-    Renderer.out(f"active → {result.active} (model={result.model})")
 
 
 # ---------- probe ----------
@@ -92,7 +67,7 @@ async def _use(name: str) -> None:
 
 @model_app.command("probe", help="探一下指定 model 通不通(消耗 ~1 token 费用)")
 def probe_cmd(
-    name: Annotated[str, typer.Argument(help="model name(必须在 config.toml 里定义)")],
+    name: Annotated[str, typer.Argument(help="entry name")],
 ) -> None:
     asyncio.run(_probe(name))
 
@@ -118,16 +93,16 @@ async def _probe(name: str) -> None:
         Renderer.die(f"✗ {name} FAIL ({result.latency_ms} ms) [{code}] {message}")
 
 
-def _parse_kv_options(items: list[str]) -> dict[str, Any]:
-    """`-o key=value` 重复 → dict;value 拆第一个 `=` 后保留(支持值含 `=`)。"""
+def _parse_kv(items: list[str], *, label: str) -> dict[str, Any]:
+    """`-x key=value` 重复 → dict;value 拆第一个 `=` 后保留(支持值含 `=`)。"""
     result: dict[str, Any] = {}
     for raw in items:
         if "=" not in raw:
-            Renderer.die(f"option 必须是 key=value 形式: {raw!r}")
+            Renderer.die(f"{label} 必须是 key=value 形式: {raw!r}")
             return {}
         k, _, v = raw.partition("=")
         if not k:
-            Renderer.die(f"option key 不能为空: {raw!r}")
+            Renderer.die(f"{label} key 不能为空: {raw!r}")
             return {}
         result[k] = v
     return result
@@ -142,18 +117,32 @@ def add_cmd(
     type: Annotated[str, typer.Option("--type", help="model type(mock / anthropic / ...)")],
     options: Annotated[
         list[str] | None,
-        typer.Option("-o", "--option", help="key=value 形式的 options;可重复"),
+        typer.Option(
+            "-o", "--option", help="options key=value;可重复(build Model 所需,如 model / api_key)"
+        ),
+    ] = None,
+    params: Annotated[
+        list[str] | None,
+        typer.Option(
+            "-p", "--param", help="params key=value;可重复(runtime 默认值,如 temperature)"
+        ),
     ] = None,
 ) -> None:
-    asyncio.run(_add(name, type, options or []))
+    asyncio.run(_add(name, type, options or [], params or []))
 
 
-async def _add(name: str, type_: str, options: list[str]) -> None:
-    opts_dict = _parse_kv_options(options)
+async def _add(name: str, type_: str, options: list[str], params: list[str]) -> None:
+    opts = _parse_kv(options, label="-o")
+    prms = _parse_kv(params, label="-p")
     try:
         async with ProxyClient.discover_session(spawn_if_missing=False) as client:
             try:
-                entry = await client.create_model(name=name, type=type_, options=opts_dict)
+                entry = await client.create_model(
+                    name=name,
+                    type=type_,
+                    options=opts,
+                    params=prms,
+                )
             except httpx.HTTPStatusError as e:
                 Renderer.die(f"添加失败 (HTTP {e.response.status_code}): {e.response.text}")
                 return
@@ -166,7 +155,7 @@ async def _add(name: str, type_: str, options: list[str]) -> None:
 # ---------- edit ----------
 
 
-@model_app.command("edit", help="编辑现有 entry(改 type 或 options;改 active 自动 rebuild)")
+@model_app.command("edit", help="编辑现有 entry(改 type / options / params;改完立即 rebuild)")
 def edit_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
     type: Annotated[
@@ -178,22 +167,41 @@ def edit_cmd(
         typer.Option(
             "-o",
             "--option",
-            help="key=value 形式的 options;可重复(整体替换 options,非 merge)",
+            help="options key=value;可重复(整体替换 options,非 merge)",
+        ),
+    ] = None,
+    params: Annotated[
+        list[str] | None,
+        typer.Option(
+            "-p",
+            "--param",
+            help="params key=value;可重复(整体替换 params,非 merge)",
         ),
     ] = None,
 ) -> None:
-    asyncio.run(_edit(name, type, options))
+    asyncio.run(_edit(name, type, options, params))
 
 
-async def _edit(name: str, type_: str | None, options: list[str] | None) -> None:
-    if type_ is None and options is None:
-        Renderer.die("至少给一个 --type 或 -o 选项,否则无事可做")
+async def _edit(
+    name: str,
+    type_: str | None,
+    options: list[str] | None,
+    params: list[str] | None,
+) -> None:
+    if type_ is None and options is None and params is None:
+        Renderer.die("至少给一个 --type / -o / -p 选项,否则无事可做")
         return
-    opts_dict = _parse_kv_options(options) if options is not None else None
+    opts = _parse_kv(options, label="-o") if options is not None else None
+    prms = _parse_kv(params, label="-p") if params is not None else None
     try:
         async with ProxyClient.discover_session(spawn_if_missing=False) as client:
             try:
-                entry = await client.update_model(name, type=type_, options=opts_dict)
+                entry = await client.update_model(
+                    name,
+                    type=type_,
+                    options=opts,
+                    params=prms,
+                )
             except httpx.HTTPStatusError as e:
                 Renderer.die(f"编辑失败 (HTTP {e.response.status_code}): {e.response.text}")
                 return
@@ -206,7 +214,7 @@ async def _edit(name: str, type_: str | None, options: list[str] | None) -> None
 # ---------- rm ----------
 
 
-@model_app.command("rm", help="删除 entry(active 不许删,先 use 别的 entry 再删)")
+@model_app.command("rm", help="删除 entry")
 def rm_cmd(
     name: Annotated[str, typer.Argument(help="要删的 entry 名")],
 ) -> None:

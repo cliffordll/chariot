@@ -18,14 +18,15 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.server.agent import Agent
+from chariot.server.config import ChariotConfig
 from chariot.server.controller import admin_router
 from chariot.server.database.session import get_session
 
 
 @pytest_asyncio.fixture
 async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    # /admin/status 会调 Agent.current();测试里初始化一个默认(MockModel)agent
-    Agent.install()
+    # /admin/status 会调 Agent.current();测试里初始化一个空 agent(无 entry 也能跑)
+    Agent.install_from_config(ChariotConfig.empty())
 
     app = FastAPI()
     app.include_router(admin_router, prefix="/admin")
@@ -55,7 +56,9 @@ async def test_status(client: AsyncClient) -> None:
     body = r.json()
     assert "version" in body
     assert "uptime_ms" in body
-    assert body["model"] == "mock-echo-v1"
+    # 0.3.1:返 entries_count(active 概念退役;空 config 计数 0)
+    assert body["entries_count"] == 0
+    assert "model" not in body
 
 
 # ---------- /admin/logs since polling 语义 ----------

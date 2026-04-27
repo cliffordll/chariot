@@ -1,27 +1,25 @@
-"""admin /models 端点 —— GET 列表 / 切 active / 探针 / entries CRUD。
+"""admin /models 端点 —— GET 列表 / 探针 / entries CRUD。
 
-0.3.0 起 model 配置住 DB(`models` / `settings` 表),所有写操作走 ModelRepo
-持久化 + 同步 Agent 状态。
+0.3.0 起 model 配置住 DB(`models` 表),所有写操作走 ModelRepo 持久化 + 同步
+Agent 状态。0.3.1 起 active 概念删除(client 在 body.model 写 entry name 路由),
+对应的 POST /admin/models 切 active 端点也已删除。
 
 端点
 ----
-GET    /admin/models                          → 列表 + active + types
-POST   /admin/models   {name}                 → 切换 active(写 settings + rebuild)
-POST   /admin/models/{name}/probe             → 0.2.5 探针(临时 build,不副作用)
+GET    /admin/models                          → entries 列表 + types
+POST   /admin/models/{name}/probe             → 探针(临时 build,不副作用)
 
-POST   /admin/models/entries                  → 0.3.0 创建 entry
-PUT    /admin/models/entries/{name}           → 0.3.0 更新 type / options(active 自动 rebuild)
-DELETE /admin/models/entries/{name}           → 0.3.0 删除(active 拒绝)
-POST   /admin/models/entries/{name}/duplicate → 0.3.0 复制(碰撞自动 _copy_N)
+POST   /admin/models/entries                  → 创建 entry
+PUT    /admin/models/entries/{name}           → 更新 type / options / params(立即 rebuild Model)
+DELETE /admin/models/entries/{name}           → 删除
+POST   /admin/models/entries/{name}/duplicate → 复制(碰撞自动 _copy_N)
 
 错误码
 ------
 - 400 `unknown_type`        —— type 不在 ModelRegistry.known_types()
-- 400 `bad_model_name`      —— 切 active 时 name 不存在(沿用 0.2.x)
-- 400 `cannot_delete_active`—— 删 active(让用户先 use 别的)
 - 404 `model_not_found`     —— update / delete / duplicate / probe 找不到 name
 - 409 `name_exists`         —— create / duplicate 目标 name 冲突
-- 502 `rebuild_failed`      —— update active entry 后新参数 build Model 失败
+- 502 `rebuild_failed`      —— update entry 后新参数 build Model 失败
 """
 
 from __future__ import annotations
@@ -52,8 +50,6 @@ __all__ = [
     "ModelsListResponse",
     "ProbeError",
     "ProbeResult",
-    "SwitchModelRequest",
-    "SwitchModelResponse",
     "UpdateEntryRequest",
     "router",
 ]
@@ -61,29 +57,30 @@ __all__ = [
 router = APIRouter()
 
 
-# ---------- 共享 Pydantic 形态(EntryResponse 被 GET /admin/models 和 entries CRUD 复用)----------
+# ---------- 共享 Pydantic 形态 ----------
 
 
 class EntryResponse(BaseModel):
-    """单条 model entry 的对外形态(name / type / options)。"""
+    """单条 model entry 的对外形态(name / type / options / params)。"""
 
     name: str
     type: str
     options: dict[str, Any]
+    params: dict[str, Any]
 
 
 # ---------- /admin/models GET ----------
 
 
 class ModelsListResponse(BaseModel):
-    """`GET /admin/models` 响应。0.3.0 起加 entries 字段返完整数据(name/type/options)。
+    """`GET /admin/models` 响应。
 
-    `available` 仍是 name 列表(0.2.x 兼容);`entries` 是 0.3.0 新增的全量数组,
-    UI / SDK 可以一次拿到 type 和 options 详情,不用再单独拉每条。
+    `available` 是 entry name 列表(0.2.x 兼容);`entries` 是全量数组,
+    `types` 是 ModelRegistry 已注册的 type key 列表。
+    0.3.1 起删除 `active` 字段(active 概念退役)。
     """
 
     available: list[str]
-    active: str | None
     types: list[str]
     entries: list[EntryResponse]
 
@@ -91,53 +88,15 @@ class ModelsListResponse(BaseModel):
 @router.get("/models", response_model=ModelsListResponse)
 async def list_models() -> ModelsListResponse:
     config = Agent.config()
-    entries = [EntryResponse(name=e.name, type=e.type, options=e.options) for e in config.models]
+    entries = [
+        EntryResponse(name=e.name, type=e.type, options=e.options, params=e.params)
+        for e in config.models
+    ]
     return ModelsListResponse(
         available=[e.name for e in config.models],
-        active=Agent.active_name(),
         types=ModelRegistry.known_types(),
         entries=entries,
     )
-
-
-# ---------- /admin/models POST(切 active)----------
-
-
-class SwitchModelRequest(BaseModel):
-    name: str
-
-
-class SwitchModelResponse(BaseModel):
-    active: str
-    model: str  # 新生效 model 的 .name 标识(写入 logs.model)
-
-
-@router.post("/models", response_model=SwitchModelResponse)
-async def switch_model(req: SwitchModelRequest, session: SessionDep) -> SwitchModelResponse:
-    """切 active model。0.3.0 起持久化到 settings.active_model + rebuild 内存实例。
-
-    流程:
-    1. `ModelRepo.set_active(name)` —— 校验 name 在 DB 并写 settings
-    2. `ChariotConfig.from_db` + `Agent.refresh_config` —— 同步 Agent 缓存
-       (确保 Agent._config 看到最新 entries)
-    3. `Agent.switch_to(name)` —— rebuild + install Model 实例
-    """
-    repo = ModelRepo(session)
-    try:
-        await repo.set_active(req.name)
-    except ModelNotFound as e:
-        raise ServiceError(status=400, code="bad_model_name", message=str(e)) from e
-
-    await _refresh_agent_config(session)
-    try:
-        agent = Agent.switch_to(req.name)
-    except ConfigError as e:
-        raise ServiceError(
-            status=502,
-            code="rebuild_failed",
-            message=f"切到 {req.name!r} 但 build Model 失败:{e}",
-        ) from e
-    return SwitchModelResponse(active=req.name, model=agent.model.name)
 
 
 # ---------- /admin/models/{name}/probe POST ----------
@@ -169,11 +128,13 @@ class CreateEntryRequest(BaseModel):
     name: str
     type: str
     options: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateEntryRequest(BaseModel):
     type: str | None = None
     options: dict[str, Any] | None = None
+    params: dict[str, Any] | None = None
 
 
 class DuplicateEntryRequest(BaseModel):
@@ -194,10 +155,22 @@ def _check_known_type(type_name: str) -> None:
         )
 
 
-async def _refresh_agent_config(session: SessionDep) -> None:
-    """从 DB 重读 ChariotConfig,刷新 Agent._config 缓存(不动 active model 实例)。"""
+async def _refresh_agent(session: SessionDep) -> None:
+    """从 DB 重读 ChariotConfig + 触发 Agent 重建 Model 字典。
+
+    0.3.1 后任何 entry CRUD 都直接 rebuild,因为 active 概念删除了,
+    每条 entry 都对应一个 Model 实例。如果某条 entry options 改了,
+    新 options 立刻生效;build 失败 → `rebuild_failed` 502。
+    """
     config = await ChariotConfig.from_db(session)
-    Agent.refresh_config(config)
+    try:
+        Agent.refresh_config(config)
+    except ConfigError as e:
+        raise ServiceError(
+            status=502,
+            code="rebuild_failed",
+            message=f"DB 改完后 rebuild Model 实例失败:{e}",
+        ) from e
 
 
 @router.post("/models/entries", response_model=EntryResponse, status_code=201)
@@ -205,13 +178,23 @@ async def create_entry(req: CreateEntryRequest, session: SessionDep) -> EntryRes
     _check_known_type(req.type)
     repo = ModelRepo(session)
     try:
-        entry = await repo.create(name=req.name, type=req.type, options=req.options)
+        entry = await repo.create(
+            name=req.name,
+            type=req.type,
+            options=req.options,
+            params=req.params,
+        )
     except DuplicateModelName as e:
         raise ServiceError(status=409, code="name_exists", message=str(e)) from e
     except ConfigError as e:
         raise ServiceError(status=400, code="bad_request", message=str(e)) from e
-    await _refresh_agent_config(session)
-    return EntryResponse(name=entry.name, type=entry.type, options=entry.options)
+    await _refresh_agent(session)
+    return EntryResponse(
+        name=entry.name,
+        type=entry.type,
+        options=entry.options,
+        params=entry.params,
+    )
 
 
 @router.put("/models/entries/{name}", response_model=EntryResponse)
@@ -224,42 +207,34 @@ async def update_entry(
         _check_known_type(req.type)
     repo = ModelRepo(session)
     try:
-        entry = await repo.update(name, type=req.type, options=req.options)
+        entry = await repo.update(
+            name,
+            type=req.type,
+            options=req.options,
+            params=req.params,
+        )
     except ModelNotFound as e:
         raise ServiceError(status=404, code="model_not_found", message=str(e)) from e
     except ConfigError as e:
         raise ServiceError(status=400, code="bad_request", message=str(e)) from e
 
-    # 改了 active entry → 同步 rebuild active model 实例(新 options 即时生效)
-    if Agent.active_name() == name:
-        await _refresh_agent_config(session)
-        try:
-            Agent.switch_to(name)
-        except ConfigError as e:
-            raise ServiceError(
-                status=502,
-                code="rebuild_failed",
-                message=f"active entry 改完后 rebuild 失败:{e}",
-            ) from e
-    else:
-        await _refresh_agent_config(session)
-    return EntryResponse(name=entry.name, type=entry.type, options=entry.options)
+    await _refresh_agent(session)
+    return EntryResponse(
+        name=entry.name,
+        type=entry.type,
+        options=entry.options,
+        params=entry.params,
+    )
 
 
 @router.delete("/models/entries/{name}", status_code=204)
 async def delete_entry(name: str, session: SessionDep) -> None:
-    if Agent.active_name() == name:
-        raise ServiceError(
-            status=400,
-            code="cannot_delete_active",
-            message=f"{name!r} 是 active model,先 use 别的 entry 再删",
-        )
     repo = ModelRepo(session)
     try:
         await repo.delete(name)
     except ModelNotFound as e:
         raise ServiceError(status=404, code="model_not_found", message=str(e)) from e
-    await _refresh_agent_config(session)
+    await _refresh_agent(session)
 
 
 @router.post(
@@ -281,5 +256,10 @@ async def duplicate_entry(
         raise ServiceError(status=409, code="name_exists", message=str(e)) from e
     except ConfigError as e:
         raise ServiceError(status=400, code="bad_request", message=str(e)) from e
-    await _refresh_agent_config(session)
-    return EntryResponse(name=entry.name, type=entry.type, options=entry.options)
+    await _refresh_agent(session)
+    return EntryResponse(
+        name=entry.name,
+        type=entry.type,
+        options=entry.options,
+        params=entry.params,
+    )

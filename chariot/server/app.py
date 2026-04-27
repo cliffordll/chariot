@@ -42,7 +42,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         config: ChariotConfig = await ChariotConfig.from_db(session)
 
     agent = Agent.install_from_config(config)
-    _log.info("startup complete (agent.model=%s)", agent.model.name)
+    _log.info("startup complete (entries=%d)", len(agent.models))
     try:
         yield
     finally:

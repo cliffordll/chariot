@@ -61,17 +61,24 @@ def test_subcommand_help(sub: str, flag: str) -> None:
     assert result.exit_code == 0, f"{sub} {flag} 应成功,实际 exit={result.exit_code}"
 
 
-def test_model_subcommand_group_has_list_and_use() -> None:
+def test_model_subcommand_group_has_list_and_crud() -> None:
+    """0.3.1 起 model 子命令组 = list / probe / add / edit / rm / duplicate(use 已删)。"""
     result = runner.invoke(app, ["model", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    assert "list" in out
-    assert "use" in out
+    for sub in ("list", "probe", "add", "edit", "rm", "duplicate"):
+        assert sub in out, f"`chariot model --help` 缺少子命令 {sub!r}"
 
 
-def test_model_use_requires_name() -> None:
-    """`chariot model use` 不带 name typer 报参数缺失。"""
-    result = runner.invoke(app, ["model", "use"])
+def test_model_use_subcommand_removed() -> None:
+    """0.3.1 路由模型重构:active 概念删除,`chariot model use` 也下线。"""
+    result = runner.invoke(app, ["model", "use", "anything"])
+    assert result.exit_code != 0
+
+
+def test_model_add_requires_name_and_type() -> None:
+    """`chariot model add` 没传 --name / --type 时 typer 报参数缺失。"""
+    result = runner.invoke(app, ["model", "add"])
     assert result.exit_code != 0
 
 

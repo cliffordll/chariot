@@ -1,28 +1,27 @@
 """Agent — chariot 智能体主类。
 
-职责(0.2.0 极简)
-------------------
-1. 持有一个 `Model` 实现(没显式注入就用 `MockModel` 兜底)
-2. 把客户端请求转给 `model.respond()`(只接 Anthropic Messages 协议)
+职责(0.3.1 路由模型重构后)
+----------------------------
+1. 持有 `name → Model` 实例字典(从 DB entries 构造)
+2. 按 client 在 body.model 字段写的 entry name 路由,转给对应 `model.respond()`
 3. 每次请求在 `logs` 表记一条(status / latency / model name)
 
+0.3.1 之前 Agent 有 active 状态、单 model 实例;0.3.1 起 active 概念删除,
+client 通过 body.model 显式选 entry。详见 `docs/DESIGN.md` §5。
+
 后续版本可以在这层加(不影响 Controller / Model):
-- 多轮对话状态
-- 工具调用 / function calling
-- 自我进化循环(chariot 的核心方向)
-- Model ensemble / 动态切换
+- 多轮对话状态 / 工具调用 / 自我进化循环 / Model ensemble
 
 单例管理
 --------
 当前运行中的 agent 是 **类级** 单例:
 
 ```python
-Agent.install(model=...)   # app lifespan startup 调一次
-Agent.current()            # 任意位置取当前 agent
-Agent.uninstall()          # lifespan shutdown / 测试 teardown
+Agent.install_from_config(config)   # app lifespan startup 调一次
+Agent.refresh_config(config)        # admin entries CRUD 后刷新缓存
+Agent.current()                     # 任意位置取当前 agent
+Agent.uninstall()                   # lifespan shutdown / 测试 teardown
 ```
-
-同一时间只存一个;`install` 第二次会覆盖第一次。模块级不暴露可变变量。
 """
 
 from __future__ import annotations
@@ -34,9 +33,8 @@ from typing import Any, ClassVar
 
 from fastapi.responses import Response
 
-from chariot.server.config import ChariotConfig, ModelNotFound
+from chariot.server.config import ChariotConfig, ConfigError, ModelEntry
 from chariot.server.model.base import Model
-from chariot.server.model.mock import mock_model
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 from chariot.server.service.log_writer import log_writer
@@ -45,98 +43,67 @@ _log = logging.getLogger("chariot.server.agent")
 
 
 class Agent:
-    """chariot 智能体。0.2.0 薄壳 —— 请求直接转 `model`,外加日志埋点。
+    """chariot 智能体。0.3.1 起按 body.model 路由到对应 entry 的 Model 实例。
 
-    对外三条路:
-    - `Agent(model=...)`:任意构造一个实例(测试 / 独立使用)
-    - `Agent.install(model=...)`:构造 + 注册为"当前运行的 agent"
+    对外:
+    - `Agent.install_from_config(config)`:按配置构建 `name → Model` 字典并注册
+    - `Agent.refresh_config(config)`:重建字典(entries CRUD 后调用)
     - `Agent.current()`:取当前 agent
-
-    `handle()` 是请求入口;其它方法都是实现细节。
+    - `Agent.handle(body)`:请求入口
     """
 
     # ---- 类级单例 ----
 
     _current: ClassVar[Agent | None] = None
     _config: ClassVar[ChariotConfig | None] = None
-    _active_name: ClassVar[str | None] = None
 
     # ---- 实例构造 ----
 
-    def __init__(self, model: Model | None = None) -> None:
-        """构造 agent。`model=None` 走 `MockModel` 兜底。"""
-        self.model: Model = model if model is not None else mock_model
+    def __init__(self) -> None:
+        self.models: dict[str, Model] = {}
 
     # ---- 单例管理(classmethod) ----
 
     @classmethod
-    def install(cls, *, model: Model | None = None) -> Agent:
-        """构造一个 agent 并注册成当前运行实例。
-
-        - app lifespan startup 里调一次(默认 `model=None` 走 MockModel)
-        - 再调会覆盖上一个(动态切 model 时用得上)
-        - 只动 `_current`;`_config` / `_active_name` 由 `install_from_config` /
-          `switch_to` 各自维护
-        """
-        cls._current = cls(model)
-        _log.info("agent installed with model=%s", cls._current.model.name)
-        return cls._current
-
-    @classmethod
     def install_from_config(cls, config: ChariotConfig) -> Agent:
-        """按 `ChariotConfig` 注入 model 并安装为当前 agent。
+        """按 `ChariotConfig` 构建 `name → Model` 字典并注册成当前 agent。
 
-        - `config.active_entry()` 为 None → MockModel fallback
-        - 否则 `ModelRegistry.build(entry)` 构造对应实现
-        - 0.3.0 起 `config` 来源是 DB(`ChariotConfig.from_db(session)`);
-          0.2.x 是 TOML 文件。数据形态不变 —— Agent 不感知来源
-        - lifespan startup 期 raise 的 `ConfigError` 直接上冒(让 server 不要起来)
+        - 每条 entry 立刻 build(eager)—— 起步成本与 entry 数线性相关,实测够快
+        - lifespan startup 期 raise 的 `ConfigError` 直接上冒(让 server 拒启动)
         """
-        entry = config.active_entry()
-        if entry is None:
-            agent = cls.install()
-            cls._active_name = None
-        else:
-            agent = cls.install(model=ModelRegistry.build(entry))
-            cls._active_name = entry.name
+        agent = cls()
+        for entry in config.models:
+            agent.models[entry.name] = ModelRegistry.build(entry)
+        cls._current = agent
         cls._config = config
+        _log.info("agent installed with %d entries: %s", len(agent.models), list(agent.models))
         return agent
 
     @classmethod
-    def refresh_config(cls, config: ChariotConfig) -> None:
-        """更新 `_config` 缓存(model 列表变了,但 active 实例不动)。
+    def refresh_config(cls, config: ChariotConfig) -> Agent:
+        """根据新 config 重建 Model 字典(entries 增/删/改后调用)。
 
-        给 admin entries CRUD 用:create / update non-active / delete non-active /
-        duplicate 之后,只刷新可见 entries 列表,active model 实例保持不变避免
-        断流式连接。改 active 走 `switch_to`(rebuild 实例)。
+        实现策略:
+        - 删 entries:从字典移除
+        - 改 entries:整 rebuild 该 entry 的 Model 实例(可能因为 options 变了)
+        - 加 entries:新 build
+        - 简化:直接全量 rebuild,反正 build 不贵且 entry 数少
         """
-        cls._config = config
-
-    @classmethod
-    def switch_to(cls, name: str) -> Agent:
-        """运行时切到名为 `name` 的 model;0.3.0 起调用方应同时持久化到 DB。
-
-        在 `_config.models` 里按 name 找 entry,经 ModelRegistry 重建,覆盖 install。
-        找不到 / build 失败 → `ConfigError`(由 controller 转 4xx/5xx)。
-
-        持久化由 controller 层负责:`POST /admin/models {name}` 走 `ModelRepo.set_active`
-        + 本方法(双写),controller 见 `controller/models.py`。
-        """
-        config = cls.config()
+        agent = cls.current()
+        new_models: dict[str, Model] = {}
         for entry in config.models:
-            if entry.name == name:
-                model = ModelRegistry.build(entry)
-                agent = cls.install(model=model)
-                cls._active_name = name
-                return agent
-        known = ", ".join(e.name for e in config.models) or "(空)"
-        raise ModelNotFound(f"未知 model name: {name!r};可选:{known}")
+            new_models[entry.name] = ModelRegistry.build(entry)
+        agent.models = new_models
+        cls._config = config
+        return agent
 
     @classmethod
     def current(cls) -> Agent:
         """取当前注册的 agent;未 install 直接 raise。"""
         if cls._current is None:
-            raise RuntimeError("Agent 未安装;在 app lifespan startup 里调 Agent.install()")
+            raise RuntimeError(
+                "Agent 未安装;在 app lifespan startup 里调 Agent.install_from_config()"
+            )
         return cls._current
 
     @classmethod
@@ -145,39 +112,53 @@ class Agent:
         return cls._config if cls._config is not None else ChariotConfig.empty()
 
     @classmethod
-    def active_name(cls) -> str | None:
-        """当前 active 的 model name(来自 config 或 switch_to);MockModel fallback 返 None。"""
-        return cls._active_name
-
-    @classmethod
     def uninstall(cls) -> None:
         """清除当前 agent 注册 + 配置状态(lifespan shutdown / 测试 teardown)。"""
         cls._current = None
         cls._config = None
-        cls._active_name = None
 
     # ---- 请求处理 ----
 
     async def handle(self, body: bytes) -> Response:
         """处理一次聊天请求。
 
-        - 按 `body.stream` 决定返回 StreamingResponse 还是 Response
-        - 记一条 log(status=ok/error + latency_ms + model=client hint)
-        - `ServiceError` 直接 re-raise(由 controller `exception_handler` 转 HTTP)
+        - 解析 body.model → 查 entry → 调 `model.respond(body)` 透传
+        - body.model 缺失 / 空 / 未知 → 400(ServiceError `unknown_model_name`)
+        - 记一条 log(model=客户端写的 name,status=ok/error)
         """
         t0 = time.monotonic()
-        model_hint = self._detect_model_hint(body)
+        model_name = self._extract_model_name(body)
         is_stream = self._detect_stream(body)
 
+        if not model_name:
+            err = ServiceError(
+                status=400,
+                code="unknown_model_name",
+                message="body.model 字段必填:写 chariot 的 entry name(`chariot model list` 看可用)",
+            )
+            await self._record_log(None, "error", t0, error=f"{err.code}: {err.message}")
+            raise err
+
+        model = self.models.get(model_name)
+        if model is None:
+            known = ", ".join(self.models) or "(空)"
+            err = ServiceError(
+                status=400,
+                code="unknown_model_name",
+                message=f"未知 model name: {model_name!r};可选:{known}",
+            )
+            await self._record_log(model_name, "error", t0, error=f"{err.code}: {err.message}")
+            raise err
+
         try:
-            resp = await self.model.respond(body, stream=is_stream)
-            await self._record_log(model_hint, "ok", t0)
+            resp = await model.respond(body, stream=is_stream)
+            await self._record_log(model_name, "ok", t0)
             return resp
         except ServiceError as e:
-            await self._record_log(model_hint, "error", t0, error=f"{e.code}: {e.message}")
+            await self._record_log(model_name, "error", t0, error=f"{e.code}: {e.message}")
             raise
         except Exception as e:  # pragma: no cover
-            await self._record_log(model_hint, "error", t0, error=str(e))
+            await self._record_log(model_name, "error", t0, error=str(e))
             raise
 
     # ---- 内部:body 探测 + 日志 ----
@@ -195,8 +176,8 @@ class Agent:
             return False
 
     @staticmethod
-    def _detect_model_hint(body: bytes) -> str | None:
-        """从 body 抽 `model` 字段作日志展示用;拿不到就 None。"""
+    def _extract_model_name(body: bytes) -> str | None:
+        """从 body 抽 `model` 字段;缺失 / 非 str / 空串都返 None。"""
         try:
             data: Any = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -205,7 +186,9 @@ class Agent:
             m = data.get("model")
         except AttributeError:
             return None
-        return m if isinstance(m, str) else None
+        if not isinstance(m, str) or not m:
+            return None
+        return m
 
     async def _record_log(
         self,
@@ -223,3 +206,23 @@ class Agent:
             latency_ms=latency_ms,
             error=error,
         )
+
+    # ---- 内部:测试钩子 ----
+
+    @classmethod
+    def install_test_models(cls, models: dict[str, Model]) -> Agent:
+        """测试专用:直接注入 name → Model 字典,不走 ModelRegistry.build。"""
+        agent = cls()
+        agent.models = dict(models)
+        cls._current = agent
+        # 给个最小 ChariotConfig 让 cls.config() 不返空
+        cls._config = ChariotConfig(
+            models=tuple(
+                ModelEntry(name=name, type="mock", options={}, params={}) for name in models
+            ),
+        )
+        return agent
+
+
+# satisfy linters; ConfigError exported here for backward compat with old imports
+__all__ = ["Agent", "ConfigError"]

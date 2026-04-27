@@ -34,7 +34,6 @@ from chariot.server.controller.models import (
     EntryResponse,
     ModelsListResponse,
     ProbeResult,
-    SwitchModelResponse,
 )
 from chariot.server.controller.runtime import StatusResponse
 from chariot.server.controller.stats import Period, StatsOut
@@ -115,20 +114,13 @@ class ProxyClient:
         resp.raise_for_status()
 
     async def list_models(self) -> ModelsListResponse:
-        """列出可用 model + 当前 active + 已注册 type。"""
+        """列出 entries(name / type / options / params)+ 已注册 type。
+
+        0.3.1 起 active 概念删除;client 在请求 body.model 写 entry name 路由。
+        """
         resp = await self.http.get(f"{self.base_url}/admin/models", timeout=_ADMIN_TIMEOUT)
         resp.raise_for_status()
         return ModelsListResponse.model_validate(resp.json())
-
-    async def use_model(self, name: str) -> SwitchModelResponse:
-        """切换 active model。失败(name 未配 / type 未注册)→ httpx.HTTPStatusError(400)。"""
-        resp = await self.http.post(
-            f"{self.base_url}/admin/models",
-            json={"name": name},
-            timeout=_ADMIN_TIMEOUT,
-        )
-        resp.raise_for_status()
-        return SwitchModelResponse.model_validate(resp.json())
 
     async def probe_model(self, name: str) -> ProbeResult:
         """对指定 model 跑一次探针(发 1 条最小请求验通断)。
@@ -154,11 +146,17 @@ class ProxyClient:
         name: str,
         type: str,
         options: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> EntryResponse:
         """新增 model entry。重名 → 409;type 未注册 → 400。"""
         resp = await self.http.post(
             f"{self.base_url}/admin/models/entries",
-            json={"name": name, "type": type, "options": options or {}},
+            json={
+                "name": name,
+                "type": type,
+                "options": options or {},
+                "params": params or {},
+            },
             timeout=_ADMIN_TIMEOUT,
         )
         resp.raise_for_status()
@@ -170,13 +168,20 @@ class ProxyClient:
         *,
         type: str | None = None,
         options: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> EntryResponse:
-        """更新 type / options。改 active entry 时 server 端会自动 rebuild model 实例。"""
+        """更新 type / options / params。任一字段 None 表示不动。
+
+        改完后 server 立即 rebuild 该 entry 对应的 Model 实例(新 options 生效);
+        rebuild 失败 → 502 `rebuild_failed`(原 entry 已落库,只是实例重建失败)。
+        """
         body: dict[str, Any] = {}
         if type is not None:
             body["type"] = type
         if options is not None:
             body["options"] = options
+        if params is not None:
+            body["params"] = params
         resp = await self.http.put(
             f"{self.base_url}/admin/models/entries/{name}",
             json=body,
@@ -186,7 +191,7 @@ class ProxyClient:
         return EntryResponse.model_validate(resp.json())
 
     async def delete_model(self, name: str) -> None:
-        """删 entry。active 不许删 → 400(`cannot_delete_active`)。"""
+        """删 entry。0.3.1 起 active 概念删除,任意 entry 都可删。"""
         resp = await self.http.delete(
             f"{self.base_url}/admin/models/entries/{name}",
             timeout=_ADMIN_TIMEOUT,

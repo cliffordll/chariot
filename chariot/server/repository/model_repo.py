@@ -1,18 +1,19 @@
-"""ModelRepo:`models` / `settings` 表的数据访问层。
+"""ModelRepo:`models` 表的数据访问层。
 
 职责
 ----
-- CRUD `models` 表(model entries)+ `settings` 表(active_model 等)
+- CRUD `models` 表(model entries:name / type / options / params)
 - 反序列化 → `ModelEntry` 数据对象(给 ModelRegistry.build 用)
 - 写入唯一性 / 必填校验,把底层 IntegrityError 转 `ConfigError`(语义层错)
 
 不做的事
 --------
 - **不**校验 type ∈ ModelRegistry.known_types() —— 业务规则归 controller 层
-- **不**校验"删除 active 是否被禁" —— 同上,业务规则归 controller
 - **不**触发 Agent reload —— 调用方负责
 
 模块级零自由函数。所有逻辑收在 `ModelRepo` 类里。
+
+0.3.1 路由模型重构后,active 概念删除;`settings` 表也已 drop。
 """
 
 from __future__ import annotations
@@ -31,19 +32,17 @@ from chariot.server.config import (
     ModelEntry,
     ModelNotFound,
 )
-from chariot.server.database.models import ModelRow, SettingRow
-
-# settings 表里存 active model name 的 key
-_ACTIVE_KEY = "active_model"
+from chariot.server.database.models import ModelRow
 
 # seed mock entry 用的常量(表空时插入)
 _SEED_NAME = "mock"
 _SEED_TYPE = "mock"
 _SEED_OPTIONS: dict[str, Any] = {}
+_SEED_PARAMS: dict[str, Any] = {}
 
 
 class ModelRepo:
-    """`models` + `settings` 表的统一数据访问层。"""
+    """`models` 表的数据访问层。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -66,13 +65,15 @@ class ModelRepo:
         name: str,
         type: str,
         options: dict[str, Any],
+        params: dict[str, Any] | None = None,
     ) -> ModelEntry:
-        """新增 entry。重名 → ConfigError;options 不可序列化 → ConfigError。"""
+        """新增 entry。重名 → DuplicateModelName;options/params 不可序列化 → ConfigError。"""
         self._check_name(name)
         self._check_type(type)
-        options_json = self._serialize_options(options)
+        options_json = self._serialize_json("options", options)
+        params_json = self._serialize_json("params", params or {})
 
-        row = ModelRow(name=name, type=type, options=options_json)
+        row = ModelRow(name=name, type=type, options=options_json, params=params_json)
         self.session.add(row)
         try:
             await self.session.commit()
@@ -88,8 +89,9 @@ class ModelRepo:
         *,
         type: str | None = None,
         options: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> ModelEntry:
-        """改 type / options(不允许改 name —— 用 duplicate + delete 模式)。"""
+        """改 type / options / params。任一字段 None 表示不动;不允许改 name。"""
         row = await self._find_row(name)
         if row is None:
             raise ModelNotFound(f"未知 model name: {name!r}")
@@ -97,7 +99,9 @@ class ModelRepo:
             self._check_type(type)
             row.type = type
         if options is not None:
-            row.options = self._serialize_options(options)
+            row.options = self._serialize_json("options", options)
+        if params is not None:
+            row.params = self._serialize_json("params", params)
         await self.session.commit()
         await self.session.refresh(row)
         return self._row_to_entry(row)
@@ -110,7 +114,10 @@ class ModelRepo:
         await self.session.commit()
 
     async def duplicate(self, name: str, *, as_name: str | None = None) -> ModelEntry:
-        """复制 entry。`as_name` 缺省 `<name>_copy`,碰撞自动加序号 `_copy_2 / _3 / ...`。"""
+        """复制 entry。`as_name` 缺省 `<name>_copy`,碰撞自动加序号 `_copy_2 / _3 / ...`。
+
+        options 和 params 都从源 entry 拷贝。
+        """
         src = await self._find_row(name)
         if src is None:
             raise ModelNotFound(f"未知 model name: {name!r}")
@@ -119,49 +126,29 @@ class ModelRepo:
         return await self.create(
             name=target,
             type=src.type,
-            options=self._deserialize_options(src.options),
+            options=self._deserialize_json("options", src.options),
+            params=self._deserialize_json("params", src.params),
         )
-
-    # ---- settings(active_model)----
-
-    async def get_active(self) -> str | None:
-        row = await self.session.get(SettingRow, _ACTIVE_KEY)
-        return row.value if row is not None and row.value else None
-
-    async def set_active(self, name: str) -> None:
-        """设置 active model。校验 name 存在 —— 不允许把 active 指到不存在的 entry。"""
-        if await self._find_row(name) is None:
-            raise ModelNotFound(f"未知 model name: {name!r}")
-        row = await self.session.get(SettingRow, _ACTIVE_KEY)
-        if row is None:
-            self.session.add(SettingRow(key=_ACTIVE_KEY, value=name))
-        else:
-            row.value = name
-        await self.session.commit()
-
-    async def clear_active(self) -> None:
-        """清空 active(走 MockModel fallback)。"""
-        row = await self.session.get(SettingRow, _ACTIVE_KEY)
-        if row is not None:
-            await self.session.delete(row)
-            await self.session.commit()
 
     # ---- 启动期 seed ----
 
     async def seed_if_empty(self) -> None:
-        """models 表空时插入默认 mock entry + active=mock,保证开箱可用。"""
+        """models 表空时插入默认 mock entry,保证开箱可用。
+
+        0.3.1 起 active 概念删除,seed 只插 entry,不再写 active。
+        client 必须显式 `body.model = "mock"` 才用 mock。
+        """
         count = await self.session.scalar(select(func.count(ModelRow.id)))
         if count and count > 0:
             return
         self.session.add(
-            ModelRow(name=_SEED_NAME, type=_SEED_TYPE, options=json.dumps(_SEED_OPTIONS)),
+            ModelRow(
+                name=_SEED_NAME,
+                type=_SEED_TYPE,
+                options=json.dumps(_SEED_OPTIONS),
+                params=json.dumps(_SEED_PARAMS),
+            ),
         )
-        # upsert active
-        active_row = await self.session.get(SettingRow, _ACTIVE_KEY)
-        if active_row is None:
-            self.session.add(SettingRow(key=_ACTIVE_KEY, value=_SEED_NAME))
-        else:
-            active_row.value = _SEED_NAME
         await self.session.commit()
 
     # ---- 内部:校验 / 序列化 / 命名 ----
@@ -179,20 +166,20 @@ class ModelRepo:
             raise ConfigError("model type 必须是非空字符串")
 
     @staticmethod
-    def _serialize_options(options: dict[str, Any]) -> str:
+    def _serialize_json(label: str, data: dict[str, Any]) -> str:
         try:
-            return json.dumps(options, ensure_ascii=False)
+            return json.dumps(data, ensure_ascii=False)
         except (TypeError, ValueError) as e:
-            raise ConfigError(f"model options 不可 JSON 序列化: {e}") from e
+            raise ConfigError(f"model {label} 不可 JSON 序列化: {e}") from e
 
     @staticmethod
-    def _deserialize_options(raw: str) -> dict[str, Any]:
+    def _deserialize_json(label: str, raw: str) -> dict[str, Any]:
         try:
             data: Any = json.loads(raw)
         except json.JSONDecodeError as e:
-            raise ConfigError(f"options JSON 损坏: {e}") from e
+            raise ConfigError(f"{label} JSON 损坏: {e}") from e
         if not isinstance(data, dict):
-            raise ConfigError("options JSON 顶层必须是 object")
+            raise ConfigError(f"{label} JSON 顶层必须是 object")
         return cast(dict[str, Any], data)
 
     @classmethod
@@ -200,7 +187,8 @@ class ModelRepo:
         return ModelEntry(
             name=row.name,
             type=row.type,
-            options=cls._deserialize_options(row.options),
+            options=cls._deserialize_json("options", row.options),
+            params=cls._deserialize_json("params", row.params),
         )
 
     async def _find_row(self, name: str) -> ModelRow | None:

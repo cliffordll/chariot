@@ -1,12 +1,13 @@
 """Chariot 配置数据形态 + 来源装载。
 
-0.3.0 起源数据来源从 TOML 文件迁到 DB(`models` / `settings` 表),由
-`ModelRepo` 持久化。本模块只保留:
+0.3.0 起源数据来源从 TOML 文件迁到 DB(`models` 表),由 `ModelRepo` 持久化。
+0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
+本模块只保留:
 
 - `ConfigError`:配置层错误(startup 期 raise,不是 HTTP)
-- `ModelEntry`:单条 model 配置(name / type / options)—— 数据形态
-- `ChariotConfig`:顶层(models 列表 + active)—— 数据形态;`from_db(session)`
-  classmethod 从 ModelRepo 装载
+- `ModelEntry`:单条 model 配置(name / type / options / params)—— 数据形态
+- `ChariotConfig`:顶层(纯 entries 容器)—— 数据形态;`from_db(session)` classmethod
+  从 ModelRepo 装载
 
 历史:0.2.x 时这里有 `ConfigLoader`(读 `~/.chariot/config.toml`)+
 `ChariotConfig.from_dict(raw)`(TOML dict 校验)。0.3.0 一并删除,见
@@ -17,11 +18,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _empty_params() -> dict[str, Any]:
+    """frozen dataclass 默认值工厂;内联 lambda pyright 推断不出 dict[str, Any]。"""
+    return {}
 
 
 class ConfigError(Exception):
@@ -32,7 +38,7 @@ class ConfigError(Exception):
 
 
 class ModelNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好,语义明显是异常
-    """指定 name 在 DB 里找不到(update / delete / duplicate src / set_active)。
+    """指定 name 在 DB 里找不到(update / delete / duplicate src)。
 
     Controller 转 HTTP 404。
     """
@@ -49,25 +55,27 @@ class DuplicateModelName(ConfigError):  # noqa: N818 — 同上
 class ModelEntry:
     """单条 model 配置条目(数据形态)。
 
-    `options` 显式必填(无默认),调用方传 `{}` 表示"无选项"。和 0.2.x 一致。
+    - `options`:build Model 实例所需(model / api_key / base_url ...)
+    - `params`:0.3.1 加。runtime sampling 默认值(temperature / top_p / max_tokens),
+      给前端发请求时填默认 body 字段用。**server 不主动注入 body**,只通过 API
+      暴露给 client。
     """
 
-    name: str  # 用户面名称(`chariot model list` 列出来)
+    name: str  # 用户面名称(`chariot model list` 列出来 / client 在 body.model 写)
     type: str  # builder 类型 key(mock / anthropic / llama_local 等)
     options: dict[str, Any]
+    params: dict[str, Any] = field(default_factory=_empty_params)
 
 
 @dataclass(frozen=True)
 class ChariotConfig:
-    """顶层配置:models 列表 + active 名称。
+    """顶层配置:models 列表。
 
-    `from_db(session)` 是唯一外部装载入口。0.3.0 删除了 TOML 装载路径
-    (`from_dict` / `ConfigLoader`),保留数据形态供 ModelRegistry.build /
-    Agent.install_from_config 复用。
+    0.3.1 删除 `active` 字段(client 用 body.model 路由,server 不持有 active 状态)。
+    `from_db(session)` 是唯一外部装载入口。
     """
 
     models: tuple[ModelEntry, ...] = ()
-    active: str | None = None
 
     # ---- 构造工厂 ----
 
@@ -77,34 +85,20 @@ class ChariotConfig:
 
     @classmethod
     async def from_db(cls, session: AsyncSession) -> ChariotConfig:
-        """从 DB(`models` 表 + `settings.active_model`)装载完整配置。
-
-        - active 指向不存在的 entry → `ConfigError`(数据不一致,需修复)
-        - 表空 → `empty()`(lifespan 调用方应当先 `seed_if_empty()`)
-        """
+        """从 DB(`models` 表)装载完整配置。表空 → `empty()`。"""
         from chariot.server.repository.model_repo import ModelRepo  # 避免循环 import
 
         repo = ModelRepo(session)
         entries = tuple(await repo.list_entries())
-        active = await repo.get_active()
-        if active is not None and not any(e.name == active for e in entries):
-            raise ConfigError(f"settings.active_model={active!r} 在 models 表里找不到")
-        return cls(models=entries, active=active)
+        return cls(models=entries)
 
     # ---- 查询 ----
 
     def is_empty(self) -> bool:
-        return not self.models and self.active is None
+        return not self.models
 
-    def active_entry(self) -> ModelEntry | None:
-        """按 active 名称返对应 entry;active=None 返 None。
-
-        active 指向未知 name 视为一致性破坏,raise `ConfigError`(`from_db` 已校验,
-        理论上不该到这;手工构造的 ChariotConfig 才可能踩到)。
-        """
-        if self.active is None:
-            return None
+    def find_entry(self, name: str) -> ModelEntry | None:
         for entry in self.models:
-            if entry.name == self.active:
+            if entry.name == name:
                 return entry
-        raise ConfigError(f"active 指向未知 model name: {self.active!r}")
+        return None

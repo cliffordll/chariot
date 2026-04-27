@@ -3,7 +3,9 @@
 与 `migrations/*.sql` 字段对齐;SQL 是 schema 真源,ORM 镜像它。
 
 - v1:`logs` 表(请求流水)
-- v2(0.3.0):`models` / `settings` 表 —— 模型配置 DB 化,不再读 config.toml
+- v2(0.3.0):`models` 表 + `settings`(KV)—— 模型配置 DB 化
+- v3(0.3.1):`models` 加 `params` 列;drop `settings` 表(active 概念删除,
+  client 在 body.model 写 entry name 直接路由)
 
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
@@ -51,7 +53,12 @@ class LogEntry(Base):
 
 
 class ModelRow(Base):
-    """`models` 表:0.3.0 起承载 [[models]] entries(name / type / options JSON)。"""
+    """`models` 表:0.3.0 起承载 [[models]] entries。
+
+    - `options`:JSON,build Model 实例所需参数(model / api_key / base_url 等)
+    - `params`:JSON,runtime sampling 默认值(temperature / top_p / max_tokens 等),
+      0.3.1 加;客户端发请求时若 body 缺字段,前端从此处填(server 不主动注入)
+    """
 
     __tablename__ = "models"
 
@@ -59,14 +66,6 @@ class ModelRow(Base):
     name: Mapped[str] = mapped_column(unique=True, index=True)
     type: Mapped[str]
     options: Mapped[str]  # JSON-serialized dict
+    params: Mapped[str]  # JSON-serialized dict;migration v3 列默认 '{}'
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
-
-
-class SettingRow(Base):
-    """`settings` 表:KV 单行存全局设置(`active_model` 等)。"""
-
-    __tablename__ = "settings"
-
-    key: Mapped[str] = mapped_column(primary_key=True)
-    value: Mapped[str]
