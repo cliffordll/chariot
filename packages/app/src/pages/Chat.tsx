@@ -221,19 +221,27 @@ export default function Chat() {
     setInput(userMsg.content);
   }, [messages, inFlight]);
 
-  const runSwitch = useCallback(async () => {
-    if (!pendingChoice || switchState.kind === "switching") return;
-    if (modelsState.kind === "ok" && pendingChoice === modelsState.data.active) return;
-    setSwitchState({ kind: "switching", name: pendingChoice });
-    try {
-      await api.useModel(pendingChoice);
-      setSwitchState({ kind: "idle" });
-      await loadModels();
-    } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setSwitchState({ kind: "err", message: msg });
-    }
-  }, [pendingChoice, switchState.kind, modelsState, loadModels]);
+  /**
+   * Select onValueChange 直接触发,Select 改值即切 active,无单独"切换"按钮。
+   * 选回当前 active(name === data.active)直接 noop;切换中重复触发也 noop。
+   */
+  const runSwitch = useCallback(
+    async (name: string) => {
+      if (switchState.kind === "switching") return;
+      if (modelsState.kind === "ok" && name === modelsState.data.active) return;
+      setPendingChoice(name);
+      setSwitchState({ kind: "switching", name });
+      try {
+        await api.useModel(name);
+        setSwitchState({ kind: "idle" });
+        await loadModels();
+      } catch (e) {
+        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+        setSwitchState({ kind: "err", message: msg });
+      }
+    },
+    [switchState.kind, modelsState, loadModels],
+  );
 
   return (
     <section className="flex h-full flex-col">
@@ -247,9 +255,8 @@ export default function Chat() {
       <ActiveModelRow
         modelsState={modelsState}
         pendingChoice={pendingChoice}
-        onChoose={setPendingChoice}
         switchState={switchState}
-        onSwitch={() => void runSwitch()}
+        onSwitch={(name) => void runSwitch(name)}
       />
 
       <AdvancedParamsPanel
@@ -315,15 +322,13 @@ export default function Chat() {
 function ActiveModelRow({
   modelsState,
   pendingChoice,
-  onChoose,
   switchState,
   onSwitch,
 }: {
   modelsState: ModelsState;
   pendingChoice: string | null;
-  onChoose: (name: string) => void;
   switchState: SwitchState;
-  onSwitch: () => void;
+  onSwitch: (name: string) => void;
 }) {
   if (modelsState.kind === "loading") {
     return (
@@ -360,7 +365,7 @@ function ActiveModelRow({
         </span>
         <Select
           value={pendingChoice ?? undefined}
-          onValueChange={onChoose}
+          onValueChange={onSwitch}
           disabled={isSwitching}
         >
           <SelectTrigger className="h-8 w-56">
@@ -377,15 +382,11 @@ function ActiveModelRow({
             ))}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          onClick={onSwitch}
-          disabled={isSwitching || !pendingChoice || pendingChoice === data.active}
-        >
-          {isSwitching ? "切换中…" : "切换"}
-        </Button>
+        {isSwitching && (
+          <span className="text-xs text-muted-foreground">切换中…</span>
+        )}
         <span className="ml-auto text-xs text-muted-foreground">
-          切换影响 server 全局 active model,所有会话共享。
+          选中即切;影响 server 全局 active model,所有会话共享。
         </span>
       </div>
       {switchState.kind === "err" && (
