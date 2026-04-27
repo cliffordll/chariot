@@ -31,6 +31,7 @@ from chariot.sdk.chat import ChatResult
 from chariot.sdk.discover import ServerDiscovery
 from chariot.server.controller.logs import LogOut
 from chariot.server.controller.models import (
+    EntryResponse,
     ModelsListResponse,
     ProbeResult,
     SwitchModelResponse,
@@ -144,6 +145,71 @@ class ProxyClient:
         )
         resp.raise_for_status()
         return ProbeResult.model_validate(resp.json())
+
+    # ---- entries CRUD(0.3.0)----
+
+    async def create_model(
+        self,
+        *,
+        name: str,
+        type: str,
+        options: dict[str, Any] | None = None,
+    ) -> EntryResponse:
+        """新增 model entry。重名 → 409;type 未注册 → 400。"""
+        resp = await self.http.post(
+            f"{self.base_url}/admin/models/entries",
+            json={"name": name, "type": type, "options": options or {}},
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return EntryResponse.model_validate(resp.json())
+
+    async def update_model(
+        self,
+        name: str,
+        *,
+        type: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> EntryResponse:
+        """更新 type / options。改 active entry 时 server 端会自动 rebuild model 实例。"""
+        body: dict[str, Any] = {}
+        if type is not None:
+            body["type"] = type
+        if options is not None:
+            body["options"] = options
+        resp = await self.http.put(
+            f"{self.base_url}/admin/models/entries/{name}",
+            json=body,
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return EntryResponse.model_validate(resp.json())
+
+    async def delete_model(self, name: str) -> None:
+        """删 entry。active 不许删 → 400(`cannot_delete_active`)。"""
+        resp = await self.http.delete(
+            f"{self.base_url}/admin/models/entries/{name}",
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+
+    async def duplicate_model(
+        self,
+        name: str,
+        *,
+        as_name: str | None = None,
+    ) -> EntryResponse:
+        """复制 entry。`as_name` 缺省 `<name>_copy`,碰撞自动 `_copy_N`。"""
+        body: dict[str, Any] = {}
+        if as_name is not None:
+            body["as"] = as_name
+        resp = await self.http.post(
+            f"{self.base_url}/admin/models/entries/{name}/duplicate",
+            json=body,
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return EntryResponse.model_validate(resp.json())
 
     # ---------- data plane ----------
 
