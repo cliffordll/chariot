@@ -144,7 +144,7 @@ def install_from_db(cls, config: ChariotConfig) -> Agent:
 
 1. `ModelRepo.create / update / delete / duplicate` 持久化
 2. 重新装载 `ChariotConfig.from_db(session)`(纯读)
-3. 触发 `Agent._refresh_config(config)`(只更新 `_config` / `_active_name` 缓存,不重建当前 Model 实例 —— 当前 active model 实例继续用,直到 active 被切走或 entry 改了 type/options 才 rebuild)
+3. 触发 `Agent.refresh_config(config)`(只更新 `_config` 缓存,不重建当前 Model 实例 —— 当前 active model 实例继续用,直到 active 被切走或 entry 改了 type/options 才 rebuild)
 
 具体:
 

@@ -32,7 +32,7 @@ from chariot.sdk.client import ProxyClient
 
 model_app = typer.Typer(
     name="model",
-    help="管理 active model(配置在 ~/.chariot/config.toml)",
+    help="管理 model entries(0.3.0 起住 chariot 内置 SQLite,不再读 config.toml)",
     no_args_is_help=True,
 )
 

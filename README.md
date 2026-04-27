@@ -80,50 +80,59 @@ Controller  →  Agent.handle(body)
 
 ## 接真实 Anthropic 模型
 
-默认走 `MockModel`(本地 echo)。要让 chariot 真打到 Anthropic Messages API:
+> **0.3.0 起**模型配置不再走 `~/.chariot/config.toml` 文件,改存 chariot 内置
+> SQLite。所有 model entries 通过 Models 页 / `chariot model` CLI / admin API
+> 增删改查。首次启动会 seed 一条 `mock` entry,开箱可用。
 
-1. 准备 API key,两种填法二选一(都给 → `api_key` 优先):
+默认走 `MockModel`(本地 echo)。要让 chariot 真打到 Anthropic Messages API,
+**两种方式二选一**:
 
-   - **(a) 直填配置文件**:省 env,但密钥明文落地 `~/.chariot/config.toml` —— 务必把它排除在版本库 / 备份 / 同步之外
-   - **(b) 走环境变量**(更安全,默认行为):
+### (A) 在 Models 页加(推荐)
 
-     ```bash
-     export ANTHROPIC_API_KEY="sk-ant-..."
-     # Windows PowerShell:$env:ANTHROPIC_API_KEY="sk-ant-..."
-     ```
+```bash
+uv run python -m chariot.server          # 起 server
+bun run --filter=@chariot/app dev         # 或者 Tauri 桌面壳:见上面 Quick start
+```
 
-2. 把内置模板写到 `~/.chariot/config.toml`:
+打开 Models tab → `[+ Add]` → 表单填 :
+- name: `claude`(任意 user-friendly id)
+- type: `anthropic`
+- model_id: `claude-opus-4-5`
+- api_key: `sk-ant-...`(或留空走 env)
+- api_key_env: `ANTHROPIC_API_KEY`(默认,可省)
+- base_url: 留空默认 `https://api.anthropic.com`
 
-   ```bash
-   uv run chariot config init       # 模板里默认 active = "mock";编辑改成 "claude"
-   uv run chariot config show       # 看当前生效路径 + 内容(排错用)
-   ```
+加完去 Chat 页右上角下拉切到 `claude` —— Send 一条试试。失败可在 Models 页对该
+entry 点 `[Test]` 跑探针,看到具体错码(`upstream_auth_failed` / `upstream_unreachable`
+/ ...)。
 
-   不想用 CLI 也可以手写,模板内容(Windows 路径:`%USERPROFILE%\.chariot\config.toml`):
+### (B) CLI 一条搞定
 
-   ```toml
-   [[models]]
-   name = "claude"
-   type = "anthropic"
-   [models.options]
-   model_id = "claude-opus-4-5"
-   # (a) 直填:取消下行注释、写 sk-ant-... 的 key;
-   # api_key = "sk-ant-..."
-   # (b) 走 env:留空 api_key,默认读 $ANTHROPIC_API_KEY;想换 env 名解开下行:
-   # api_key_env = "YOUR_VAR"
-   # base_url 也可选,默认就是 https://api.anthropic.com
+```bash
+uv run chariot model add --name claude --type anthropic \
+    -o model_id=claude-opus-4-5 \
+    -o api_key=sk-ant-...
 
-   [active]
-   model = "claude"
-   ```
+uv run chariot model use claude          # 切 active(持久化到 DB)
+uv run chariot model probe claude        # 探针验通断
+```
 
-3. 重启 server:`uv run python -m chariot.server`。Dashboard 或 `curl /v1/messages` 会走真实模型。
+或不传 `api_key`,走 env:
 
-行为细节:
-- 客户端 body 里写啥 `model` 都会被替换成配置里的 `model_id`(chariot 是单一身份代理)
-- 上游 401 / 403 → 502 `upstream_auth_failed`(检查 config 里的 `api_key` 或 `$ANTHROPIC_API_KEY`);429 透传;5xx → 502
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."     # PowerShell:$env:ANTHROPIC_API_KEY="..."
+uv run chariot model add --name claude --type anthropic -o model_id=claude-opus-4-5
+uv run chariot model use claude
+```
+
+### 行为细节
+
+- 客户端 body 里写啥 `model` 都会被替换成 entry 的 `model_id`(chariot 是单一身份代理)
+- 上游 401 / 403 → 502 `upstream_auth_failed`(检查 entry 的 api_key);429 透传;5xx → 502
 - 流式:`stream: true` 直接透传上游 SSE 字节,中途断开靠断 TCP 通知客户端
-- 没设 `[active]`、或删除 `config.toml` 文件 → 自动 fallback 到 MockModel(开箱可用)
+- 没切 active(seed 后默认 mock)/ entry 不存在 → 走 MockModel fallback(开箱可用)
+- ⚠️ **直填 api_key 安全提示**:密钥落地 `~/.chariot/chariot.db`(SQLite 文件)。
+  务必把这个目录排除在版本库 / 备份 / 同步之外
 
 ## OpenAI 客户端怎么接
 
@@ -154,8 +163,8 @@ chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端
 
 | File | Purpose |
 |---|---|
-| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.2.0)— Controller / Agent / Model 分层 + Config + Registry |
-| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.2.0:单协议化 + 真实模型 + 切换控制面) |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.3.0)— Controller / Agent / Model 分层 + 模型管理 DB 化 + Registry |
+| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.3.0:模型配置 DB 化 + Models 页 CRUD) |
 | [`docs/history/`](docs/history/) | 历史版本 DESIGN / FEATURE 归档(每个发布版本一份冻结快照) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.3.0+ 方向(多轮记忆 / 工具调用 / 进化循环) |
 | [`docs/guides/first-run.md`](docs/guides/first-run.md) | **First-time setup** — tools, deps, sidecar, launch |
@@ -164,11 +173,15 @@ chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端
 
 ## Status
 
-**0.2.0 ✅** — 单协议化(只接 Anthropic Messages)+ 真实模型接入(`AnthropicModel`
-透传到上游 + 错误映射 + 流式 SSE)+ Model 注册中心(`ModelRegistry` 装饰器派发)+
-`~/.chariot/config.toml` 配置 + 运行时切换(`/admin/models` / `chariot model
-list use` / Dashboard 切换面板)。无配置时自动 fallback 到 `MockModel`(开箱可用)。
+**0.3.0 ✅** — 模型配置全面 DB 化:`~/.chariot/config.toml` 真源被 chariot 内置
+SQLite 替代(`models` / `settings` 表)。Models tab 提供 add / edit / delete /
+duplicate UI;CLI 同步加 `chariot model add/edit/rm/duplicate`。`chariot config
+init/show` 子命令组废弃。0.2.x 老用户:旧 `~/.chariot/config.toml` 不再被读取,
+首次启动会 seed 一条 `mock` entry 开箱可用,真模型自行在 Models 页加。
 
-**0.3.0+** 方向:Agent 层加多轮对话记忆 / 工具调用 / 自我进化循环 —— 详见
+**0.2.6 ✅** — 模型探针(`POST /admin/models/{name}/probe` + Models 页 [Test])
++ Chat 页高级采样参数 UI(temperature / top_p / max_tokens 滑杆)。
+
+**0.4.0+** 方向:Agent 层加多轮对话记忆 / 工具调用 / 自我进化循环 —— 详见
 [`docs/ROADMAP.md`](docs/ROADMAP.md)。新加真实后端只需写一个 `chariot/server/model/<name>.py`
 + `@ModelRegistry.register("xxx")` 一行装饰器。

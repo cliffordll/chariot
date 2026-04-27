@@ -346,8 +346,8 @@ function ActiveModelRow({
     return (
       <div className="mb-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         当前走 MockModel fallback(<code className="font-mono">{activeLabel}</code>)。
-        在 <code className="font-mono">~/.chariot/config.toml</code> 加{" "}
-        <code className="rounded bg-muted px-1 py-0.5">[[models]]</code> 后重启 server 即可切换。
+        在 Models 页 <code className="rounded bg-muted px-1 py-0.5">+ Add</code>{" "}
+        新建 entry 后,在这里下拉切换。
       </div>
     );
   }

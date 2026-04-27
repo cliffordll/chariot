@@ -1,19 +1,19 @@
-# Chariot v1+ 路线图
+# Chariot 路线图
 
-v0 已落地的范围见 `docs/FEATURE.md`(阶段 1.1~1.10 ✅)。本文档记录**不在 v0 范围**的方向。
+0.1.0 ~ 0.3.0 已落地的范围见 `docs/FEATURE.md` + `docs/history/`。本文档记录
+**未来方向**(0.4.0 起)。
 
 ---
 
-## v1:真实模型接入 / 选型
+## v1:真实模型接入 / 选型 ✅(0.2.0 ~ 0.3.0 完成)
 
-- **Model config 体系** —— `~/.chariot/config.toml` 指定 model 类型 + 连接参数;
-  `init_agent()` 按 config inject 对应 Model 实现,没配走 Mock
-- **三个 Model 候选方向**(优先选一个上):
-  - `AnthropicAdapterModel`:走 Anthropic Messages API,三 protocol 本地翻译成 messages 再调
-  - `OpenAIAdapterModel`:走 OpenAI Chat Completions API
-  - `LocalLlamaModel`:llama.cpp / vllm 进程绑 socket,完全本机
-- **Model 切换** —— UI Dashboard 加"切换 model"下拉 + 重启按钮;
-  CLI `chariot model list / use <name>`
+- ✅ **Model 配置体系**:0.2.x 用 `~/.chariot/config.toml`,0.3.0 起改 DB-backed
+  (`models` / `settings` 表);Models 页 / `chariot model` CLI / admin API CRUD
+- ✅ **AnthropicModel**:透传到 Anthropic Messages API,错误映射 + 流式 SSE
+- 🟡 **OpenAIAdapterModel** / **LocalLlamaModel**:暂未上(用 LiteLLM 等外部转换器
+  接 chariot 当 Anthropic 后端即可)
+- ✅ **Model 切换**:Chat 页下拉 + 设为 active(0.3.0 持久化到 DB);
+  CLI `chariot model list / use / probe / add / edit / rm / duplicate`
 
 ## v2:Agent 进化(chariot 的核心方向)
 
@@ -39,7 +39,7 @@ v0 已落地的范围见 `docs/FEATURE.md`(阶段 1.1~1.10 ✅)。本文档记�
 
 - 实时日志流(SSE / WebSocket 而非 polling)
 - 按 model / protocol 切分的用量统计(时间序列图)
-- 配置导入导出(`chariot config export/import`)
+- 配置导入导出(`chariot model export/import` —— 把 DB 里的 entries 导出为 JSON / 从 JSON 导入)
 
 ## 发版与分发
 
