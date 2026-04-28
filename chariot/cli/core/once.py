@@ -25,7 +25,7 @@ class ChatOnce:
     async def run(self, text: str) -> None:
         self.ctx.append_user(text)
         try:
-            result = await self.ctx.run_turn(Renderer.stream_token)
+            result = await self.ctx.run_turn(Renderer.render_event)
         except ChatError as e:
             Renderer.stream_newline()
             Renderer.error_bubble(f"HTTP {e.status}: {e.short_body()}")

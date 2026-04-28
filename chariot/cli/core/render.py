@@ -12,12 +12,16 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterable, Mapping
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from rich.console import Console
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from chariot.sdk.streams import StreamEvent
 
 
 class Renderer:
@@ -29,6 +33,12 @@ class Renderer:
 
     # 静默开关:True 时抑制 stdout 成功输出(stderr / 错误不变)
     QUIET: ClassVar[bool] = False
+
+    # 流式渲染状态:`stream_token` 写入后置 True;`stream_newline` /
+    # `tool_use_line` / `tool_result_line` 在需要换行时检查并清零。
+    # 0.5.0 起多事件混排(text + tool_use + tool_result),tool 行需要确保跟
+    # 之前的内联 text 之间有断行;state 让调用方不必手动协调。
+    _last_was_inline_text: ClassVar[bool] = False
 
     # ---------- stdout(受 QUIET 影响)----------
 
@@ -79,6 +89,7 @@ class Renderer:
             return
         sys.stdout.write(tok)
         sys.stdout.flush()
+        cls._last_was_inline_text = True
 
     @classmethod
     def stream_newline(cls) -> None:
@@ -87,6 +98,63 @@ class Renderer:
             return
         sys.stdout.write("\n")
         sys.stdout.flush()
+        cls._last_was_inline_text = False
+
+    @classmethod
+    def tool_use_line(cls, name: str, input_repr: str) -> None:
+        """流式 tool_use 行,dim 灰 → 前缀。如果前面有未换行的 inline text,先补一行。
+
+        典型形态::
+
+            →  read_file({"path": "x.txt"})
+        """
+        if cls.QUIET:
+            return
+        if cls._last_was_inline_text:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            cls._last_was_inline_text = False
+        cls._stdout.print(f"[dim]→ {name}({input_repr})[/dim]", highlight=False)
+
+    @classmethod
+    def render_event(cls, ev: StreamEvent) -> None:
+        """`ChatStream.events()` 吐的 typed event → 屏幕输出。
+
+        REPL / once / batch 共用同一份 dispatch 逻辑(实例化各自的 ChatContext
+        都把这个静态方法当 on_event 回调传给 `run_turn`)。
+        - text → stream_token(逐增量直写)
+        - tool_use → tool_use_line(name + JSON 化的 input)
+        - tool_result → tool_result_line(content + is_error)
+        - turn_complete / stream_done:静默(meta 行另外打;caller 可读 TurnResult)
+        """
+        if ev.kind == "text":
+            cls.stream_token(ev.text)
+        elif ev.kind == "tool_use":
+            input_repr = json.dumps(ev.tool_input or {}, ensure_ascii=False)
+            cls.tool_use_line(ev.tool_name, input_repr)
+        elif ev.kind == "tool_result":
+            cls.tool_result_line(ev.tool_result_content, is_error=ev.is_error)
+
+    @classmethod
+    def tool_result_line(cls, text: str, *, is_error: bool = False) -> None:
+        """流式 tool_result 行。成功 dim 灰 ← 前缀;错误红色。
+
+        长 text 截到首行末尾(避免一条 tool_result 把屏幕灌满);完整内容靠 `chariot
+        conversation show` 看。
+        """
+        if cls.QUIET:
+            return
+        if cls._last_was_inline_text:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            cls._last_was_inline_text = False
+        # 截首行 + 限长(避免 tool_result 灌屏)
+        first_line = text.splitlines()[0] if text else "(空)"
+        truncated = first_line if len(first_line) <= 120 else first_line[:119] + "…"
+        if is_error:
+            cls._stdout.print(f"[red]← error: {truncated}[/red]", highlight=False)
+        else:
+            cls._stdout.print(f"[dim]← {truncated}[/dim]", highlight=False)
 
     @classmethod
     def meta_line(

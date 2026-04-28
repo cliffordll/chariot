@@ -152,10 +152,15 @@ class ChatRepl:
         )
 
     async def _one_turn(self, user_text: str) -> None:
-        """发一轮请求;失败撤回 user,避免污染后续上下文。"""
+        """发一轮请求;失败撤回 user,避免污染后续上下文。
+
+        0.5.0 起 server 可能返多 turn(slow path 工具循环),`Renderer.render_event`
+        把 typed StreamEvent 分派为屏幕输出:text 逐 token 流,tool_use / tool_result
+        各自单行渲染。
+        """
         self.ctx.append_user(user_text)
         try:
-            result = await self.ctx.run_turn(Renderer.stream_token)
+            result = await self.ctx.run_turn(Renderer.render_event)
         except ChatError as e:
             Renderer.stream_newline()
             self.ctx.pop_last()

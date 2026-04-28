@@ -42,8 +42,8 @@ class ChatBatch:
         for text in texts:
             self.ctx.append_user(text)
             try:
-                # batch 不打印 token,on_token 回调空跑
-                result = await self.ctx.run_turn(on_token=_noop)
+                # batch 不打印任何输出,on_event 回调空跑(收尾拿 TurnResult)
+                result = await self.ctx.run_turn(on_event=_noop)
             except ChatError as e:
                 self.ctx.pop_last()
                 self.errors.append(e)
@@ -53,5 +53,5 @@ class ChatBatch:
         return results
 
 
-def _noop(_: str) -> None:
-    """on_token 占位;batch 不消费增量 token(只在收尾拿完整 TurnResult.text)。"""
+def _noop(_: object) -> None:
+    """on_event 占位;batch 不消费 typed events(只在收尾拿完整 TurnResult)。"""

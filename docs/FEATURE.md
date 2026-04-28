@@ -11,6 +11,9 @@
 每步推进规则(沿用):每完成一步 → 跑验证 → 等用户确认"通过"再标 ✅,然后 commit。
 一个 FEATURE 步骤 = 一个 commit。
 
+**执行顺序调整**(用户指令):S.3 推迟,实际推进顺序为 S.1 → S.2 → S.4 → S.3 → S.5。
+S.x 标号不动(commit message 引用稳定),只是按文档章节顺序读时不等于推进顺序。
+
 ---
 
 ## 0.5.0 patch 列表
@@ -99,7 +102,7 @@
     messages,断 `refresh_from_server` 替换本地 `self.messages`
 - **验证**:`uv run pytest -q`
 
-### S.4 CLI REPL 渲染流式工具
+### S.4 ✅ CLI REPL 渲染流式工具
 
 **目标**:dim 灰行实时打印 tool_use / tool_result。
 

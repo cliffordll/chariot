@@ -26,7 +26,14 @@ stateful / stateless body.messages 契约(0.4.3 起严格遵守)
 ```
 ctx = ChatContext(client=client, model="claude-haiku-4-5")
 ctx.append_user("hi")
-result = await ctx.run_turn(on_token=print)
+
+def on_event(ev):
+    if ev.kind == "text":
+        print(ev.text, end="", flush=True)
+    elif ev.kind == "tool_use":
+        print(f"\\n→ {ev.tool_name}({ev.tool_input})")
+
+result = await ctx.run_turn(on_event)
 ctx.append_assistant(result.text)
 ```
 """
@@ -39,7 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from chariot.sdk.client import ProxyClient
-from chariot.sdk.streams import ChatStream
+from chariot.sdk.streams import ChatStream, StreamEvent
 
 DEFAULT_MODEL: str = "claude-haiku-4-5"
 
@@ -108,14 +115,25 @@ class ChatContext:
 
     # ---------- 核心:一轮请求 ----------
 
-    async def run_turn(self, on_token: Callable[[str], None]) -> TurnResult:
-        """用当前 `self.messages` 发一轮流式请求,`on_token` 实时收每个文本增量。
+    async def run_turn(self, on_event: Callable[[StreamEvent], None]) -> TurnResult:
+        """用当前 `self.messages` 发一轮流式请求,`on_event` 实时收每个 typed event。
+
+        Caller 用 `on_event` 分派显示:text 增量逐 token 流;tool_use 单行打印;
+        tool_result 单行打印(0.5.0 协议级流式工具循环,一条响应里可能多 turn)。
+
+        TurnResult.text 取的是 **最后一个 assistant turn**(stop_reason 收敛那轮)的
+        文本;之前的 assistant turn(后跟 tool_use 那种)文本算"过程文本",不进
+        TurnResult —— caller 已经通过 on_event 看到过了。
 
         server 4xx / 5xx 时抛 `ChatError`(body = 响应正文)。
         """
         body = self._build_body()
         stream = ChatStream()
-        buf: list[str] = []
+        # 跨 turn 跟踪:current_turn_text 是当前正在累积的 assistant turn 文本;
+        # 每次 turn_complete(role=assistant)snapshot 到 last_assistant_text,
+        # 被下一轮覆盖,流尾留下的就是最终轮的文本。
+        current_turn_text: list[str] = []
+        last_assistant_text: list[str] = []
         t0 = time.monotonic()
 
         async with self.client.stream_chat(body, conversation_id=self.conversation_id) as resp:
@@ -125,12 +143,17 @@ class ChatContext:
                     status=resp.status_code,
                     body=err_bytes.decode("utf-8", errors="replace"),
                 )
-            async for tok in stream.text_deltas(resp):
-                on_token(tok)
-                buf.append(tok)
+            async for ev in stream.events(resp):
+                on_event(ev)
+                if ev.kind == "text":
+                    current_turn_text.append(ev.text)
+                elif ev.kind == "turn_complete" and ev.role == "assistant":
+                    # 这一轮 assistant 收尾(可能是 tool_use 中转,也可能是 final)
+                    last_assistant_text = current_turn_text
+                    current_turn_text = []
 
         return TurnResult(
-            text="".join(buf),
+            text="".join(last_assistant_text),
             input_tokens=stream.input_tokens,
             output_tokens=stream.output_tokens,
             latency_ms=int((time.monotonic() - t0) * 1000),
