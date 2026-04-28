@@ -63,6 +63,8 @@ async def test_status(echo_client: tuple[ProxyClient, dict[str, Any]]) -> None:
             "version": "0.1.0",
             "uptime_ms": 12345,
             "entries_count": 2,
+            "tools_enabled": 0,
+            "conversations_count": 0,
             "url": "http://127.0.0.1:12345",
         },
     )
@@ -70,6 +72,8 @@ async def test_status(echo_client: tuple[ProxyClient, dict[str, Any]]) -> None:
     assert status.version == "0.1.0"
     assert status.uptime_ms == 12345
     assert status.entries_count == 2
+    assert status.tools_enabled == 0
+    assert status.conversations_count == 0
     assert status.url == "http://127.0.0.1:12345"
     assert captured["request"].url.path == "/admin/status"
 

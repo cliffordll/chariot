@@ -17,7 +17,15 @@ from __future__ import annotations
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from chariot.server.controller import dataplane, logs, models, runtime, stats
+from chariot.server.controller import (
+    conversations,
+    dataplane,
+    logs,
+    models,
+    runtime,
+    stats,
+    tools,
+)
 from chariot.server.controller.errors import chariot_error
 from chariot.server.service.exceptions import ServiceError
 
@@ -26,6 +34,8 @@ admin_router.include_router(runtime.router)
 admin_router.include_router(logs.router)
 admin_router.include_router(stats.router)
 admin_router.include_router(models.router)
+admin_router.include_router(tools.router)
+admin_router.include_router(conversations.router)
 
 dataplane_router = APIRouter()
 dataplane_router.include_router(dataplane.router)

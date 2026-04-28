@@ -59,6 +59,21 @@ class ToolNotFound(ConfigError):  # noqa: N818 — 同 ModelNotFound
     """
 
 
+class ConversationNotFound(ConfigError):  # noqa: N818 — 同 ModelNotFound
+    """指定 conversation id 在 DB 里找不到(0.4.0 update_title / delete 路径)。
+
+    Controller 转 HTTP 404。
+    """
+
+
+class DuplicateConversationId(ConfigError):  # noqa: N818 — 同 DuplicateModelName
+    """conversation id 已存在(0.4.0 显式 create 路径)。
+
+    Controller 转 HTTP 409。`ensure_exists` 不会触发(它是 idempotent upsert);
+    只 `POST /admin/conversations` 显式创建并指定已用 id 时会撞。
+    """
+
+
 @dataclass(frozen=True)
 class ModelEntry:
     """单条 model 配置条目(数据形态)。

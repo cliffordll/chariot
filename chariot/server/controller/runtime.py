@@ -16,9 +16,12 @@ import time
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from chariot import __version__
 from chariot.server.agent import Agent
+from chariot.server.database.models import ConversationRow
+from chariot.server.database.session import SessionDep
 
 router = APIRouter()
 
@@ -43,12 +46,14 @@ async def ping() -> PingResponse:
 class StatusResponse(BaseModel):
     version: str
     uptime_ms: int
-    entries_count: int  # 0.3.1:已注册 entries 数量;active 概念退役后不再返单一 model
+    entries_count: int  # 0.3.1:已注册 model entries 数量;active 概念退役后不再返单一 model
+    tools_enabled: int  # 0.4.0:Agent 当前 enabled tools 数(Agent.tools 字典 len)
+    conversations_count: int  # 0.4.0:DB 里 conversations 总数
     url: str  # 客户端抵达 server 的 base URL(含 scheme + host + port)
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status(request: Request) -> StatusResponse:
+async def status(request: Request, session: SessionDep) -> StatusResponse:
     uptime_ms = int((time.monotonic() - _START_MONO) * 1000)
     agent = Agent.current()
     # 直接从 ASGI scope["server"] = (host, port) 拿 bind 的地址;避开 base_url
@@ -57,10 +62,13 @@ async def status(request: Request) -> StatusResponse:
     scope_server = request.scope.get("server") or (None, None)
     host, port = scope_server
     url = f"http://{host}:{port}" if host and port else str(request.base_url).rstrip("/")
+    convs_count = (await session.scalar(select(func.count(ConversationRow.id)))) or 0
     return StatusResponse(
         version=__version__,
         uptime_ms=uptime_ms,
         entries_count=len(agent.models),
+        tools_enabled=len(agent.tools),
+        conversations_count=int(convs_count),
         url=url,
     )
 

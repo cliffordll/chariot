@@ -33,7 +33,11 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError
+from chariot.server.config import (
+    ConfigError,
+    ConversationNotFound,
+    DuplicateConversationId,
+)
 from chariot.server.database.models import ConversationRow, MessageRow
 
 
@@ -67,12 +71,12 @@ class ConversationRepo:
     # ---- conversations CRUD ----
 
     async def create(self, conv_id: str, *, title: str | None = None) -> Conversation:
-        """显式创建一个 conversation。id 已存在 → ConfigError(controller 转 409)。"""
+        """显式创建一个 conversation。id 已存在 → DuplicateConversationId(409)。"""
         if not conv_id:
             raise ConfigError("conversation id 必须是非空字符串")
         existing = await self._find_row(conv_id)
         if existing is not None:
-            raise ConfigError(f"conversation id {conv_id!r} 已存在")
+            raise DuplicateConversationId(f"conversation id {conv_id!r} 已存在")
         row = ConversationRow(id=conv_id, title=title, last_model=None)
         self.session.add(row)
         await self.session.commit()
@@ -117,7 +121,7 @@ class ConversationRepo:
     async def update_title(self, conv_id: str, title: str | None) -> Conversation:
         row = await self._find_row(conv_id)
         if row is None:
-            raise ConfigError(f"未知 conversation id: {conv_id!r}")
+            raise ConversationNotFound(f"未知 conversation id: {conv_id!r}")
         row.title = title
         await self.session.commit()
         await self.session.refresh(row)
@@ -127,7 +131,7 @@ class ConversationRepo:
         """删 conversation + 手动 cascade 删 messages(不依赖 SQLite FK 开关)。"""
         row = await self._find_row(conv_id)
         if row is None:
-            raise ConfigError(f"未知 conversation id: {conv_id!r}")
+            raise ConversationNotFound(f"未知 conversation id: {conv_id!r}")
         await self.session.execute(
             sa_delete(MessageRow).where(MessageRow.conversation_id == conv_id),
         )
