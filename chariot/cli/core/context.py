@@ -6,6 +6,21 @@
 0.2.0 起 chariot 单协议化(只接 Anthropic Messages),`ChatContext` 跟着收敛 ——
 不再持 fmt 字段,_build_body 只产 messages 协议体。
 
+stateful / stateless body.messages 契约(0.4.3 起严格遵守)
+-----------------------------------------------------------
+- **stateless**(`conversation_id is None`):body.messages = 整段本地历史,server
+  不持久化,model 看到的就是 client 传的全部
+- **stateful**(`conversation_id is not None`):body.messages = **只发本轮新增 user
+  msg**(`self.messages[-1:]`)。server 端 `Agent.handle` 会:
+  (a) 从 messages 表 load 历史 prepend 到 body 前面再喂 model
+  (b) 把 body.messages 全部 append 到 messages 表
+  → 所以 client 必须只送"新增"的部分,否则 server 会把已 persist 的历史再 append
+  一遍 → DB 翻倍 + model 看到双份 history。详见 `Agent._run_tool_loop`
+  (`chariot/server/agent.py:207-216`)
+
+本地 `self.messages` 仍累积所有轮(给 REPL 失败 `pop_last` 回退用,以及 stateless
+模式拼 body 用),但 stateful 模式下 `_build_body` 只取末尾那条 user msg 进 body。
+
 典型用法
 --------
 ```
@@ -124,10 +139,25 @@ class ChatContext:
     # ---------- 私有:组装请求体 ----------
 
     def _build_body(self) -> dict[str, Any]:
-        """把对话历史组装成 Anthropic Messages 请求体。"""
+        """把对话历史组装成 Anthropic Messages 请求体。
+
+        body.messages 取值取决于 stateful / stateless;详见模块级 docstring 的契约段。
+        """
         return {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "stream": True,
-            "messages": self.messages,
+            "messages": self._messages_to_send(),
         }
+
+    def _messages_to_send(self) -> list[dict[str, str]]:
+        """决定 body.messages 装什么。
+
+        - stateful(有 conversation_id):只发末尾那条(本轮新增 user msg);server
+          自己从 DB prepend 历史。这条规则避免 server 重复 persist 老消息(详见
+          模块 docstring 的"契约"段)
+        - stateless:发全量本地历史,server 不持久化
+        """
+        if self.conversation_id is not None:
+            return self.messages[-1:] if self.messages else []
+        return self.messages
