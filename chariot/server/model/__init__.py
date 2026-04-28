@@ -18,11 +18,8 @@ Agent 持有一个 Model 实例完成实际响应生成;Model 层**无状态**,�
 from __future__ import annotations
 
 from chariot.server.model.anthropic import AnthropicModel
-from chariot.server.model.base import Model
-from chariot.server.model.mock import MockModel, mock_model
+from chariot.server.model.mock import MockModel
 from chariot.server.model.registry import ModelRegistry
 
 ModelRegistry.register("mock", MockModel)
 ModelRegistry.register("anthropic", AnthropicModel)
-
-__all__ = ["AnthropicModel", "MockModel", "Model", "ModelRegistry", "mock_model"]

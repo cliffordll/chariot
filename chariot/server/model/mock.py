@@ -190,7 +190,3 @@ class MockModel(Model):
             return [""]
         n = cls._CHUNK_CHARS
         return [text[i : i + n] for i in range(0, len(text), n)]
-
-
-# 模块级单例(默认可用);Agent 初始化时默认注入这个
-mock_model = MockModel()

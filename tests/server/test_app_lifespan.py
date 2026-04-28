@@ -21,7 +21,7 @@ from chariot.server import app as app_module
 from chariot.server.agent import Agent
 from chariot.server.app import create_app, lifespan
 from chariot.server.database.models import ModelRow
-from chariot.server.database.session import _state as _db_state
+from chariot.server.database.session import DBState
 from chariot.server.database.session import init_db as _real_init_db
 from chariot.server.model.mock import MockModel
 from chariot.server.repository.model_repo import ModelRepo
@@ -50,7 +50,7 @@ async def test_lifespan_first_run_seeds_mock(isolated_db: Path) -> None:
         assert isinstance(current.models["mock"], MockModel)
 
         # DB 里也确实有 seed 行
-        sm = _db_state.session_maker
+        sm = DBState.session_maker
         assert sm is not None
         async with sm() as s:
             rows = (await s.execute(select(ModelRow))).scalars().all()
@@ -67,7 +67,7 @@ async def test_lifespan_second_run_skips_seed(isolated_db: Path) -> None:
     """已有 entries(用户自己加过)→ seed_if_empty 不再插入,沿用已有状态。"""
     # 先用一次 init_db + 手工写一条 entry,模拟"用户已加过 model"
     await _real_init_db(isolated_db)
-    sm = _db_state.session_maker
+    sm = DBState.session_maker
     assert sm is not None
     async with sm() as s:
         await ModelRepo(s).create(name="my-claude", type="mock", options={})
@@ -82,7 +82,7 @@ async def test_lifespan_second_run_skips_seed(isolated_db: Path) -> None:
         assert "my-claude" in agent.models
         assert "mock" not in agent.models  # 没新 seed
         # 表里只有 my-claude
-        sm2 = _db_state.session_maker
+        sm2 = DBState.session_maker
         assert sm2 is not None
         async with sm2() as s:
             rows = (await s.execute(select(ModelRow))).scalars().all()

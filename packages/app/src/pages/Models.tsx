@@ -313,8 +313,9 @@ function ModelsCard({
       ) : (
         <>
           <div className="mb-2 text-xs text-muted-foreground">
-            Test 会真打上游一次,消耗 ~1 token;mock 模型走本地零费用。
-            点行头展开 → 编辑 sampling 默认 params(切到该 entry 时 Chat 会用这些值)。
+            Test 会真打上游一次(~1 token;mock 零费用)。展开行可编辑 params(Chat
+            切到该 entry 时用作 sampling 默认值)—— 一行一对 KV,数字 / true / false / null
+            直写,字符串免引号。
           </div>
           <ul className="mb-4 divide-y divide-border rounded-md border border-border">
             {data.entries.map((entry) => (
@@ -647,13 +648,8 @@ function ParamsEditor({
 
   return (
     <div className="border-t border-border bg-muted/20 px-3 py-3 text-xs">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          params(runtime sampling 默认值)
-        </span>
-        <span className="text-[11px] text-muted-foreground">
-          数字 / true / false / null 直接写;字符串免引号
-        </span>
+      <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+        params
       </div>
 
       {/* 预设 chips:点击一键加常用 sampling 字段;已存在的 key 灰掉。 */}
@@ -674,9 +670,7 @@ function ParamsEditor({
         ))}
       </div>
 
-      {rows.length === 0 ? (
-        <p className="mb-2 text-muted-foreground">(空 — 点上方 preset 或 + Add row 加一对 KV)</p>
-      ) : (
+      {rows.length === 0 ? null : (
         <ul className="mb-2 space-y-1">
           {rows.map((r, i) => (
             <li key={i} className="flex items-center gap-2">

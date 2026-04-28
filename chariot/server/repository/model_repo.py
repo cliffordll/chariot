@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -34,15 +34,15 @@ from chariot.server.config import (
 )
 from chariot.server.database.models import ModelRow
 
-# seed mock entry 用的常量(表空时插入)
-_SEED_NAME = "mock"
-_SEED_TYPE = "mock"
-_SEED_OPTIONS: dict[str, Any] = {}
-_SEED_PARAMS: dict[str, Any] = {}
-
 
 class ModelRepo:
     """`models` 表的数据访问层。"""
+
+    # seed mock entry 用的常量(`seed_if_empty` 在表空时插入)
+    _SEED_NAME: ClassVar[str] = "mock"
+    _SEED_TYPE: ClassVar[str] = "mock"
+    _SEED_OPTIONS: ClassVar[dict[str, Any]] = {}
+    _SEED_PARAMS: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -143,10 +143,10 @@ class ModelRepo:
             return
         self.session.add(
             ModelRow(
-                name=_SEED_NAME,
-                type=_SEED_TYPE,
-                options=json.dumps(_SEED_OPTIONS),
-                params=json.dumps(_SEED_PARAMS),
+                name=self._SEED_NAME,
+                type=self._SEED_TYPE,
+                options=json.dumps(self._SEED_OPTIONS),
+                params=json.dumps(self._SEED_PARAMS),
             ),
         )
         await self.session.commit()
@@ -209,10 +209,6 @@ class ModelRepo:
         return f"{src_name}_copy_{i}"
 
     # ---- 静态查询(测试 / 调试用)----
-
-    async def count(self) -> int:
-        n = await self.session.scalar(select(func.count(ModelRow.id)))
-        return int(n or 0)
 
     async def list_rows(self) -> Sequence[ModelRow]:
         """返原始 ORM rows(给需要 created_at / updated_at 的 caller)。"""

@@ -3,14 +3,20 @@
 启动时 `init_db()` 建目录 / engine / 跑 migrations / session maker;
 关闭时 `dispose_db()` 释放连接池。
 migrations 用 SA 跑,aiosqlite 只作 `sqlite+aiosqlite://` 驱动依赖。
+
+封装
+----
+单例状态(engine + session_maker)挂在 `DBState` ClassVar 上,生命周期由
+`install / dispose` 两个 classmethod 管。模块级零可变变量、零自由函数(只剩
+纯静态 SQL 解析 helper);公开 API `init_db / dispose_db / get_session_maker /
+get_session / SessionDep` 均是 `DBState.<method>` 的薄别名,调用方无感。
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from fastapi import Depends
 from sqlalchemy import text
@@ -23,15 +29,6 @@ from sqlalchemy.ext.asyncio import (
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
 CURRENT_SCHEMA_VERSION = 3
-
-
-@dataclass
-class _DBState:
-    engine: AsyncEngine | None = None
-    session_maker: async_sessionmaker[AsyncSession] | None = None
-
-
-_state = _DBState()
 
 
 def _db_url(db_path: Path) -> str:
@@ -92,43 +89,59 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
                 await conn.execute(text(stmt))
 
 
-async def init_db(db_path: Path = DEFAULT_DB_PATH) -> async_sessionmaker[AsyncSession]:
-    """建目录 + engine + 跑 migrations + 绑 session_maker;返回 session_maker。
+class DBState:
+    """DB 连接 + session 工厂的类级单例(取代旧 `_state = _DBState()` 模块级变量)。
 
-    返回值给 lifespan 等"已确定 init 完成"的调用方拿到非 None 的 sm,免去
-    `if sm is None: raise` 防御。后台路径(log_writer 等)仍走 `get_session_maker()`
-    取 Optional —— 那里 None 是合法状态(server 还没起来)。
+    生命周期:
+    - `install(db_path)`:lifespan startup 调,建 engine + 跑 migrations + 装 sm
+    - `dispose()`:lifespan shutdown 调,释放连接池
+    - `session_maker_or_none()`:fail-soft 路径(后台 LogWriter 在 startup 未跑完
+      时也可能被调,这里允许返 None,调用方决定怎么兜底)
+    - `session_iter()`:FastAPI Depends 用;sm 未装载直接 raise(请求路径不可静默)
     """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_async_engine(_db_url(db_path))
-    await _maybe_run_migrations(engine)
-    _state.engine = engine
-    # expire_on_commit=False:commit 后对象属性不失效,避免响应序列化时 lazy reload
-    sm = async_sessionmaker(engine, expire_on_commit=False)
-    _state.session_maker = sm
-    return sm
+
+    engine: ClassVar[AsyncEngine | None] = None
+    session_maker: ClassVar[async_sessionmaker[AsyncSession] | None] = None
+
+    @classmethod
+    async def install(cls, db_path: Path = DEFAULT_DB_PATH) -> async_sessionmaker[AsyncSession]:
+        """建目录 + engine + 跑 migrations + 绑 session_maker;返回 session_maker。"""
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        engine = create_async_engine(_db_url(db_path))
+        await _maybe_run_migrations(engine)
+        cls.engine = engine
+        # expire_on_commit=False:commit 后对象属性不失效,避免响应序列化时 lazy reload
+        sm = async_sessionmaker(engine, expire_on_commit=False)
+        cls.session_maker = sm
+        return sm
+
+    @classmethod
+    async def dispose(cls) -> None:
+        """释放连接池;SQLite WAL checkpoint 在最后一个连接关闭时触发。"""
+        if cls.engine is not None:
+            await cls.engine.dispose()
+        cls.engine = None
+        cls.session_maker = None
+
+    @classmethod
+    def session_maker_or_none(cls) -> async_sessionmaker[AsyncSession] | None:
+        """给非 FastAPI-scoped 路径(后台 LogWriter)拿 session_maker。未 init 返 None。"""
+        return cls.session_maker
+
+    @classmethod
+    async def session_iter(cls) -> AsyncIterator[AsyncSession]:
+        """FastAPI Depends:每请求一个独立 session,退出时自动关(未 commit 则 rollback)。"""
+        if cls.session_maker is None:
+            raise RuntimeError("DB 未初始化,先调 init_db()")
+        async with cls.session_maker() as session:
+            yield session
 
 
-async def dispose_db() -> None:
-    """释放连接池;SQLite WAL checkpoint 在最后一个连接关闭时触发。"""
-    if _state.engine is not None:
-        await _state.engine.dispose()
-    _state.engine = None
-    _state.session_maker = None
-
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI 依赖:每请求一个独立 session,退出时自动关(未 commit 则 rollback)。"""
-    if _state.session_maker is None:
-        raise RuntimeError("DB 未初始化,先调 init_db()")
-    async with _state.session_maker() as session:
-        yield session
-
-
-def get_session_maker() -> async_sessionmaker[AsyncSession] | None:
-    """给非 FastAPI-scoped 路径(service 层后台写入)拿 session_maker。未 init 返 None。"""
-    return _state.session_maker
-
+# 模块级公开 API(别名指向 classmethod;调用方 import 链路不变)
+init_db = DBState.install
+dispose_db = DBState.dispose
+get_session_maker = DBState.session_maker_or_none
+get_session = DBState.session_iter
 
 # 公共 FastAPI 依赖别名:avoid 各模块重复定义。
 SessionDep = Annotated[AsyncSession, Depends(get_session)]

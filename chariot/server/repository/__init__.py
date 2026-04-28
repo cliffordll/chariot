@@ -5,8 +5,9 @@
 - `repository/`:data access(按表分类的 query helper)
 - `controller/` / `service/` / `agent.py`:调用 repo,不直接写 SQLAlchemy
 
-错误语义:repo **不抛** `HTTPException`。None / `IntegrityError` 等原始信号交给调用方,
-由其各自映射成 HTTP 错误。
+错误语义:repo **不抛** `HTTPException`。语义错(如 name 冲突 / 记录不存在)
+抛 `ConfigError` 子类(`DuplicateModelName / ModelNotFound`),原始 SQLAlchemy
+异常透传给调用方;controller 层用 `_to_service_error` 集中映射成 HTTP 错误。
 """
 
 from __future__ import annotations

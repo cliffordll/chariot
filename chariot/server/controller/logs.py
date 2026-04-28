@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from chariot.server.database.models import LogEntry
 from chariot.server.repository import LogRepoDep
 
 router = APIRouter()
@@ -36,6 +37,20 @@ class LogOut(BaseModel):
     status: str
     error: str | None
 
+    @classmethod
+    def from_row(cls, entry: LogEntry) -> LogOut:
+        """从 ORM 行构造响应,免逐字段重复。"""
+        return cls(
+            id=entry.id,
+            created_at=entry.created_at,
+            model=entry.model,
+            input_tokens=entry.input_tokens,
+            output_tokens=entry.output_tokens,
+            latency_ms=entry.latency_ms,
+            status=entry.status,
+            error=entry.error,
+        )
+
 
 @router.get("/logs", response_model=list[LogOut])
 async def list_logs(
@@ -51,16 +66,4 @@ async def list_logs(
         since=since,
         until=until,
     )
-    return [
-        LogOut(
-            id=entry.id,
-            created_at=entry.created_at,
-            model=entry.model,
-            input_tokens=entry.input_tokens,
-            output_tokens=entry.output_tokens,
-            latency_ms=entry.latency_ms,
-            status=entry.status,
-            error=entry.error,
-        )
-        for entry in rows
-    ]
+    return [LogOut.from_row(entry) for entry in rows]
