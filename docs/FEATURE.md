@@ -1,6 +1,6 @@
 # Chariot 0.4.0 推进表
 
-> **当前活跃**:`0.4.0`(开发中)
+> **当前活跃**:`0.4.0`
 > **上一版归档**:[`docs/history/0.3.1/FEATURE.md`](history/0.3.1/FEATURE.md)
 >
 > **0.4.0 主题**:Agent 进化第一步 —— 多轮对话记忆 + 工具调用。详细架构见
@@ -13,7 +13,7 @@
 
 ## 0.4.0 patch 列表
 
-### M.1 schema + 三表 ORM + Repos + migration v4
+### M.1 ✅ schema + 三表 ORM + Repos + migration v4
 
 - migration v4(`chariot/server/database/migrations.py`):
   - `CREATE TABLE conversations (id, title, last_model, created_at, updated_at)` + `idx_conversations_updated`
@@ -32,21 +32,21 @@
 - 测试:`tests/server/test_conversation_repo.py` + `tests/server/test_tool_repo.py`
 - **验证**:`pytest -q` + `ruff check` + `pyright`
 
-### M.2 Tool ABC + ToolRegistry + 4 内置工具实现
+### M.2 ✅ Tool ABC + ToolRegistry + 4 内置工具实现
 
 - `chariot/server/tool/base.py`:`Tool` ABC(`name` / `from_config` / `schema` / `execute`)
 - `chariot/server/tool/registry.py`:`ToolRegistry`(类比 ModelRegistry)
 - 4 个实现:
   - `chariot/server/tool/readfile.py`:`ReadFileTool`(`max_bytes` 截断 + UTF-8 fallback base64)
   - `chariot/server/tool/listdir.py`:`ListDirTool`(`recursive` 选项)
-  - `chariot/server/tool/shellexec.py`:`ShellExecTool`(workdir 下跑 + timeout + Windows PowerShell / Unix bash 分支)
+  - `chariot/server/tool/shellexec.py`:`ShellExecTool`(workdir 下跑 + timeout;**直接 `asyncio.create_subprocess_exec`,不过 shell** —— 跨平台一致 + 免 quoting / shell metachar 注入,见 DESIGN §8.4)
   - `chariot/server/tool/httpget.py`:`HttpGetTool`(域白名单 + max_bytes)
 - `chariot/server/tool/__init__.py`:四个 `ToolRegistry.register(...)` 显式调用
 - `ToolEntry` / `ToolConfig`(`chariot/server/config.py` 加,与 `ModelEntry` / `ChariotConfig` 同结构)
 - 测试:`tests/server/test_tools.py`(每个工具的 happy path + 边界:超大文件截断 / 不存在路径 / timeout / 白名单拦截)
 - **验证**:`pytest -q` + `ruff check` + `pyright`
 
-### M.3 Agent 接 ConversationRepo + 工具循环 + lifespan 接入
+### M.3 ✅ Agent 接 ConversationRepo + 工具循环 + lifespan 接入
 
 - `Agent` 类(`chariot/server/agent.py`)新字段:`_tools: dict[str, Tool]`
 - `Agent.install_from_config(model_config, tool_config)` 替代 0.3.1 的单参版本
@@ -66,7 +66,7 @@
   - `tests/server/test_app_lifespan.py` 扩:tools seed
 - **验证**:`pytest -q` + `ruff check` + `pyright`
 
-### M.4 dataplane controller 接 X-Chariot-Conversation header
+### M.4 ✅ dataplane controller 接 X-Chariot-Conversation header
 
 - `chariot/server/controller/dataplane.py`:
   - 读 `request.headers.get("X-Chariot-Conversation")`,ULID 正则校验
@@ -79,7 +79,7 @@
   - 非法 ULID → 400
 - **验证**:`pytest -q`
 
-### M.5 admin/conversations + admin/tools controller + Pydantic schema
+### M.5 ✅ admin/conversations + admin/tools controller + Pydantic schema
 
 - `chariot/server/controller/conversations.py`(新):
   - `GET /admin/conversations` / `GET /admin/conversations/{id}` / `DELETE` / `PATCH` / `POST`(显式创建)
@@ -93,7 +93,7 @@
 - 测试:`tests/server/test_admin_conversations.py` + `tests/server/test_admin_tools.py`
 - **验证**:`pytest -q`
 
-### M.6 SDK + CLI 同步
+### M.6 ✅ SDK + CLI 同步
 
 - SDK(`chariot/sdk/proxy_client.py`):加 7 方法
   - `list_conversations / get_conversation / delete_conversation / update_conversation / create_conversation`
@@ -105,25 +105,26 @@
 - 测试:`tests/sdk/test_client_admin.py` 扩 + `tests/cli/test_commands_conversation.py` + `tests/cli/test_commands_tool.py`
 - **验证**:`pytest -q`
 
-### M.7 前端 Chat 页会话侧栏 + Tools 页
+### M.7 ✅ 前端 Chat 页会话侧栏 + Tools 页
 
-- `packages/app/src/api.ts`:
-  - 加 `Conversation` / `ConversationDetail` / `Tool` 类型
-  - 加 `listConversations / getConversation / deleteConversation / updateConversation / createConversation`
+- `packages/app/src/lib/api.ts`:
+  - 加 `Conversation` / `ConversationDetail` / `Message` / `AnthropicBlock` / `Tool` 类型
+  - 加 `listConversations / getConversation / deleteConversation / updateConversationTitle / createConversation`
   - 加 `listTools / updateTool`
   - `StatusResponse` 加 `tools_enabled` / `conversations_count`
-  - request `/v1/messages` 时附 `X-Chariot-Conversation` header(从当前 active conversation)
+- `packages/app/src/lib/chat.ts`:加 `conversationId` 选项,经 `X-Chariot-Conversation` header 透传
 - `packages/app/src/pages/Chat.tsx`:
-  - 左侧 `ConversationListSidebar`(列表 + [+ New] + 行操作)
-  - 中间 `MessagesView` 渲染 Anthropic content blocks:user(text / tool_result 可折叠卡片)+ assistant(text / tool_use 卡片);按 content block 的 `type` 字段 dispatch 渲染组件
-  - active conversation 持久化:换成 server-side(刷新页面也能恢复列表)
-  - 0.3.1 的 `chariot.chat.selected_entry` localStorage 沿用
-- `packages/app/src/pages/Tools.tsx`(新):类比 Models 页,4 行折叠展开
-- `packages/app/src/pages/Dashboard.tsx`:展示新 status 字段
-- 路由:Tools 加进 `App.tsx` 导航
-- **验证**:`bun run --filter=@chariot/app build` + 手测发起带工具的对话
+  - 左侧 conversations 侧栏(列表 + `+ New` + rename / delete)
+  - 右侧按 Anthropic content blocks 分支渲染:text 普通气泡 / tool_use 蓝色卡片(name + input JSON)/ tool_result 绿/红卡片(content 文本或嵌套 blocks)
+  - 流式期间 pending overlay,完成后 `getConversation` 拉 canonical 替换(含 tool_use/tool_result blocks)
+  - 首发自动创建 conversation(避免空 conv 堆积);`chariot.chat.active_conversation` + `chariot.chat.selected_entry` localStorage 持久化
+- `packages/app/src/pages/Tools.tsx`(新):类比 Models 页,4 行 fold/expand;Button 充当 on/off toggle(没装 Switch 组件),KV 编辑器整体替换 options,只读展示 anthropic schema
+- `packages/app/src/pages/Dashboard.tsx`:展示 `tools_enabled` / `conversations_count` + Tools/Chat 入口链接
+- `packages/app/src/routes.tsx`:加 `/tools` 路由 + Tools nav
+- **附带 server 修复**:`AnthropicModel._rewrite_for_upstream` 把 `stream` 参数同步写到 `body.stream`;否则 slow path 内部 `stream=False` 调用时 client 原 body 里 `stream=true` 没推平,上游返 SSE → JSON 解析炸 → `upstream_invalid_response` 502
+- **验证**:`bun run typecheck` + `bun run build` + 手测发起带工具的多轮对话
 
-### M.8 docs + 版本号 0.3.1 → 0.4.0
+### M.8 ✅ docs + 版本号 0.3.1 → 0.4.0
 
 - `DESIGN.md` 已在归档时落盘,实施过程若有偏差再更新
 - `FEATURE.md` 标 ✅ 进度

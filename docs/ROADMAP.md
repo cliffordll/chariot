@@ -1,7 +1,7 @@
 # Chariot 路线图
 
-0.1.0 ~ 0.3.1 已落地的范围见 `docs/FEATURE.md` + `docs/history/`。本文档记录
-**未来方向**(0.4.0 起)。
+0.1.0 ~ 0.4.0 已落地的范围见 `docs/FEATURE.md` + `docs/history/`。本文档记录
+**未来方向**(0.5.0 起)。
 
 ---
 
@@ -19,23 +19,24 @@
 
 ## v2:Agent 进化(chariot 的核心方向)
 
-- **多轮对话记忆** —— Agent 持有 `Conversation` 状态,跨轮复用;配套 `conversations`
-  / `messages` 表
-- **工具调用 / function calling** —— Agent 在 respond 后检测 tool_use,执行工具,
-  拼新 turn 再调 Model
-- **自我进化循环** —— 读 logs 表 feedback,调权重 / 切换 model / 修 prompt;
+- ✅ **多轮对话记忆**(0.4.0)—— `conversations` + `messages` 表;
+  `X-Chariot-Conversation` header 触发 stateful;Agent.handle 接 ConversationRepo
+- ✅ **工具调用 / function calling**(0.4.0)—— Tool ABC + ToolRegistry + 4 内置
+  工具(read_file / list_dir / shell_exec / http_get);Agent slow path 工具循环
+- **自我进化循环**(0.5.0+)—— 读 logs 表 feedback,调权重 / 切换 model / 修 prompt;
   `agent.evolve()` 定期任务
-- **多 Agent 实例** —— logs 加 `agent_id` 字段;`get_agent(agent_id)` 按 ID 路由;
-  config 支持定义多个 agent profile
+- **多 Agent 实例**(0.6.0+)—— logs / conversations / tools 加 `agent_id` 维度;
+  `get_agent(agent_id)` 按 ID 路由;config 支持定义多个 agent profile
+- **工具调用流式优化**(0.7.0?)—— 中间 turn 增量 stream(免"最后一轮重发拿 SSE");
+  client 实时看到 tool_use / tool_result blocks
 
 ## 数据面体验
 
-- **Chat 会话持久化** —— `conversations` + `messages` 表 + `/admin/conversations/*`
-  端点 + GUI 侧栏会话列表、历史翻阅、会话导出
+- ✅ **Chat 会话持久化**(0.4.0)—— GUI 侧栏列表 / 选择 / rename / delete;
+  CLI `chariot conversation list / show / rm / rename`
 - **Chat 原始请求 / 响应预览面板** —— Chat 页可折叠 JSON 面板,显示每轮请求体 +
   响应体(含 SSE 完整事件序列)。协议调试用
-- **CLI Chat 增强** —— 多会话文件(`chariot chat --session foo`,
-  `~/.chariot/sessions/*.json`)、会话导入导出
+- **会话导出 / 导入** —— `chariot conversation export <id>` / 多客户端共享会话历史
 
 ## 管理面体验
 

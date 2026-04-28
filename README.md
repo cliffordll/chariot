@@ -64,19 +64,25 @@ bun run --filter=@chariot/app dev          # 终端 B:Vite at http://localhost:5
 
 ```
 CLI / UI / Anthropic SDK / claude code
-        │  POST /v1/messages
+        │  POST /v1/messages  [+ X-Chariot-Conversation: <ulid>?]
         ▼
-Controller  →  Agent.handle(body)
-                    ↓
-                Model.respond(body, *, stream)
-                    ↓
-              MockModel (default · local echo)
-              AnthropicModel (透传到 Anthropic API)
-              future: LocalLlama / 自研 ...
+Controller  →  Agent.handle(body, conversation_id?)
+                    │
+                    ├─ fast path:无 conv + 无 tools → 直接透传 Model.respond
+                    │
+                    └─ slow path:load 历史 / 工具循环
+                                │
+                                ├── Model.respond(body, *, stream)
+                                │     ├ MockModel (默认 · local echo)
+                                │     └ AnthropicModel (透传 Anthropic API)
+                                │
+                                └── tool 检测 / 执行 / 拼下一轮
+                                      └ Tool.execute()
+                                          read_file / list_dir / shell_exec / http_get
 ```
 
-三层通过两条窄接口解耦,新增一个模型或一条进化逻辑不穿层。契约细节见
-[`docs/DESIGN.md`](docs/DESIGN.md) §5。
+四层(Controller / Agent / Model / Tool)通过窄接口解耦,加一个模型或一个工具
+都不穿层。契约细节见 [`docs/DESIGN.md`](docs/DESIGN.md) §5 / §8。
 
 ## 接真实 Anthropic 模型
 
@@ -147,6 +153,58 @@ uv run chariot model probe claude
 - ⚠️ **直填 api_key 安全提示**:密钥落地 `~/.chariot/chariot.db`(SQLite 文件)。
   务必把这个目录排除在版本库 / 备份 / 同步之外
 
+## 多轮对话 + 工具调用(0.4.0)
+
+### 多轮对话(`X-Chariot-Conversation` header)
+
+Chat 行为按 client 是否传 `X-Chariot-Conversation` 分流:
+
+| 模式 | header | 行为 |
+|---|---|---|
+| **stateless**(沿用 0.3.x) | 不传 | 单轮,不写 `messages` 表 |
+| **stateful · 既有会话** | 传已存在的 ULID | server 从 DB load 历史 prepend,持久化新轮 |
+| **stateful · 新建** | 传新 ULID | server auto-create + 持久化 |
+
+GUI Chat 页内置侧栏:`+ New` / 选 / rename / delete;首发自动创建 ULID。
+CLI 等价:
+
+```bash
+uv run chariot chat --conversation new  "你好"          # 新建会话
+uv run chariot conversation list                         # 列所有会话
+uv run chariot chat --conversation <ulid>  "继续之前的"  # 接着聊
+uv run chariot conversation show <ulid>                  # 看完整 messages
+uv run chariot conversation rename <ulid> "调试 SQL"      # 改标题
+uv run chariot conversation rm <ulid>                    # 删
+```
+
+### 工具调用
+
+Server 内置 4 条 fixture(默认全部 disabled,name + type 不可改):
+
+| name | 用途 | 关键 options |
+|---|---|---|
+| `read_file` | 读本地文件 | `max_bytes`(截断阈值) |
+| `list_dir` | 列目录 | `recursive`(是否递归) |
+| `shell_exec` | 跑命令 | `workdir` / `timeout_sec`;**不过 shell**,直接 `subprocess_exec`(免 quoting + 免 shell metachar 注入) |
+| `http_get` | HTTP GET | `allowed_domains`(域白名单) / `max_bytes` |
+
+GUI Tools 页或 CLI 启用:
+
+```bash
+uv run chariot tool list                                       # 看状态
+uv run chariot tool enable shell_exec                          # 启用
+uv run chariot tool config http_get -o 'allowed_domains=["api.example.com"]'
+uv run chariot tool disable shell_exec
+```
+
+Agent 在每轮请求 server 端注入所有 enabled tools 的 schema 到 `body.tools`
+(client 已传则不覆盖)。检测到 `tool_use` block → 执行 → 拼 `tool_result` 回
+LLM,直到收敛。max iterations 由 env `CHARIOT_MAX_TOOL_ITER` 控制(默认 10)。
+
+⚠️ **shell_exec / http_get 无沙箱**:工具直接以 server 进程身份跑命令 / 发请求。
+本机单用户场景下是可接受的;别把 chariot 暴露到公网或多用户共享环境,也别把
+`workdir` 指到敏感目录。
+
 ## OpenAI 客户端怎么接
 
 chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端调 chariot,
@@ -176,32 +234,37 @@ chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端
 
 | File | Purpose |
 |---|---|
-| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.3.1)— Controller / Agent / Model 分层 + 路由模型 + Registry |
-| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.3.0:模型配置 DB 化 + Models 页 CRUD;0.3.1:路由模型重构) |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.4.0)— Controller / Agent / Model / Tool 四层 + Conversation / Tool registry |
+| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.4.0:多轮对话记忆 + 工具调用 M.1–M.8) |
 | [`docs/history/`](docs/history/) | 历史版本 DESIGN / FEATURE 归档(每个发布版本一份冻结快照) |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.3.0+ 方向(多轮记忆 / 工具调用 / 进化循环) |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.5.0+ 方向(自我进化循环 / 多 Agent / 工具调用流式优化) |
 | [`docs/guides/first-run.md`](docs/guides/first-run.md) | **First-time setup** — tools, deps, sidecar, launch |
 | [`docs/guides/`](docs/guides/) | Developer guides (CLI, DB, Tauri, uv, etc.) |
 | [`CLAUDE.md`](CLAUDE.md) | Claude session conventions (project-level) |
 
 ## Status
 
+**0.4.0 ✅** — Agent 进化第一步:多轮对话记忆 + 工具调用。
+新增三表 `conversations` / `messages` / `tools`(migration v4)、`Tool` ABC +
+`ToolRegistry` + 4 内置工具(`read_file` / `list_dir` / `shell_exec` /
+`http_get`)、Agent 工具循环 + slow path / fast path 分流。Client 通过
+`X-Chariot-Conversation` header 触发 stateful 会话(不传 = 沿用 0.3.x stateless)。
+GUI 加 Tools 页 + Chat 会话侧栏(rename / delete / 自动创建 ULID),按 anthropic
+content blocks 分支渲染 text / tool_use / tool_result。CLI 加 `chariot
+conversation` / `chariot tool` 子命令组,`chariot chat --conversation <id|new>`。
+
 **0.3.1 ✅** — 路由模型重构:`active` 概念删除,client 在 `body.model` 写 entry
-name 直接路由,server 不再持有"当前选哪个"的状态。`models` 表加 `params` 列
-(JSON)承载 runtime sampling 默认值;Models 页行展开后看到 `OptionsBlock`(只读展示
-model / api_key(脱敏) / base_url)+ `ParamsEditor`(KV 编辑 params,带常用字段
-预设 chips:temperature / top_p / top_k / max_tokens / stop_sequences)。
-Chat 页极简化(只剩 entry 选择 + 输入框 + localStorage 持久化),发请求时直接从当前
-entry 的 params 现取 sampling —— sampling 配置只有 Models 页一个入口。
-`POST /admin/models` 切 active 端点 + `chariot model use` CLI 同步删除。
+name 直接路由。`models` 表加 `params` 列承载 runtime sampling 默认值。
+Chat 页极简化(只剩 entry 选择 + 输入框),sampling 配置归属 Models 页一个入口。
 
 **0.3.0 ✅** — 模型配置全面 DB 化:`~/.chariot/config.toml` 真源被 chariot 内置
 SQLite 替代。Models tab 提供 add / edit / delete / duplicate UI;CLI 同步加
-`chariot model add/edit/rm/duplicate`。`chariot config init/show` 子命令组废弃。
+`chariot model add/edit/rm/duplicate`。
 
 **0.2.6 ✅** — 模型探针(`POST /admin/models/{name}/probe` + Models 页 [Test])
-+ Chat 页高级采样参数 UI(temperature / top_p / max_tokens 滑杆)。
++ Chat 页高级采样参数 UI。
 
-**0.4.0+** 方向:Agent 层加多轮对话记忆 / 工具调用 / 自我进化循环 —— 详见
-[`docs/ROADMAP.md`](docs/ROADMAP.md)。新加真实后端 = 写一个 `chariot/server/model/<name>.py`
-+ 在 `chariot/server/model/__init__.py` 加一行 `ModelRegistry.register("xxx", NewModel)`。
+**0.5.0+** 方向:自我进化循环(读 logs feedback) / 多 Agent 实例 / 工具调用流式
+优化 —— 详见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。新加模型 = 写一个
+`chariot/server/model/<name>.py` + `ModelRegistry.register(...)`;新加工具同构 ——
+`chariot/server/tool/<name>.py` + `ToolRegistry.register(...)`。
