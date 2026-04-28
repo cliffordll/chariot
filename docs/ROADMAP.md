@@ -23,12 +23,16 @@
   `X-Chariot-Conversation` header 触发 stateful;Agent.handle 接 ConversationRepo
 - ✅ **工具调用 / function calling**(0.4.0)—— Tool ABC + ToolRegistry + 4 内置
   工具(read_file / list_dir / shell_exec / http_get);Agent slow path 工具循环
-- **自我进化循环**(0.5.0+)—— 读 logs 表 feedback,调权重 / 切换 model / 修 prompt;
+- **协议级流式工具循环**(0.5.0,优先级上调)—— 撤掉 `Agent.handle` 当前的
+  `stream=False` 循环 + 最终一轮 `stream=True` 重发,改为全程 streaming。多轮在
+  同一条 HTTP 响应里以多个 `message_start ... message_stop` 块串联,server 在
+  轮间合成 `tool_result` 消息块。CLI / UI / 透传客户端共享一份原生 Anthropic
+  事件流,工具调用 / 结果对终端用户实时可见。覆盖四端:server agent 流式循环 /
+  SDK ChatStream typed events / CLI REPL 渲染 / app Chat 页 pending 卡片实时 append
+- **自我进化循环**(0.6.0+)—— 读 logs 表 feedback,调权重 / 切换 model / 修 prompt;
   `agent.evolve()` 定期任务
-- **多 Agent 实例**(0.6.0+)—— logs / conversations / tools 加 `agent_id` 维度;
+- **多 Agent 实例**(0.7.0+)—— logs / conversations / tools 加 `agent_id` 维度;
   `get_agent(agent_id)` 按 ID 路由;config 支持定义多个 agent profile
-- **工具调用流式优化**(0.7.0?)—— 中间 turn 增量 stream(免"最后一轮重发拿 SSE");
-  client 实时看到 tool_use / tool_result blocks
 
 ## 数据面体验
 
