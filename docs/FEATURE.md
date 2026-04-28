@@ -1,145 +1,150 @@
-# Chariot 0.4.0 推进表
+# Chariot 0.5.0 推进表
 
-> **当前活跃**:`0.4.0`
-> **上一版归档**:[`docs/history/0.3.1/FEATURE.md`](history/0.3.1/FEATURE.md)
+> **当前活跃**:`0.5.0`
+> **上一版归档**:[`docs/history/0.4.0/FEATURE.md`](history/0.4.0/FEATURE.md)
 >
-> **0.4.0 主题**:Agent 进化第一步 —— 多轮对话记忆 + 工具调用。详细架构见
-> [`DESIGN.md`](DESIGN.md)。
+> **0.5.0 主题**:**协议级流式工具循环**。撤掉 Agent slow path 的 `stream=False`
+> 中间步 + `stream=True` 收尾重发,改成全程 streaming;一条 HTTP 响应里多个
+> `message_start ... message_stop` 块串联,server 在轮间合成 `tool_result` 消息块。
+> CLI / UI / 透传客户端共享一份原生 Anthropic 事件流。详细架构见 [`DESIGN.md`](DESIGN.md)。
 
 每步推进规则(沿用):每完成一步 → 跑验证 → 等用户确认"通过"再标 ✅,然后 commit。
 一个 FEATURE 步骤 = 一个 commit。
 
 ---
 
-## 0.4.0 patch 列表
+## 0.5.0 patch 列表
 
-### M.1 ✅ schema + 三表 ORM + Repos + migration v4
+### S.1 server agent 流式工具循环
 
-- migration v4(`chariot/server/database/migrations.py`):
-  - `CREATE TABLE conversations (id, title, last_model, created_at, updated_at)` + `idx_conversations_updated`
-  - `CREATE TABLE messages (id, conversation_id FK, seq, role, content, model_name, created_at)` + `idx_messages_conv` + `UNIQUE(conversation_id, seq)`
-  - `CREATE TABLE tools (id, name UNIQUE, type, enabled, options, created_at, updated_at)` + `idx_tools_name`
-- ORM(`chariot/server/database/models.py`):`ConversationRow` / `MessageRow` / `ToolRow`
-- `ConversationRepo`(`chariot/server/repository/conversation_repo.py`):
-  - `create(id, title=None) / get(id) / list(limit, offset) / delete(id) / update_title(id, title)`
-  - `ensure_exists(id)` —— 不存在则 create(供 dataplane auto-create 用)
-  - `append_message(conv_id, role, content, model_name=None)` —— seq 自增
-  - `load_messages_as_anthropic(conv_id) -> list[dict]` —— 拼回 Anthropic 协议形态
-- `ToolRepo`(`chariot/server/repository/tool_repo.py`):
-  - `list_entries(s) / get(name) / update(name, enabled?, options?) / list_enabled(s)`
-  - `seed_if_empty(s)` —— 写 4 条默认 disabled 行
-  - **不暴露** create / delete(0.4.0 tools 表只允许改 enabled / options)
-- 测试:`tests/server/test_conversation_repo.py` + `tests/server/test_tool_repo.py`
-- **验证**:`pytest -q` + `ruff check` + `pyright`
+**目标**:`Agent._run_tool_loop` 全程 streaming;一条响应里串多个 `message_start
+... message_stop` 块,server 合成 `tool_result` message。
 
-### M.2 ✅ Tool ABC + ToolRegistry + 4 内置工具实现
+- `chariot/server/agent.py`:
+  - 撤掉当前 `model.respond(stream=False)` 的 while 循环 + 收敛后 `stream=True`
+    重发(`agent.py:222-244` 段)
+  - 新方法 `_stream_tool_loop(body_dict, model, conversation_id, conv_repo)` 返
+    `AsyncIterator[bytes]`(SSE bytes 给 client),内部:
+    - `await model.respond(body, stream=True)` 拿上游 SSE
+    - 边转发 SSE 边 buffer assistant content blocks(text + tool_use)
+    - `message_stop` 后:
+      - 有 tool_use → 持久化 assistant content + 跑工具 + 合成 `tool_result`
+        message SSE 帧推给 client + 持久化 `user`(tool_result)+ 拼下轮 body +
+        续循环
+      - 无 tool_use → 持久化 assistant content + 关流
+  - 工具执行错误 → 合成 `tool_result is_error=true` message;不中断流
+  - max_iter 超 → 写 Anthropic 协议原生 `event: error` 帧 + 关流
+- `chariot/server/controller/dataplane.py`:`StreamingResponse` 直接消费上面
+  的 `AsyncIterator[bytes]`,不再走"非流式拿全文 + 转 stream"的 fallback
+- `chariot/server/agent.py` 持久化时机:每轮 `message_stop` 后立即 `append_message`
+  (assistant content + 合成的 tool_result user content)
+- 测试:
+  - `tests/server/test_agent_streaming_loop.py`(新):
+    - mock model 返第 1 轮 tool_use stream + 第 2 轮 text-only stream → 断
+      server 转出的 SSE 序列含 2×`message_start` + 1× tool_result 合成块
+    - max_iter 超 → 断 `event: error` 帧
+    - 工具抛 → 断 `tool_result is_error=true`
+    - 持久化时机:每个 message_stop 后 messages 表已有对应行
+  - `tests/server/test_agent_tool_loop.py` 旧 case(0.4.0 非流式)→ 标 deprecated
+    或重写到流式
+- **验证**:`uv run pytest -q` + `uv run ruff check .` + `uv run pyright chariot/`
 
-- `chariot/server/tool/base.py`:`Tool` ABC(`name` / `from_config` / `schema` / `execute`)
-- `chariot/server/tool/registry.py`:`ToolRegistry`(类比 ModelRegistry)
-- 4 个实现:
-  - `chariot/server/tool/readfile.py`:`ReadFileTool`(`max_bytes` 截断 + UTF-8 fallback base64)
-  - `chariot/server/tool/listdir.py`:`ListDirTool`(`recursive` 选项)
-  - `chariot/server/tool/shellexec.py`:`ShellExecTool`(workdir 下跑 + timeout;**直接 `asyncio.create_subprocess_exec`,不过 shell** —— 跨平台一致 + 免 quoting / shell metachar 注入,见 DESIGN §8.4)
-  - `chariot/server/tool/httpget.py`:`HttpGetTool`(域白名单 + max_bytes)
-- `chariot/server/tool/__init__.py`:四个 `ToolRegistry.register(...)` 显式调用
-- `ToolEntry` / `ToolConfig`(`chariot/server/config.py` 加,与 `ModelEntry` / `ChariotConfig` 同结构)
-- 测试:`tests/server/test_tools.py`(每个工具的 happy path + 边界:超大文件截断 / 不存在路径 / timeout / 白名单拦截)
-- **验证**:`pytest -q` + `ruff check` + `pyright`
+### S.2 SDK 流解析适配 ChatStream
 
-### M.3 ✅ Agent 接 ConversationRepo + 工具循环 + lifespan 接入
+**目标**:`ChatStream.events()` 吐 typed StreamEvent;`text_deltas` 保留兼容。
 
-- `Agent` 类(`chariot/server/agent.py`)新字段:`_tools: dict[str, Tool]`
-- `Agent.install_from_config(model_config, tool_config)` 替代 0.3.1 的单参版本
-- `Agent.handle(body, *, conversation_id, stream, session)` 主流程改造:
-  - 接 ConversationRepo(每次 handle 现 new,不挂在 Agent 上)
-  - 有 conversation_id → ensure_exists + load history + prepend
-  - 工具循环:while 检测 tool_use → 执行 → append tool_result → 重调 Model
-  - max_iter 配置(env `CHARIOT_MAX_TOOL_ITER`,默认 10),超限 400 `tool_iter_exceeded`
-  - 收敛后若 client 要 stream,重发一次 `model.respond(stream=True)`
-- body.tools 注入:Agent 在调 Model 前,把所有 enabled tools 的 schema 收集塞进
-  body.tools(若客户端已经传了,merge / 客户端优先?**0.4.0 决定:客户端优先,
-  server 不覆盖客户端传的 body.tools**;若客户端没传,server 注入 enabled tools 的 schema)
-- lifespan 改:加 `ToolRepo.seed_if_empty()` + `ToolConfig.from_db(s)` + 双 config 注入 install
-- 测试更新:
-  - `tests/server/test_agent.py` 扩:install_from_config 双参 / handle 工具循环路径
-  - `tests/server/test_agent_tool_loop.py`(新):mock model 返 tool_use → 收敛 / max_iter 超限 / 工具失败传播
-  - `tests/server/test_app_lifespan.py` 扩:tools seed
-- **验证**:`pytest -q` + `ruff check` + `pyright`
+- `chariot/sdk/streams.py`:
+  - 加 `StreamEvent` dataclass(`kind` + 各 kind 专属字段;DESIGN §10.1)
+  - 加 `events(resp) -> AsyncIterator[StreamEvent]`,处理:
+    - 多 `message_start` 累加 input/output tokens
+    - `content_block_start(text)` + 累积 `text_delta` → 多个 `kind=text` event
+    - `content_block_start(tool_use)` → `tool_use_start`;累积 `input_json_delta`
+      → `tool_use_input` event(可选,部分 caller 不要 partial JSON);
+      `content_block_stop` 后 parse JSON 完整 input → `tool_use_complete`
+    - `content_block_start(tool_result)` + 累积内容 → `tool_result` event(server
+      合成的 user message 里的 block)
+    - 每个 `message_stop` → `turn_complete`(usage 给本轮统计)
+    - 整个流结束 → `stream_done`
+  - `text_deltas(resp)` 实现改成 `events(resp)` + 过滤 `kind=="text"` yield text
+- 测试:
+  - `tests/sdk/test_streams_events.py`(新):回放手写 SSE 字节序列(多
+    message_start + tool_use + tool_result + text)→ 断 events 序列
+  - `tests/sdk/test_streams.py` 旧 `text_deltas` case 全部仍通过(回归)
+- **验证**:`uv run pytest -q tests/sdk/`
 
-### M.4 ✅ dataplane controller 接 X-Chariot-Conversation header
+### S.3 跨客户端协调 + CLI fetch_history + advisory lock
 
-- `chariot/server/controller/dataplane.py`:
-  - 读 `request.headers.get("X-Chariot-Conversation")`,ULID 正则校验
-  - 校验失败 → 400 `invalid_conversation_id`
-  - 透传到 `agent.handle(body, conversation_id=..., stream=..., session=...)`
-- `tests/server/test_dataplane.py` 扩:
-  - 不带 header → 行为同 0.3.1(stateless)
-  - 带 header 且 conv 不存在 → auto-create + 写 messages 表
-  - 带 header 且 conv 存在 → load history + 拼接
-  - 非法 ULID → 400
-- **验证**:`pytest -q`
+**目标**:解决 issue 2(CLI 不知 UI 写入)和 issue 3(并发写时 model 看到错乱)。
 
-### M.5 ✅ admin/conversations + admin/tools controller + Pydantic schema
+- **server-side advisory lock**:
+  - `chariot/server/repository/conversation_repo.py` 加 `acquire_lock(conv_id, timeout_s) -> AsyncContextManager`,实现用 SQLite `BEGIN IMMEDIATE` 长事务包住
+    `load → append user → call model → append assistant`
+  - `chariot/server/agent.py` `_stream_tool_loop` 起步段用 `async with conv_repo.acquire_lock(conversation_id):` 包整段循环
+  - 等待超时(env `CHARIOT_CONV_LOCK_TIMEOUT_S`,默认 30s)→ 503 +
+    `code: conversation_busy`
+- **SDK fetch history**:
+  - `chariot/sdk/proxy_client.py` 已有 `get_conversation()` 拉 conv 元;**确认**
+    或新增 `get_conversation_messages(id) -> list[anthropic_msg]` 拉 canonical
+    history(若已存在,跳过)
+- **CLI auto-refresh**:
+  - `chariot/cli/core/context.py` 加 `refresh_from_server() -> None` 方法,
+    stateful only;调 SDK 拉 history 替换 `self.messages`
+  - `ChatRepl._one_turn` send 前自动调一次(env `CHARIOT_CLI_AUTO_REFRESH=0`
+    可关闭)
+- 测试:
+  - `tests/server/test_conversation_lock.py`(新):并发两 client 同 conv_id,
+    断 acquire / release 顺序 + 超时 503 + lock 释放后第二个 client 看到
+    第一个写入的内容
+  - `tests/cli/test_context_refresh.py`(新):mock SDK 返 server canonical
+    messages,断 `refresh_from_server` 替换本地 `self.messages`
+- **验证**:`uv run pytest -q`
 
-- `chariot/server/controller/conversations.py`(新):
-  - `GET /admin/conversations` / `GET /admin/conversations/{id}` / `DELETE` / `PATCH` / `POST`(显式创建)
-  - schema:`ConversationOut` / `ConversationDetail`(含 messages 数组)/ `ConversationsListResponse` / `UpdateTitleRequest` / `CreateConversationRequest`
-- `chariot/server/controller/tools.py`(新):
-  - `GET /admin/tools`:列 4 条 + 各自 schema
-  - `PUT /admin/tools/{name}`:改 enabled / options;校验 options JSON、type 不允许改
-  - schema:`ToolOut` / `ToolsListResponse` / `UpdateToolRequest`
-- `controller/runtime.py`:`StatusResponse` 加 `tools_enabled` / `conversations_count`
-- 端点注册到 `chariot/server/app.py`
-- 测试:`tests/server/test_admin_conversations.py` + `tests/server/test_admin_tools.py`
-- **验证**:`pytest -q`
+### S.4 CLI REPL 渲染流式工具
 
-### M.6 ✅ SDK + CLI 同步
+**目标**:dim 灰行实时打印 tool_use / tool_result。
 
-- SDK(`chariot/sdk/proxy_client.py`):加 7 方法
-  - `list_conversations / get_conversation / delete_conversation / update_conversation / create_conversation`
-  - `list_tools / update_tool`
-- CLI:
-  - `chariot/cli/commands/conversation.py`(新):`list / show / rm / rename`
-  - `chariot/cli/commands/tool.py`(新):`list / enable / disable / config`
-  - `chariot chat` 加 `--conversation <id>` 参数(可选;默认每次新建 ULID)
-- 测试:`tests/sdk/test_client_admin.py` 扩 + `tests/cli/test_commands_conversation.py` + `tests/cli/test_commands_tool.py`
-- **验证**:`pytest -q`
+- `chariot/cli/core/render.py`:加 `tool_use_line(name, input_repr)` /
+  `tool_result_line(text, is_error)`(dim 灰 / 红前缀)
+- `chariot/cli/core/context.py`:
+  - 改 `run_turn` 签名:不再单回调 `on_token`,改成多回调或 yield events:
+    - 简洁版:加 `events()` AsyncIterator 直接吐 SDK StreamEvent
+    - REPL caller `_one_turn` async for event:dispatch 到 Renderer
+- `chariot/cli/core/repl.py` `_one_turn` 改写消费 events
+- `chariot/cli/core/once.py` / `batch.py` 同步:吃 events,但只关心 text + meta
+- 测试:
+  - `tests/cli/test_repl_tool_render.py`(新):mock SDK events → 断 Renderer
+    收到的调用序列(text 走 stream_token,tool_use 走 tool_use_line,etc.)
+- **验证**:`uv run pytest -q tests/cli/` + 手测 REPL(stateful conv,触发工具)
 
-### M.7 ✅ 前端 Chat 页会话侧栏 + Tools 页
+### S.5 UI Chat 页实时渲染 tool blocks + docs + 版本号
 
-- `packages/app/src/lib/api.ts`:
-  - 加 `Conversation` / `ConversationDetail` / `Message` / `AnthropicBlock` / `Tool` 类型
-  - 加 `listConversations / getConversation / deleteConversation / updateConversationTitle / createConversation`
-  - 加 `listTools / updateTool`
-  - `StatusResponse` 加 `tools_enabled` / `conversations_count`
-- `packages/app/src/lib/chat.ts`:加 `conversationId` 选项,经 `X-Chariot-Conversation` header 透传
+**目标**:pending 卡片渐进 append tool_use / tool_result blocks,撤掉"等
+loadConvDetail 才看到工具"的依赖。
+
+- `packages/app/src/lib/streams.ts`:
+  - 加 typed event handlers(同 SDK ChatStream typed events)
+  - 流式回调 `onEvent(event: StreamEvent)`
 - `packages/app/src/pages/Chat.tsx`:
-  - 左侧 conversations 侧栏(列表 + `+ New` + rename / delete)
-  - 右侧按 Anthropic content blocks 分支渲染:text 普通气泡 / tool_use 蓝色卡片(name + input JSON)/ tool_result 绿/红卡片(content 文本或嵌套 blocks)
-  - 流式期间 pending overlay,完成后 `getConversation` 拉 canonical 替换(含 tool_use/tool_result blocks)
-  - 首发自动创建 conversation(避免空 conv 堆积);`chariot.chat.active_conversation` + `chariot.chat.selected_entry` localStorage 持久化
-- `packages/app/src/pages/Tools.tsx`(新):类比 Models 页,4 行 fold/expand;Button 充当 on/off toggle(没装 Switch 组件),KV 编辑器整体替换 options,只读展示 anthropic schema
-- `packages/app/src/pages/Dashboard.tsx`:展示 `tools_enabled` / `conversations_count` + Tools/Chat 入口链接
-- `packages/app/src/routes.tsx`:加 `/tools` 路由 + Tools nav
-- **附带 server 修复**:`AnthropicModel._rewrite_for_upstream` 把 `stream` 参数同步写到 `body.stream`;否则 slow path 内部 `stream=False` 调用时 client 原 body 里 `stream=true` 没推平,上游返 SSE → JSON 解析炸 → `upstream_invalid_response` 502
-- **验证**:`bun run typecheck` + `bun run build` + 手测发起带工具的多轮对话
-
-### M.8 ✅ docs + 版本号 0.3.1 → 0.4.0
-
-- `DESIGN.md` 已在归档时落盘,实施过程若有偏差再更新
-- `FEATURE.md` 标 ✅ 进度
-- `ROADMAP.md` v2 段调整:多轮记忆 / 工具调用 标 0.4.0 完成,仅保留进化循环 + 多 Agent 在 v2
-- `README.md` 加 conversations / tools 用法段落,Chat 页 + CLI 用例
-- `pyproject.toml` + `chariot/__init__.py` 升 `0.3.1 → 0.4.0`
-- 全套验证(ruff / format / pyright / pytest / bun build)
-- commit + 等用户 push
+  - `pending` 类型从 `{userText, assistantText, ...}` 改成 `{userText, blocks: AnthropicBlock[], status, meta, ...}`
+  - `runTurn` 调用 `onEvent`:text 累加进末尾 text block;tool_use_complete 推
+    新 tool_use block;tool_result 推 tool_result block
+  - 渲染:复用 `Chat.tsx:727-774` 的 tool_use / tool_result 卡片
+  - `loadConvDetail` 保留作 reconciliation,turn done 后调一次(server canonical
+    校对)
+- `docs/DESIGN.md` 实施过程偏差校正(若有)
+- `docs/FEATURE.md` 全部步骤标 ✅
+- `docs/ROADMAP.md` 更新:0.5.0 协议级流式标已完成,0.6.0 / 0.7.0 上调到 0.5.0+ /
+  0.6.0+ 表述
+- `README.md`:CLI / UI 流式工具 demo 段(可选截图)
+- 版本号 `pyproject.toml` + `chariot/__init__.py`:`0.4.4 → 0.5.0`
+- **验证**:全套(ruff / format / pyright / pytest / bun build)+ 手测端到端
+  (CLI REPL 看到 → read_file 行;UI Chat 卡片实时 append tool 卡片)
 
 ---
 
-## 0.5.0+ 路标
+## 0.6.0+ 路标
 
 详见 `docs/ROADMAP.md`。要点:
 
-- **0.5.0**:Agent 自我进化循环(读 logs feedback 调权重 / 切 model / 修 prompt)
-- **0.6.0**:多 Agent 实例(logs / conversations / tools 加 agent_id 维度)
-- **0.7.0?**:工具调用流式优化(中间 turn 增量 stream;免"最后一轮重发")
+- **0.6.0**:Agent 自我进化循环(读 logs feedback 调权重 / 切 model / 修 prompt)
+- **0.7.0**:多 Agent 实例(logs / conversations / tools 加 agent_id 维度)
