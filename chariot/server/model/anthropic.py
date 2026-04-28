@@ -131,15 +131,22 @@ class AnthropicModel(Model):
     # ---- Model 接口 ----
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:
-        payload = self._rewrite_model(body)
+        payload = self._rewrite_for_upstream(body, stream=stream)
         if stream:
             return await self._stream(payload)
         return await self._unary(payload)
 
     # ---- 内部:body 改写 + 上游调用 ----
 
-    def _rewrite_model(self, body: bytes) -> bytes:
-        """把 body.model 字段改成配置里的 model;非法 JSON 直接 raise 400 给客户端。"""
+    def _rewrite_for_upstream(self, body: bytes, *, stream: bool) -> bytes:
+        """改写 body 字段:
+        - `model` → 配置里的真实 model name(client 写啥都按配置走)
+        - `stream` → 同步本地 stream 参数(Anthropic 据 body.stream 决定输出格式;
+          slow path 内部循环以 stream=False 调时,client 原 body 里的 stream=true
+          必须被推平,否则上游返回 SSE 而我们走 _unary 拿原始 bytes,JSON 解析炸)
+
+        非法 JSON 直接 raise 400 给客户端。
+        """
         try:
             data: Any = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -150,6 +157,7 @@ class AnthropicModel(Model):
             raise ServiceError(status=400, code="invalid_json_body", message="顶层必须是对象")
         body_dict = cast(dict[str, Any], data)
         body_dict["model"] = self._model
+        body_dict["stream"] = stream
         return json.dumps(body_dict, ensure_ascii=False).encode("utf-8")
 
     async def _unary(self, payload: bytes) -> Response:

@@ -150,6 +150,16 @@ export default function Dashboard() {
               value={<code className="font-mono text-sm">{state.status.entries_count}</code>}
             />
             <Stat
+              label="tools enabled"
+              value={<code className="font-mono text-sm">{state.status.tools_enabled}</code>}
+            />
+            <Stat
+              label="conversations"
+              value={
+                <code className="font-mono text-sm">{state.status.conversations_count}</code>
+              }
+            />
+            <Stat
               label="server url"
               value={
                 <code className="break-all font-mono text-sm">
@@ -159,12 +169,26 @@ export default function Dashboard() {
             />
           </div>
 
-          <Link
-            to="/models"
-            className="text-sm text-muted-foreground underline-offset-2 hover:underline"
-          >
-            模型管理(列表 + 探针)→
-          </Link>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <Link
+              to="/models"
+              className="text-muted-foreground underline-offset-2 hover:underline"
+            >
+              模型管理 →
+            </Link>
+            <Link
+              to="/tools"
+              className="text-muted-foreground underline-offset-2 hover:underline"
+            >
+              工具管理 →
+            </Link>
+            <Link
+              to="/chat"
+              className="text-muted-foreground underline-offset-2 hover:underline"
+            >
+              对话 →
+            </Link>
+          </div>
         </>
       )}
     </section>

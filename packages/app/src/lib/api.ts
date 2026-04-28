@@ -18,6 +18,10 @@ export interface StatusResponse {
   uptime_ms: number;
   /** 0.3.1 起返已注册 entries 数量(active 退役)。 */
   entries_count: number;
+  /** 0.4.0 加。Agent 当前 enabled tools 数(Agent.tools 字典 len)。 */
+  tools_enabled: number;
+  /** 0.4.0 加。DB 里 conversations 总数。 */
+  conversations_count: number;
   /** 客户端抵达 server 的 base URL(含 scheme + host + port)。 */
   url: string;
 }
@@ -73,6 +77,75 @@ export interface ModelEntry {
   options: Record<string, unknown>;
   /** 0.3.1 加。runtime 默认 sampling 参数(temperature / top_p / max_tokens 等);前端切到该 entry 时填充 Chat 高级参数面板。 */
   params: Record<string, unknown>;
+}
+
+// =====================================================================
+// 0.4.0:Conversation + Tool
+// =====================================================================
+
+/** 对齐 `chariot.server.controller.conversations.ConversationOut`。 */
+export interface Conversation {
+  id: string;
+  title: string | null;
+  /** 派生:最后一轮 assistant 用的 model entry name。 */
+  last_model: string | null;
+  message_count: number;
+  /** ISO 8601 datetime。 */
+  created_at: string;
+  updated_at: string;
+}
+
+/** Anthropic content block(text / tool_use / tool_result / 其它);content
+ *  可以是 string(纯文本 message)或 blocks 数组。前端按 type 分支渲染。 */
+export type AnthropicBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | {
+      type: "tool_result";
+      tool_use_id: string;
+      content: AnthropicBlock[] | string;
+      is_error?: boolean;
+    }
+  | { type: string; [key: string]: unknown };
+
+/** 对齐 `chariot.server.controller.conversations.MessageOut`。 */
+export interface Message {
+  seq: number;
+  role: "user" | "assistant";
+  content: string | AnthropicBlock[];
+  /** 仅 role='assistant' 行非空,记本轮用的 entry name。 */
+  model_name: string | null;
+  created_at: string;
+}
+
+/** `GET /admin/conversations`。 */
+export interface ConversationsListResponse {
+  items: Conversation[];
+  limit: number;
+  offset: number;
+}
+
+/** `GET /admin/conversations/{id}`。 */
+export interface ConversationDetail {
+  conversation: Conversation;
+  messages: Message[];
+}
+
+/** 对齐 `chariot.server.controller.tools.ToolOut`。 */
+export interface Tool {
+  name: string;
+  type: string;
+  enabled: boolean;
+  options: Record<string, unknown>;
+  /** anthropic tool definition JSON;options 不合法时为 null。 */
+  schema_: Record<string, unknown> | null;
+}
+
+/** `GET /admin/tools`。 */
+export interface ToolsListResponse {
+  /** ToolRegistry.known_types()。 */
+  types: string[];
+  entries: Tool[];
 }
 
 export class ApiError extends Error {
@@ -204,6 +277,59 @@ export const api = {
     return request(`/admin/models/entries/${encodeURIComponent(name)}/duplicate`, {
       method: "POST",
       body: JSON.stringify(as_ !== undefined ? { as: as_ } : {}),
+    });
+  },
+
+  // ---------- conversations(0.4.0)----------
+
+  listConversations(params: { limit?: number; offset?: number } = {}): Promise<ConversationsListResponse> {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.offset !== undefined) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return request(`/admin/conversations${qs ? "?" + qs : ""}`);
+  },
+
+  getConversation(id: string): Promise<ConversationDetail> {
+    return request(`/admin/conversations/${encodeURIComponent(id)}`);
+  },
+
+  /** 显式创建。`id` 不传 → server 生成 ULID;传了必须合法 ULID(server 会校验)。 */
+  createConversation(req: { id?: string; title?: string | null } = {}): Promise<Conversation> {
+    return request("/admin/conversations", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  },
+
+  deleteConversation(id: string): Promise<void> {
+    return request(`/admin/conversations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  /** 改 title;`title=null` 把标题清空。 */
+  updateConversationTitle(id: string, title: string | null): Promise<Conversation> {
+    return request(`/admin/conversations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    });
+  },
+
+  // ---------- tools(0.4.0)----------
+
+  listTools(): Promise<ToolsListResponse> {
+    return request("/admin/tools");
+  },
+
+  /** 改 enabled / options。两者都 None → no-op(server 仍触发 Agent rebuild)。 */
+  updateTool(
+    name: string,
+    req: { enabled?: boolean; options?: Record<string, unknown> },
+  ): Promise<Tool> {
+    return request(`/admin/tools/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
     });
   },
 };

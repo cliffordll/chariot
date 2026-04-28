@@ -25,6 +25,8 @@ export interface ChatTurnOpts {
    */
   temperature?: number;
   topP?: number;
+  /** 0.4.0 加。非空时通过 `X-Chariot-Conversation` header 带去,server 据此追加 messages。 */
+  conversationId?: string | null;
   signal: AbortSignal;
   onToken: (t: string) => void;
 }
@@ -68,11 +70,15 @@ export async function runTurn(
 
   const base = await apiBase();
   const t0 = performance.now();
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (opts.conversationId) {
+    headers["x-chariot-conversation"] = opts.conversationId;
+  }
   let resp: Response;
   try {
     resp = await fetch(base + MESSAGES_PATH, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(body),
       signal: opts.signal,
     });
