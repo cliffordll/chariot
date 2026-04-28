@@ -6,7 +6,7 @@
  */
 
 import { apiBase } from "@/lib/api";
-import { ChatStream } from "@/lib/streams";
+import { ChatStream, type StreamEvent } from "@/lib/streams";
 
 const MESSAGES_PATH = "/v1/messages";
 
@@ -28,7 +28,12 @@ export interface ChatTurnOpts {
   /** 0.4.0 加。非空时通过 `X-Chariot-Conversation` header 带去,server 据此追加 messages。 */
   conversationId?: string | null;
   signal: AbortSignal;
-  onToken: (t: string) => void;
+  /**
+   * 0.5.0:typed StreamEvent 回调(text / tool_use / tool_result / turn_complete /
+   * stream_done)。caller 用 ev.kind 分派;text 用于逐 token 累积,tool_use /
+   * tool_result 用于渐进 append blocks 卡片。
+   */
+  onEvent: (ev: StreamEvent) => void;
 }
 
 export interface ChatTurnResult {
@@ -95,12 +100,21 @@ export async function runTurn(
   }
 
   const stream = new ChatStream();
-  const buf: string[] = [];
+  // 跨 turn 跟踪:current_turn_text 累积当前 assistant turn 文本;
+  // turn_complete(role=assistant)snapshot 到 lastAssistantText,被下一轮覆盖,
+  // 流尾留下的就是最终轮的 final 文本(返回给 caller 作 ChatTurnResult.text)。
+  let currentTurnText = "";
+  let lastAssistantText = "";
   let aborted = false;
   try {
-    for await (const tok of stream.textDeltas(resp, opts.signal)) {
-      buf.push(tok);
-      opts.onToken(tok);
+    for await (const ev of stream.events(resp, opts.signal)) {
+      opts.onEvent(ev);
+      if (ev.kind === "text") {
+        currentTurnText += ev.text;
+      } else if (ev.kind === "turn_complete" && ev.role === "assistant") {
+        lastAssistantText = currentTurnText;
+        currentTurnText = "";
+      }
     }
   } catch (e) {
     if (opts.signal.aborted) {
@@ -111,7 +125,7 @@ export async function runTurn(
   }
 
   return {
-    text: buf.join(""),
+    text: lastAssistantText,
     inputTokens: stream.inputTokens,
     outputTokens: stream.outputTokens,
     latencyMs: Math.round(performance.now() - t0),

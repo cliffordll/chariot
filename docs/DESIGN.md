@@ -119,14 +119,21 @@ block。server 在两轮 LLM 之间合成这条 message 并通过 SSE 流转给 
 时,各自 `load history` 看到的是 send 之前的快照,没看到对方那条;然后各自调
 Model + append 自己的 turn → DB 序列错乱。修复:
 
-- `ConversationRepo.acquire_advisory_lock(conv_id)` 用 SQLite `BEGIN IMMEDIATE` +
-  长事务包住 `load → append user → call model → append assistant`
+- `ConversationLockManager`(`chariot/server/conversation_lock.py`):per-conv
+  in-memory `asyncio.Lock` 字典(单进程 server,async 协程在事件循环里串行,
+  asyncio.Lock 足够);`acquire(conv_id, timeout_s)` 是 async context manager,
+  `yield` 期间持锁,退出自动释放
 - 等待中的 client 排队,先到先服务;超时(env `CHARIOT_CONV_LOCK_TIMEOUT_S`,
   默认 30s)→ 503 + `code: conversation_busy`,client 自行重试
 
-实现位置:`Agent._run_tool_loop` 起步那段(`history/0.4.0/DESIGN.md` §7 流程图
-里的 "Stateful 起步" 段),用 async with `conv_repo.locked(conversation_id)` 包住
-整段循环。
+实现位置:`Agent._stream_tool_loop` 把整段流式循环用 `async with
+ConversationLockManager.acquire(conversation_id):` 包住(stateless 走
+`nullcontext`,无锁)。
+
+> **设计取舍**:原方案是 SQLite `BEGIN IMMEDIATE` 长事务做 DB-level lock
+> (跨进程也安全)。0.5.0 选 in-memory asyncio.Lock 是因为 chariot 是单进程
+> server,asyncio.Lock 实现简单、没事务冲突 / 死锁风险。多进程部署再切 SQLite
+> 锁(0.6.0+ 选项)。
 
 ## 8. Tool 层(沿用 0.4.0,见归档)
 

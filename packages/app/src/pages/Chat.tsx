@@ -19,6 +19,7 @@ import {
   type ModelsListResponse,
 } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
+import type { StreamEvent } from "@/lib/streams";
 
 /**
  * Chat 页(0.4.0):左侧 conversation 侧栏 + 右侧 messages 视图。
@@ -76,8 +77,15 @@ function lsSet(key: string, value: string | null): void {
 interface PendingTurn {
   /** 用户这轮发的文本(已显示在右侧但还没落 DB)。 */
   userText: string;
-  /** assistant 流式增量文本。 */
-  assistantText: string;
+  /**
+   * 0.5.0:渐进 append 的 anthropic content blocks。
+   * - text 增量累积进末尾 text block(没有就推一个新的)
+   * - tool_use_complete 推 tool_use block
+   * - tool_result 推 tool_result block
+   * - server 合成的 user role tool_result message 完整 turn 也走这里(单条 list 即可,
+   *   不区分 assistant / user 边界 —— BlocksRender 按 type 分支着色已足够区分)
+   */
+  blocks: AnthropicBlock[];
   status: "streaming" | "done" | "aborted" | "error";
   errorMsg: string | null;
   meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
@@ -294,7 +302,7 @@ export default function Chat() {
         const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
         setPending({
           userText: text,
-          assistantText: "",
+          blocks: [],
           status: "error",
           errorMsg: `创建会话失败: ${msg}`,
           meta: null,
@@ -307,10 +315,10 @@ export default function Chat() {
       convId = pane.id;
     }
 
-    // 1. 显示 pending 行
+    // 1. 显示 pending 行(blocks 起步空,onEvent 渐进 append)
     setPending({
       userText: text,
-      assistantText: "",
+      blocks: [],
       status: "streaming",
       errorMsg: null,
       meta: null,
@@ -337,12 +345,8 @@ export default function Chat() {
         topP: sampling.topP,
         conversationId: convId,
         signal: ctrl.signal,
-        onToken: (tok) => {
-          setPending((cur) =>
-            cur
-              ? { ...cur, assistantText: cur.assistantText + tok }
-              : cur,
-          );
+        onEvent: (ev) => {
+          setPending((cur) => (cur ? { ...cur, blocks: applyEvent(cur.blocks, ev) } : cur));
         },
       });
 
@@ -823,6 +827,46 @@ function ToolResultContent({
   );
 }
 
+/**
+ * 0.5.0:把一条 StreamEvent 应用到 pending blocks 上。
+ *
+ * - text:文本增量累积进**末尾**那条 text block;末尾不是 text 就推一条新 text
+ *   block(典型场景:tool_use 后的 text response 起步)
+ * - tool_use:推一条新 tool_use block
+ * - tool_result:推一条新 tool_result block
+ * - turn_complete / stream_done:不动 blocks(纯通知,Chat.tsx 也不需要在这里处理 meta,
+ *   meta 由 runTurn 返回值赋)
+ */
+function applyEvent(blocks: AnthropicBlock[], ev: StreamEvent): AnthropicBlock[] {
+  if (ev.kind === "text") {
+    const last = blocks[blocks.length - 1];
+    if (last && last.type === "text" && typeof (last as { text?: unknown }).text === "string") {
+      const next = blocks.slice();
+      next[next.length - 1] = { type: "text", text: (last as { text: string }).text + ev.text };
+      return next;
+    }
+    return [...blocks, { type: "text", text: ev.text }];
+  }
+  if (ev.kind === "tool_use") {
+    return [
+      ...blocks,
+      { type: "tool_use", id: ev.toolUseId, name: ev.toolName, input: ev.toolInput },
+    ];
+  }
+  if (ev.kind === "tool_result") {
+    return [
+      ...blocks,
+      {
+        type: "tool_result",
+        tool_use_id: ev.toolUseId,
+        content: ev.toolResultContent,
+        is_error: ev.isError,
+      },
+    ];
+  }
+  return blocks;
+}
+
 function PendingBubble({
   pending,
   onRetry,
@@ -838,15 +882,17 @@ function PendingBubble({
         </div>
       </div>
       <div className="flex flex-col items-start gap-1">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-background px-3 py-2 text-sm">
-          {pending.assistantText ||
-            (pending.status === "streaming" ? (
-              <span className="text-muted-foreground">…</span>
-            ) : null)}
-          {pending.status === "aborted" && (
-            <span className="ml-1 text-xs text-muted-foreground">[已中断]</span>
-          )}
-        </div>
+        {pending.blocks.length === 0 && pending.status === "streaming" && (
+          <div className="max-w-[85%] rounded-lg border border-border bg-background px-3 py-2 text-sm">
+            <span className="text-muted-foreground">…</span>
+          </div>
+        )}
+        {pending.blocks.length > 0 && (
+          <BlocksRender blocks={pending.blocks} side="assistant" />
+        )}
+        {pending.status === "aborted" && (
+          <span className="text-xs text-muted-foreground">[已中断]</span>
+        )}
         {pending.status === "error" && pending.errorMsg && (
           <div className="max-w-[85%] rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive">
             {pending.errorMsg}

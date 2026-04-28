@@ -119,7 +119,7 @@ S.x 标号不动(commit message 引用稳定),只是按文档章节顺序读时�
     收到的调用序列(text 走 stream_token,tool_use 走 tool_use_line,etc.)
 - **验证**:`uv run pytest -q tests/cli/` + 手测 REPL(stateful conv,触发工具)
 
-### S.5 UI Chat 页实时渲染 tool blocks + docs + 版本号
+### S.5 ✅ UI Chat 页实时渲染 tool blocks + docs + 版本号
 
 **目标**:pending 卡片渐进 append tool_use / tool_result blocks,撤掉"等
 loadConvDetail 才看到工具"的依赖。
