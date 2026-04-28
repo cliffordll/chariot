@@ -193,14 +193,14 @@ export default function Chat() {
     if (!valid) setSelectedEntry(data.available[0]);
   }, [modelsState, selectedEntry, setSelectedEntry]);
 
-  // auto-scroll
+  // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
+  // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
+  // messages 时长度跳变,distance 常超 64px → 阈值卡住不滚 → 用户看不到最新。
+  // 牺牲"流式中往上翻看历史不被打断"的便利,优先保证消息可见性。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distance = el.scrollHeight - (el.scrollTop + el.clientHeight);
-    if (distance < 64) {
-      el.scrollTop = el.scrollHeight;
-    }
+    el.scrollTop = el.scrollHeight;
   }, [pane, pending]);
 
   const startNewChat = useCallback(() => {
@@ -483,7 +483,7 @@ export default function Chat() {
       </aside>
 
       {/* 右侧主面板 */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">
             {pane.kind === "loaded" && pane.conversation.title
