@@ -2,12 +2,12 @@
 
 0.3.0 起源数据来源从 TOML 文件迁到 DB(`models` 表),由 `ModelRepo` 持久化。
 0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
-本模块只保留:
+0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
+`ModelEntry` / `ChariotConfig` 同结构。本模块汇总:
 
 - `ConfigError`:配置层错误(startup 期 raise,不是 HTTP)
-- `ModelEntry`:单条 model 配置(name / type / options / params)—— 数据形态
-- `ChariotConfig`:顶层(纯 entries 容器)—— 数据形态;`from_db(session)` classmethod
-  从 ModelRepo 装载
+- `ModelEntry` / `ChariotConfig`:model 配置(0.3.x)
+- `ToolEntry` / `ToolConfig`:tool 配置(0.4.0);`from_db(session)` 从 ToolRepo 装载
 
 历史:0.2.x 时这里有 `ConfigLoader`(读 `~/.chariot/config.toml`)+
 `ChariotConfig.from_dict(raw)`(TOML dict 校验)。0.3.0 一并删除,见
@@ -48,6 +48,14 @@ class DuplicateModelName(ConfigError):  # noqa: N818 — 同上
     """name 已存在(create / duplicate 目标名冲突)。
 
     Controller 转 HTTP 409。
+    """
+
+
+class ToolNotFound(ConfigError):  # noqa: N818 — 同 ModelNotFound
+    """指定 tool name 在 DB 里找不到(0.4.0 update_tool 路径)。
+
+    Controller 转 HTTP 404。0.4.0 tools 是 4 条 seeded fixture,只在 DB
+    被外部破坏(手动 DELETE)或 seed 没跑完时会触发。
     """
 
 
@@ -99,6 +107,59 @@ class ChariotConfig:
 
     def find_entry(self, name: str) -> ModelEntry | None:
         for entry in self.models:
+            if entry.name == name:
+                return entry
+        return None
+
+
+@dataclass(frozen=True)
+class ToolEntry:
+    """单条 tool 配置(0.4.0)。
+
+    `name` == ToolRegistry type key(0.4.0 一种 type 一个 entry,预留同类多实例
+    时再分;详见 `docs/DESIGN.md` §8)。`options` 形态依 type 而定:
+
+    - `read_file`:`{"max_bytes": int}`
+    - `list_dir`:`{}`
+    - `shell_exec`:`{"workdir": str, "timeout_s": int}`
+    - `http_get`:`{"allowed_domains": list[str], "max_bytes": int}`
+    """
+
+    name: str
+    type: str
+    enabled: bool
+    options: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolConfig:
+    """顶层 tool 配置:enabled tools 列表(0.4.0)。
+
+    Agent 在 lifespan startup 调 `from_db(session)` → `ToolRepo.list_enabled()`
+    装载后,build 出 Tool 实例字典 `{name → Tool}`。disabled 的 entry 不进容器,
+    Agent 看不到。
+    """
+
+    tools: tuple[ToolEntry, ...] = ()
+
+    @classmethod
+    def empty(cls) -> ToolConfig:
+        return cls()
+
+    @classmethod
+    async def from_db(cls, session: AsyncSession) -> ToolConfig:
+        """从 DB(`tools` 表)装载 enabled entries。表空(seed 未跑)/ 全 disabled → `empty()`。"""
+        from chariot.server.repository.tool_repo import ToolRepo  # 避免循环 import
+
+        repo = ToolRepo(session)
+        entries = tuple(await repo.list_enabled())
+        return cls(tools=entries)
+
+    def is_empty(self) -> bool:
+        return not self.tools
+
+    def find_entry(self, name: str) -> ToolEntry | None:
+        for entry in self.tools:
             if entry.name == name:
                 return entry
         return None

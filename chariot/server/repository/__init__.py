@@ -17,13 +17,33 @@ from typing import Annotated
 from fastapi import Depends
 
 from chariot.server.database.session import SessionDep
+from chariot.server.repository.conversation_repo import Conversation, ConversationRepo
 from chariot.server.repository.log import LogRepo
+from chariot.server.repository.tool_repo import ToolRepo
 
 
 def _log_repo(session: SessionDep) -> LogRepo:
     return LogRepo(session)
 
 
-LogRepoDep = Annotated[LogRepo, Depends(_log_repo)]
+def _conversation_repo(session: SessionDep) -> ConversationRepo:
+    return ConversationRepo(session)
 
-__all__ = ["LogRepo", "LogRepoDep"]
+
+def _tool_repo(session: SessionDep) -> ToolRepo:
+    return ToolRepo(session)
+
+
+LogRepoDep = Annotated[LogRepo, Depends(_log_repo)]
+ConversationRepoDep = Annotated[ConversationRepo, Depends(_conversation_repo)]
+ToolRepoDep = Annotated[ToolRepo, Depends(_tool_repo)]
+
+__all__ = [
+    "Conversation",
+    "ConversationRepo",
+    "ConversationRepoDep",
+    "LogRepo",
+    "LogRepoDep",
+    "ToolRepo",
+    "ToolRepoDep",
+]
