@@ -119,3 +119,212 @@ async def test_shutdown(echo_client: tuple[ProxyClient, dict[str, Any]]) -> None
     req = captured["request"]
     assert req.method == "POST"
     assert req.url.path == "/admin/shutdown"
+
+
+# ---------- conversations(0.4.0)----------
+
+ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
+
+
+async def test_list_conversations(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        200,
+        json={
+            "items": [
+                {
+                    "id": ULID_A,
+                    "title": "t",
+                    "last_model": "mock",
+                    "message_count": 3,
+                    "created_at": "2026-04-28T10:00:00Z",
+                    "updated_at": "2026-04-28T10:05:00Z",
+                },
+            ],
+            "limit": 10,
+            "offset": 0,
+        },
+    )
+    resp = await client.list_conversations(limit=10)
+    assert len(resp.items) == 1
+    assert resp.items[0].id == ULID_A
+    req = captured["request"]
+    assert req.url.path == "/admin/conversations"
+    assert req.url.params["limit"] == "10"
+
+
+async def test_get_conversation(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        200,
+        json={
+            "conversation": {
+                "id": ULID_A,
+                "title": None,
+                "last_model": None,
+                "message_count": 0,
+                "created_at": "2026-04-28T10:00:00Z",
+                "updated_at": "2026-04-28T10:00:00Z",
+            },
+            "messages": [],
+        },
+    )
+    detail = await client.get_conversation(ULID_A)
+    assert detail.conversation.id == ULID_A
+    assert captured["request"].url.path == f"/admin/conversations/{ULID_A}"
+
+
+async def test_create_conversation_server_id(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        201,
+        json={
+            "id": ULID_A,
+            "title": "x",
+            "last_model": None,
+            "message_count": 0,
+            "created_at": "2026-04-28T10:00:00Z",
+            "updated_at": "2026-04-28T10:00:00Z",
+        },
+    )
+    conv = await client.create_conversation(title="x")
+    assert conv.id == ULID_A
+    req = captured["request"]
+    assert req.method == "POST"
+    assert req.url.path == "/admin/conversations"
+
+
+async def test_create_conversation_with_id(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        201,
+        json={
+            "id": ULID_A,
+            "title": None,
+            "last_model": None,
+            "message_count": 0,
+            "created_at": "2026-04-28T10:00:00Z",
+            "updated_at": "2026-04-28T10:00:00Z",
+        },
+    )
+    await client.create_conversation(conv_id=ULID_A)
+    import json as _json
+
+    body = _json.loads(captured["request"].content)
+    assert body["id"] == ULID_A
+
+
+async def test_delete_conversation(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(204)
+    await client.delete_conversation(ULID_A)
+    req = captured["request"]
+    assert req.method == "DELETE"
+    assert req.url.path == f"/admin/conversations/{ULID_A}"
+
+
+async def test_update_conversation_title(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        200,
+        json={
+            "id": ULID_A,
+            "title": "新标题",
+            "last_model": None,
+            "message_count": 0,
+            "created_at": "2026-04-28T10:00:00Z",
+            "updated_at": "2026-04-28T10:00:00Z",
+        },
+    )
+    conv = await client.update_conversation(ULID_A, title="新标题")
+    assert conv.title == "新标题"
+    req = captured["request"]
+    assert req.method == "PATCH"
+
+
+# ---------- tools(0.4.0)----------
+
+
+async def test_list_tools(echo_client: tuple[ProxyClient, dict[str, Any]]) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        200,
+        json={
+            "types": ["read_file", "list_dir", "shell_exec", "http_get"],
+            "entries": [
+                {
+                    "name": "read_file",
+                    "type": "read_file",
+                    "enabled": False,
+                    "options": {"max_bytes": 1048576},
+                    "schema_": {
+                        "name": "read_file",
+                        "description": "...",
+                        "input_schema": {},
+                    },
+                },
+            ],
+        },
+    )
+    resp = await client.list_tools()
+    assert len(resp.entries) == 1
+    assert resp.entries[0].name == "read_file"
+    assert captured["request"].url.path == "/admin/tools"
+
+
+async def test_update_tool(echo_client: tuple[ProxyClient, dict[str, Any]]) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(
+        200,
+        json={
+            "name": "read_file",
+            "type": "read_file",
+            "enabled": True,
+            "options": {"max_bytes": 2048},
+            "schema_": None,
+        },
+    )
+    tool = await client.update_tool(
+        "read_file",
+        enabled=True,
+        options={"max_bytes": 2048},
+    )
+    assert tool.enabled is True
+    req = captured["request"]
+    assert req.method == "PUT"
+    assert req.url.path == "/admin/tools/read_file"
+
+
+# ---------- chat with conversation_id ----------
+
+
+async def test_post_chat_passes_conversation_header(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(200, json={"ok": True})
+    await client.post_chat({"model": "spy"}, conversation_id=ULID_A)
+    req = captured["request"]
+    assert req.headers["x-chariot-conversation"] == ULID_A
+
+
+async def test_post_chat_no_header_when_no_id(
+    echo_client: tuple[ProxyClient, dict[str, Any]],
+) -> None:
+    client, captured = echo_client
+    captured["response"] = httpx.Response(200, json={"ok": True})
+    await client.post_chat({"model": "spy"})
+    req = captured["request"]
+    assert "x-chariot-conversation" not in req.headers

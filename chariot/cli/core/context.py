@@ -64,6 +64,12 @@ class ChatContext:
     model: str
     max_tokens: int = 1024
     messages: list[dict[str, str]] = field(default_factory=_empty_messages)
+    # 0.4.0:可选 conversation id(ULID)。给了则 SDK 附 X-Chariot-Conversation header,
+    # server 走 stateful 路径(load 历史 + persist 这轮)。注意:server-side 持久化
+    # 后,本地 self.messages 跟 server 的 history 可能重复,但 server 端约定 client
+    # 只传"这一轮新增"。CLI chat 模式下 self.messages 仍累积本进程内的轮(便于
+    # REPL 打印 / 撤回),发请求时 server 看到 history + new turn 拼出来一致
+    conversation_id: str | None = None
 
     # ---------- 状态操作 ----------
 
@@ -97,7 +103,7 @@ class ChatContext:
         buf: list[str] = []
         t0 = time.monotonic()
 
-        async with self.client.stream_chat(body) as resp:
+        async with self.client.stream_chat(body, conversation_id=self.conversation_id) as resp:
             if resp.status_code >= 400:
                 err_bytes = await resp.aread()
                 raise ChatError(

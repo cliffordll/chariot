@@ -20,6 +20,9 @@ from chariot.cli.commands import (
     chat as chat_mod,
 )
 from chariot.cli.commands import (
+    conversation as conversation_mod,
+)
+from chariot.cli.commands import (
     logs as logs_mod,
 )
 from chariot.cli.commands import (
@@ -36,6 +39,9 @@ from chariot.cli.commands import (
 )
 from chariot.cli.commands import (
     stop as stop_mod,
+)
+from chariot.cli.commands import (
+    tool as tool_mod,
 )
 
 # 所有子 Typer 共享的 context 配置:让 `-h` 也能触发 help(默认只认 `--help`)
@@ -71,6 +77,8 @@ for mod in (
     stats_mod,
     chat_mod,
     model_mod,
+    tool_mod,
+    conversation_mod,
 ):
     mod.register(app)
 

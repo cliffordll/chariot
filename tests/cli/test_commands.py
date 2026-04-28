@@ -45,20 +45,78 @@ def _wide_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_root_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    # 关键子命令名都出现
+    # 关键子命令名都出现(0.4.0 加 tool / conversation)
     out = _plain(result.output)
-    for sub in ("status", "start", "stop", "logs", "stats", "chat", "model"):
+    for sub in (
+        "status",
+        "start",
+        "stop",
+        "logs",
+        "stats",
+        "chat",
+        "model",
+        "tool",
+        "conversation",
+    ):
         assert sub in out, f"--help 输出里缺少子命令 {sub!r}"
 
 
 @pytest.mark.parametrize(
     "sub",
-    ["status", "start", "stop", "logs", "stats", "chat", "model"],
+    [
+        "status",
+        "start",
+        "stop",
+        "logs",
+        "stats",
+        "chat",
+        "model",
+        "tool",
+        "conversation",
+    ],
 )
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_subcommand_help(sub: str, flag: str) -> None:
     result = runner.invoke(app, [sub, flag])
     assert result.exit_code == 0, f"{sub} {flag} 应成功,实际 exit={result.exit_code}"
+
+
+def test_tool_subcommand_group_has_list_enable_disable_config() -> None:
+    """0.4.0 chariot tool 子命令组。"""
+    result = runner.invoke(app, ["tool", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for sub in ("list", "enable", "disable", "config"):
+        assert sub in out, f"`chariot tool --help` 缺少子命令 {sub!r}"
+
+
+def test_conversation_subcommand_group_has_list_show_rm_rename() -> None:
+    """0.4.0 chariot conversation 子命令组。"""
+    result = runner.invoke(app, ["conversation", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for sub in ("list", "show", "rm", "rename"):
+        assert sub in out, f"`chariot conversation --help` 缺少子命令 {sub!r}"
+
+
+def test_chat_has_conversation_option() -> None:
+    """0.4.0 chariot chat 加 --conversation 选项。"""
+    result = runner.invoke(app, ["chat", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "--conversation" in out
+
+
+def test_tool_enable_requires_name() -> None:
+    """`chariot tool enable` 没传 name → 退出码非 0。"""
+    result = runner.invoke(app, ["tool", "enable"])
+    assert result.exit_code != 0
+
+
+def test_conversation_show_requires_id() -> None:
+    """`chariot conversation show` 没传 id → 退出码非 0。"""
+    result = runner.invoke(app, ["conversation", "show"])
+    assert result.exit_code != 0
 
 
 def test_model_subcommand_group_has_list_and_crud() -> None:

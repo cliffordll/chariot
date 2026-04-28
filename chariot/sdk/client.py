@@ -29,6 +29,11 @@ import httpx
 
 from chariot.sdk.chat import ChatResult
 from chariot.sdk.discover import ServerDiscovery
+from chariot.server.controller.conversations import (
+    ConversationDetailResponse,
+    ConversationOut,
+    ConversationsListResponse,
+)
 from chariot.server.controller.logs import LogOut
 from chariot.server.controller.models import (
     EntryResponse,
@@ -37,6 +42,7 @@ from chariot.server.controller.models import (
 )
 from chariot.server.controller.runtime import StatusResponse
 from chariot.server.controller.stats import Period, StatsOut
+from chariot.server.controller.tools import ToolOut, ToolsListResponse
 
 _DATA_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 _ADMIN_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
@@ -216,34 +222,157 @@ class ProxyClient:
         resp.raise_for_status()
         return EntryResponse.model_validate(resp.json())
 
+    # ---- conversations(0.4.0)----
+
+    async def list_conversations(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> ConversationsListResponse:
+        """列 conversations(updated_at desc)。"""
+        resp = await self.http.get(
+            f"{self.base_url}/admin/conversations",
+            params={"limit": limit, "offset": offset},
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ConversationsListResponse.model_validate(resp.json())
+
+    async def get_conversation(self, conv_id: str) -> ConversationDetailResponse:
+        """取详情(含 messages 数组)。404 → httpx.HTTPStatusError。"""
+        resp = await self.http.get(
+            f"{self.base_url}/admin/conversations/{conv_id}",
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ConversationDetailResponse.model_validate(resp.json())
+
+    async def create_conversation(
+        self,
+        *,
+        conv_id: str | None = None,
+        title: str | None = None,
+    ) -> ConversationOut:
+        """显式创建。`conv_id` 不传 → server 生成 ULID;传了必须合法 ULID。"""
+        body: dict[str, Any] = {}
+        if conv_id is not None:
+            body["id"] = conv_id
+        if title is not None:
+            body["title"] = title
+        resp = await self.http.post(
+            f"{self.base_url}/admin/conversations",
+            json=body,
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ConversationOut.model_validate(resp.json())
+
+    async def delete_conversation(self, conv_id: str) -> None:
+        resp = await self.http.delete(
+            f"{self.base_url}/admin/conversations/{conv_id}",
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+
+    async def update_conversation(
+        self,
+        conv_id: str,
+        *,
+        title: str | None,
+    ) -> ConversationOut:
+        """改 title。`title=None` 把标题清空(发 PATCH body:`{"title": null}`)。"""
+        resp = await self.http.patch(
+            f"{self.base_url}/admin/conversations/{conv_id}",
+            json={"title": title},
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ConversationOut.model_validate(resp.json())
+
+    # ---- tools(0.4.0)----
+
+    async def list_tools(self) -> ToolsListResponse:
+        """列 4 条 fixture(每条含 enabled / options / anthropic schema 预览)。"""
+        resp = await self.http.get(
+            f"{self.base_url}/admin/tools",
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ToolsListResponse.model_validate(resp.json())
+
+    async def update_tool(
+        self,
+        name: str,
+        *,
+        enabled: bool | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> ToolOut:
+        """改 enabled / options。两个都 None → 等价 no-op(server 仍触发 rebuild)。"""
+        body: dict[str, Any] = {}
+        if enabled is not None:
+            body["enabled"] = enabled
+        if options is not None:
+            body["options"] = options
+        resp = await self.http.put(
+            f"{self.base_url}/admin/tools/{name}",
+            json=body,
+            timeout=_ADMIN_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return ToolOut.model_validate(resp.json())
+
     # ---------- data plane ----------
 
     @property
     def _data_url(self) -> str:
         return f"{self.base_url}{_MESSAGES_PATH}"
 
-    async def post_chat(self, body: dict[str, Any]) -> httpx.Response:
-        """非流式数据面 POST;调用方拿到 Response 自己 `.json()`。"""
+    async def post_chat(
+        self,
+        body: dict[str, Any],
+        *,
+        conversation_id: str | None = None,
+    ) -> httpx.Response:
+        """非流式数据面 POST;调用方拿到 Response 自己 `.json()`。
+
+        `conversation_id` 给了 → 附 X-Chariot-Conversation header(Agent 走 stateful path)。
+        """
         return await self.http.post(
             self._data_url,
             json=body,
-            headers={"content-type": "application/json"},
+            headers=self._chat_headers(conversation_id),
         )
 
     @asynccontextmanager
-    async def stream_chat(self, body: dict[str, Any]) -> AsyncGenerator[httpx.Response]:
-        """流式数据面 POST;返回 async context,`resp.aiter_bytes()` 读流。"""
+    async def stream_chat(
+        self,
+        body: dict[str, Any],
+        *,
+        conversation_id: str | None = None,
+    ) -> AsyncGenerator[httpx.Response]:
+        """流式数据面 POST;返回 async context,`resp.aiter_bytes()` 读流。
+
+        `conversation_id` 给了 → 附 X-Chariot-Conversation header。
+        """
         req = self.http.build_request(
             "POST",
             self._data_url,
             json=body,
-            headers={"content-type": "application/json"},
+            headers=self._chat_headers(conversation_id),
         )
         resp = await self.http.send(req, stream=True)
         try:
             yield resp
         finally:
             await resp.aclose()
+
+    @staticmethod
+    def _chat_headers(conversation_id: str | None) -> dict[str, str]:
+        h: dict[str, str] = {"content-type": "application/json"}
+        if conversation_id:
+            h["X-Chariot-Conversation"] = conversation_id
+        return h
 
     async def chat_once(
         self,
