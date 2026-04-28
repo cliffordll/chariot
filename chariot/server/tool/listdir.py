@@ -69,7 +69,7 @@ class ListDirTool(Tool):
             return self._error("input.path 必须是非空字符串")
         recursive = bool(input.get("recursive", False))
 
-        path = Path(path_raw).expanduser()
+        path = self.normalize_path(path_raw)
         try:
             if not path.exists():
                 return self._error(f"路径不存在: {path}")

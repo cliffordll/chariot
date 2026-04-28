@@ -225,6 +225,32 @@ async def test_list_dir_is_file_rejected(tmp_path: Path) -> None:
     assert result["is_error"] is True
 
 
+async def test_list_dir_normalizes_unix_style_windows_path(tmp_path: Path) -> None:
+    """LLM 给的 ``/X:/...``(unix-style)路径应被 normalize 后正常列出。
+
+    pathlib 在 Windows 默认把这种路径解析成"根 + 子目录 X: + ..."(drive 字段为空,
+    exists 永远 False)。Tool.normalize_path 剥前导 ``/`` 后才能正常工作。
+    在 POSIX 上由于该路径形态本来就合法 + 大概率不存在,test 跳过该断言部分。
+    """
+    (tmp_path / "a.txt").write_text("a")
+    raw = str(tmp_path)
+    # 兼容 POSIX(/tmp/...)与 Windows(D:\opendemo\...);构造 unix-style 形态
+    if raw.startswith("/"):
+        # POSIX:已经是 /tmp/... 形态;normalize 不会改它,等同 happy path
+        unix_form = raw
+    else:
+        # Windows:把 D:\foo\bar 拼成 /d:/foo/bar
+        drive = raw[0].lower()
+        rest = raw[2:].replace("\\", "/")
+        unix_form = f"/{drive}:{rest}"
+    result = await _make_list_dir().execute({"path": unix_form})
+    assert result.get("is_error") is not True, (
+        f"normalize 应剥前导 / 让 {unix_form!r} 能 exist;结果: {result}"
+    )
+    items = json.loads(result["content"][0]["text"])
+    assert any(it["name"] == "a.txt" for it in items)
+
+
 def test_list_dir_schema_has_path_required() -> None:
     schema = _make_list_dir().schema()
     assert schema["name"] == "list_dir"

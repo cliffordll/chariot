@@ -30,7 +30,6 @@ chariot 默认 disabled 即此考虑。0.4.x 可能加 path_whitelist 选项。
 from __future__ import annotations
 
 import base64
-from pathlib import Path
 from typing import Any, ClassVar, Self
 
 from chariot.server.config import ToolEntry
@@ -81,7 +80,7 @@ class ReadFileTool(Tool):
         path_raw = input.get("path")
         if not isinstance(path_raw, str) or not path_raw:
             return self._error("input.path 必须是非空字符串")
-        path = Path(path_raw).expanduser()
+        path = self.normalize_path(path_raw)
         try:
             if not path.exists():
                 return self._error(f"路径不存在: {path}")
