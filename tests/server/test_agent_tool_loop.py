@@ -1,23 +1,23 @@
-"""Agent 工具循环测试(0.4.0 M.3)。
+"""Agent 流式工具循环测试(0.5.0 S.1)。
+
+跟 0.4.0 比关键变化:agent 全程 streaming —— 上游 Model 永远以 stream=True 调,
+mock model 必须吐 Anthropic Messages 协议的 SSE 字节流。一条 HTTP 响应里串多
+个 message_start ... message_stop 块(每轮一对)+ server 在轮间合成 tool_result
+message 的 SSE 帧。
 
 覆盖:
 - slow path:server 注入 body.tools(client 没传时)
-- 工具循环:第一轮返 tool_use → 执行工具 → 第二轮返 final → return
-- 多轮工具循环
-- max_iter 超限 → 400 tool_iter_exceeded
-- 工具不存在(未注册或被禁) → tool_result is_error=True 进下一轮
+- 单轮工具循环 / 多轮 / 未知工具 / max_iter 超限
 - conversation_id auto-create + history load + persist user/assistant/tool_result
-- stream + slow path:收敛后重发 model.respond(stream=True)
-- client 传了 body.tools → server 不覆盖
+- stream client:返 StreamingResponse,流里含多 message_start 块
+- 非 stream client:server 内部 streaming + drain 后重建 Anthropic 非流 JSON
 - env CHARIOT_MAX_TOOL_ITER 生效
-
-设计:用 SequentialMockModel,按列表逐次返回预设 response;每次 respond 拿下一个。
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Self
 
 import pytest
@@ -30,80 +30,174 @@ from chariot.server.model.base import Model
 from chariot.server.repository.conversation_repo import ConversationRepo
 from chariot.server.service.exceptions import ServiceError
 from chariot.server.tool.base import Tool
+from chariot.shared.sse import SseParser
 
 ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
 
 
 # ============================================================
-# 测试用 Mock Model:按预设列表逐次返响应
+# SSE 构造工具
+# ============================================================
+
+
+def _sse_event(name: str, data: dict[str, Any]) -> bytes:
+    """跟 chariot.server.agent._format_sse_event / mock._sse_event 同款。"""
+    return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
+
+
+def _build_turn_sse(
+    content_blocks: list[dict[str, Any]],
+    *,
+    stop_reason: str = "end_turn",
+    msg_id: str = "msg_test",
+    model: str = "spy",
+) -> list[bytes]:
+    """构造一轮 LLM 响应的完整 SSE 帧序列(Anthropic Messages 协议)。
+
+    content_blocks 每条:
+      {"type": "text", "text": "..."}              → 一个 text block
+      {"type": "tool_use", "id": "...", "name": "...", "input": {...}}  → 一个 tool_use block
+    """
+    frames: list[bytes] = []
+    frames.append(
+        _sse_event(
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            },
+        ),
+    )
+    for i, block in enumerate(content_blocks):
+        btype = block["type"]
+        if btype == "text":
+            frames.append(
+                _sse_event(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": i,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                ),
+            )
+            frames.append(
+                _sse_event(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": i,
+                        "delta": {"type": "text_delta", "text": block["text"]},
+                    },
+                ),
+            )
+            frames.append(
+                _sse_event(
+                    "content_block_stop",
+                    {"type": "content_block_stop", "index": i},
+                ),
+            )
+        elif btype == "tool_use":
+            frames.append(
+                _sse_event(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": i,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": block["id"],
+                            "name": block["name"],
+                            "input": {},
+                        },
+                    },
+                ),
+            )
+            frames.append(
+                _sse_event(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": i,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(block["input"]),
+                        },
+                    },
+                ),
+            )
+            frames.append(
+                _sse_event(
+                    "content_block_stop",
+                    {"type": "content_block_stop", "index": i},
+                ),
+            )
+    frames.append(
+        _sse_event(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                "usage": {"output_tokens": 10},
+            },
+        ),
+    )
+    frames.append(_sse_event("message_stop", {"type": "message_stop"}))
+    return frames
+
+
+# ============================================================
+# 测试用 Mock Model:按预设列表逐次返 SSE 流
 # ============================================================
 
 
 class SequentialMockModel(Model):
-    """按 _responses 列表逐次返预设响应(JSON 字符串 → Response)。
+    """按 _turns 列表逐次返 SSE 流。每次 respond 取下一项打包 StreamingResponse。
 
-    每次 respond 拿下一项;stream=True 时返 StreamingResponse 包同样字节。
-    用 calls 记录每次的 (body, stream) 供断言。
+    `_turns[i]` 是 list[dict]:这一轮的 content blocks(text / tool_use)。
+    每次 respond 用它构造 _build_turn_sse 字节然后包 StreamingResponse。
     """
 
     name = "spy"
 
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
-        self._responses = list(responses)
+    def __init__(self, turns: list[list[dict[str, Any]]]) -> None:
+        self._turns = list(turns)
         self.calls: list[tuple[bytes, bool]] = []
 
     @classmethod
     def from_config(cls, options: dict[str, Any]) -> Self:
         del options
-        return cls(responses=[])
+        return cls(turns=[])
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:
         self.calls.append((body, stream))
-        if not self._responses:
+        if not self._turns:
             raise RuntimeError(
-                f"SequentialMockModel exhausted (call #{len(self.calls)});预设响应数不够",
+                f"SequentialMockModel exhausted (call #{len(self.calls)});预设 turns 数不够",
             )
-        data = self._responses.pop(0)
-        body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        if stream:
-
-            async def _gen() -> Any:
-                yield body_bytes
-
-            return StreamingResponse(_gen(), media_type="text/event-stream")
-        return Response(
-            content=body_bytes,
-            status_code=200,
-            media_type="application/json",
+        blocks = self._turns.pop(0)
+        # 决定 stop_reason:含 tool_use → "tool_use",否则 "end_turn"
+        has_tu = any(b.get("type") == "tool_use" for b in blocks)
+        sse_frames = _build_turn_sse(
+            blocks,
+            stop_reason="tool_use" if has_tu else "end_turn",
         )
 
+        async def _gen() -> AsyncIterator[bytes]:
+            for f in sse_frames:
+                yield f
 
-def _final_response(text: str) -> dict[str, Any]:
-    """没 tool_use 的 final assistant response。"""
-    return {
-        "id": "msg_final",
-        "type": "message",
-        "role": "assistant",
-        "model": "spy",
-        "content": [{"type": "text", "text": text}],
-        "stop_reason": "end_turn",
-    }
-
-
-def _tool_use_response(tool_uses: list[dict[str, Any]], *, text: str = "") -> dict[str, Any]:
-    """带 tool_use blocks 的 assistant response。"""
-    content: list[dict[str, Any]] = []
-    if text:
-        content.append({"type": "text", "text": text})
-    content.extend(tool_uses)
-    return {
-        "id": "msg_tooluse",
-        "type": "message",
-        "role": "assistant",
-        "model": "spy",
-        "content": content,
-        "stop_reason": "tool_use",
-    }
+        # 0.5.0 起 Agent slow path 永远 stream=True 调上游
+        return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 # ============================================================
@@ -171,23 +265,25 @@ async def test_tool_injection_when_client_omits(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """client 没传 body.tools → server 注入所有 enabled tool 的 schema 进 body."""
+    """client 没传 body.tools → server 注入所有 enabled tool 的 schema 进 body.
+
+    带 conv_id 走 slow path(否则 fast path 不进流式逻辑)。
+    """
     tool = CountingTool("read_file", ["file content"])
-    model = SequentialMockModel(
-        [_final_response("ok done")],  # 第一轮就收敛(不返 tool_use)
-    )
+    model = SequentialMockModel([[{"type": "text", "text": "ok done"}]])  # 一轮收敛
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"read_file": tool})
 
     body = json.dumps({"model": "m", "messages": [{"role": "user", "content": "hi"}]}).encode(
         "utf-8"
     )
-    await agent.handle(body)
+    await agent.handle(body, session=session, conversation_id=ULID_A)
 
-    # 验:model 收到的 body 含 tools 数组(server 注入)
     assert len(model.calls) == 1
     sent_body = json.loads(model.calls[0][0])
     assert "tools" in sent_body
     assert any(t["name"] == "read_file" for t in sent_body["tools"])
+    # 0.5.0 slow path 永远 stream=True 给上游
+    assert model.calls[0][1] is True
 
 
 async def test_client_tools_not_overridden(
@@ -196,7 +292,7 @@ async def test_client_tools_not_overridden(
 ) -> None:
     """client 传了 body.tools → server 不覆盖(client 优先)。"""
     tool = CountingTool("read_file", [])
-    model = SequentialMockModel([_final_response("done")])
+    model = SequentialMockModel([[{"type": "text", "text": "done"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"read_file": tool})
 
     client_tools = [{"name": "client_custom", "description": "custom", "input_schema": {}}]
@@ -204,28 +300,29 @@ async def test_client_tools_not_overridden(
     await agent.handle(body)
 
     sent_body = json.loads(model.calls[0][0])
-    assert sent_body["tools"] == client_tools  # 原样保留,server 没插 read_file
+    assert sent_body["tools"] == client_tools
 
 
 async def test_single_tool_call_then_final(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """轮 1:assistant 返 tool_use → 执行工具 → 轮 2:assistant 返 final text。"""
+    """轮 1:assistant 返 tool_use → 执行工具 → 轮 2:assistant 返 final text。
+
+    非 stream client 拿到的是重建后的 Anthropic 非流 JSON。
+    """
     tool = CountingTool("read_file", ["文件内容"])
     model = SequentialMockModel(
         [
-            _tool_use_response(
-                [
-                    {
-                        "type": "tool_use",
-                        "id": "tu_1",
-                        "name": "read_file",
-                        "input": {"path": "x.txt"},
-                    }
-                ],
-            ),
-            _final_response("基于文件内容,答案是 X"),
+            [
+                {
+                    "type": "tool_use",
+                    "id": "tu_1",
+                    "name": "read_file",
+                    "input": {"path": "x.txt"},
+                },
+            ],
+            [{"type": "text", "text": "基于文件内容,答案是 X"}],
         ],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"read_file": tool})
@@ -235,20 +332,26 @@ async def test_single_tool_call_then_final(
     )
     resp = await agent.handle(body)
 
-    # 验:工具被调用一次 + 输入正确
+    # 工具被调用一次 + 输入正确
     assert len(tool.calls) == 1
     assert tool.calls[0] == {"path": "x.txt"}
-    # 验:model 被调用两次
+    # model 被调用两次,都是 stream=True
     assert len(model.calls) == 2
-    # 第二轮 body.messages 应含 tool_result
+    assert all(c[1] is True for c in model.calls)
+    # 第二轮 body.messages 应含 server 拼好的 tool_result
     second_body = json.loads(model.calls[1][0])
     second_msgs = second_body["messages"]
     last_msg = second_msgs[-1]
     assert last_msg["role"] == "user"
     assert last_msg["content"][0]["type"] == "tool_result"
     assert last_msg["content"][0]["tool_use_id"] == "tu_1"
-    # 终轮响应原样返
+    # 非 stream client → 重建的 Anthropic JSON 响应
+    assert isinstance(resp, Response)
+    assert not isinstance(resp, StreamingResponse)
     assert resp.status_code == 200
+    final_body = json.loads(bytes(resp.body))
+    assert final_body["role"] == "assistant"
+    assert final_body["content"][0]["text"] == "基于文件内容,答案是 X"
 
 
 async def test_multi_round_tool_loop(
@@ -259,13 +362,9 @@ async def test_multi_round_tool_loop(
     tool = CountingTool("read_file", ["内容1", "内容2"])
     model = SequentialMockModel(
         [
-            _tool_use_response(
-                [{"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {"path": "a"}}],
-            ),
-            _tool_use_response(
-                [{"type": "tool_use", "id": "tu_2", "name": "read_file", "input": {"path": "b"}}],
-            ),
-            _final_response("综合 a / b 内容,答案"),
+            [{"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {"path": "a"}}],
+            [{"type": "tool_use", "id": "tu_2", "name": "read_file", "input": {"path": "b"}}],
+            [{"type": "text", "text": "综合 a / b 内容,答案"}],
         ],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"read_file": tool})
@@ -284,10 +383,8 @@ async def test_unknown_tool_returns_is_error(
     """LLM 调用未注册的工具 → server 返 is_error tool_result,继续循环。"""
     model = SequentialMockModel(
         [
-            _tool_use_response(
-                [{"type": "tool_use", "id": "tu_1", "name": "nope", "input": {}}],
-            ),
-            _final_response("ok"),
+            [{"type": "tool_use", "id": "tu_1", "name": "nope", "input": {}}],
+            [{"type": "text", "text": "ok"}],
         ],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
@@ -301,21 +398,16 @@ async def test_unknown_tool_returns_is_error(
     assert "nope" in last_msg["content"][0]["content"][0]["text"]
 
 
-async def test_max_iter_exceeded_raises(
+async def test_max_iter_exceeded_raises_for_non_stream(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """配 max_iter=2,Mock 一直返 tool_use → 第 2 轮超限 → 400 tool_iter_exceeded。"""
+    """配 max_iter=2,Mock 一直返 tool_use → 第 2 轮超限 → 非 stream client raise 400。"""
     monkeypatch.setenv("CHARIOT_MAX_TOOL_ITER", "2")
     tool = CountingTool("t", ["a", "b", "c"])
     model = SequentialMockModel(
-        [
-            _tool_use_response(
-                [{"type": "tool_use", "id": f"tu_{i}", "name": "t", "input": {}}],
-            )
-            for i in range(5)
-        ],
+        [[{"type": "tool_use", "id": f"tu_{i}", "name": "t", "input": {}}] for i in range(5)],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"t": tool})
 
@@ -326,12 +418,46 @@ async def test_max_iter_exceeded_raises(
     assert exc.value.status == 400
 
 
+async def test_max_iter_exceeded_emits_error_event_for_stream(
+    session: AsyncSession,
+    make_test_agent: MakeTestAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stream client 超限 → 流里含 `event: error`(SSE 协议原生),关流 graceful。"""
+    monkeypatch.setenv("CHARIOT_MAX_TOOL_ITER", "2")
+    tool = CountingTool("t", ["a", "b", "c"])
+    model = SequentialMockModel(
+        [[{"type": "tool_use", "id": f"tu_{i}", "name": "t", "input": {}}] for i in range(5)],
+    )
+    agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"t": tool})
+
+    body = json.dumps({"model": "m", "stream": True, "messages": []}).encode("utf-8")
+    resp = await agent.handle(body)
+    assert isinstance(resp, StreamingResponse)
+
+    chunks: list[bytes] = []
+    async for chunk in resp.body_iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else bytes(chunk))  # type: ignore[arg-type]
+    full = b"".join(chunks)
+    # 流尾应有一条 event: error
+    events: list[str] = []
+
+    async def _byte_iter() -> AsyncIterator[bytes]:
+        yield full
+
+    async for event_name, data in SseParser.iter_frames(_byte_iter()):
+        if event_name == "error":
+            events.append(data.get("error", {}).get("type", ""))
+    assert "tool_iter_exceeded" in events
+
+
 async def test_env_max_iter_default_when_unset(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env 没设 → 默认 10。"""
+    del make_test_agent
     monkeypatch.delenv("CHARIOT_MAX_TOOL_ITER", raising=False)
     assert Agent._max_tool_iter() == 10
 
@@ -360,10 +486,8 @@ async def test_handle_with_conversation_persists_messages(
     tool = CountingTool("t", ["tool result text"])
     model = SequentialMockModel(
         [
-            _tool_use_response(
-                [{"type": "tool_use", "id": "tu_1", "name": "t", "input": {}}],
-            ),
-            _final_response("done"),
+            [{"type": "tool_use", "id": "tu_1", "name": "t", "input": {}}],
+            [{"type": "text", "text": "done"}],
         ],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"t": tool})
@@ -375,10 +499,10 @@ async def test_handle_with_conversation_persists_messages(
 
     repo = ConversationRepo(session)
     msgs = await repo.load_messages_as_anthropic(ULID_A)
-    # 应该有 4 条 messages:
+    # 4 条 messages:
     # 0: user "hi"
     # 1: assistant 含 tool_use
-    # 2: user 含 tool_result
+    # 2: user 含 tool_result(server 拼)
     # 3: assistant 含 final text
     assert len(msgs) == 4
     assert msgs[0]["role"] == "user" and msgs[0]["content"] == "hi"
@@ -397,7 +521,7 @@ async def test_handle_with_conversation_loads_history(
     await repo.append_message(ULID_A, "user", "上轮的问题")
     await repo.append_message(ULID_A, "assistant", "上轮的答", model_name="m")
 
-    model = SequentialMockModel([_final_response("现在的答案")])
+    model = SequentialMockModel([[{"type": "text", "text": "现在的答案"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
 
     body = json.dumps(
@@ -407,7 +531,7 @@ async def test_handle_with_conversation_loads_history(
 
     sent_body = json.loads(model.calls[0][0])
     sent_msgs = sent_body["messages"]
-    assert len(sent_msgs) == 3  # 历史 2 + 新 1
+    assert len(sent_msgs) == 3
     assert sent_msgs[0]["content"] == "上轮的问题"
     assert sent_msgs[1]["content"] == "上轮的答"
     assert sent_msgs[2]["content"] == "新问题"
@@ -418,7 +542,7 @@ async def test_handle_with_conversation_auto_creates(
     make_test_agent: MakeTestAgent,
 ) -> None:
     """conversation_id 不存在 → ensure_exists 自动创建。"""
-    model = SequentialMockModel([_final_response("ok")])
+    model = SequentialMockModel([[{"type": "text", "text": "ok"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
 
     body = json.dumps({"model": "m", "tools": [], "messages": []}).encode("utf-8")
@@ -435,7 +559,7 @@ async def test_handle_with_conversation_updates_last_model(
     make_test_agent: MakeTestAgent,
 ) -> None:
     """assistant 落库时同步 conversations.last_model。"""
-    model = SequentialMockModel([_final_response("ok")])
+    model = SequentialMockModel([[{"type": "text", "text": "ok"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={}, model_name="claude")
 
     body = json.dumps(
@@ -450,23 +574,20 @@ async def test_handle_with_conversation_updates_last_model(
 
 
 # ============================================================
-# Stream 重发
+# Stream client(0.5.0 不再有"重发"模式;直接转发流)
 # ============================================================
 
 
-async def test_stream_in_slow_path_replays_with_stream_true(
+async def test_stream_client_gets_streaming_response(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """slow path + client 要 stream → 收敛后再调一次 model.respond(stream=True)."""
+    """stream=True client → 返 StreamingResponse;model 调用次数 = 工具循环轮数(不 +1)。"""
     tool = CountingTool("t", ["res"])
     model = SequentialMockModel(
         [
-            _tool_use_response(
-                [{"type": "tool_use", "id": "tu_1", "name": "t", "input": {}}],
-            ),
-            _final_response("done"),
-            _final_response("done streamed"),  # 第 3 次:重发拿 stream
+            [{"type": "tool_use", "id": "tu_1", "name": "t", "input": {}}],
+            [{"type": "text", "text": "done"}],
         ],
     )
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={"t": tool})
@@ -474,24 +595,43 @@ async def test_stream_in_slow_path_replays_with_stream_true(
     body = json.dumps({"model": "m", "stream": True, "messages": []}).encode("utf-8")
     resp = await agent.handle(body)
 
-    # 验:model 被调 3 次,最后一次 stream=True
-    assert len(model.calls) == 3
-    assert model.calls[0][1] is False  # tool_use 轮
-    assert model.calls[1][1] is False  # 收敛轮
-    assert model.calls[2][1] is True  # 重发 stream
     assert isinstance(resp, StreamingResponse)
+    # drain 流
+    chunks: list[bytes] = []
+    async for chunk in resp.body_iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else bytes(chunk))  # type: ignore[arg-type]
+
+    # 0.5.0 行为:model 调 2 次(无"重发"),都 stream=True
+    assert len(model.calls) == 2
+    assert all(c[1] is True for c in model.calls)
+    # 流里应含至少 2 个 message_start(轮 1 + 轮 2)+ 1 个 server 合成的 tool_result message
+    full = b"".join(chunks)
+
+    async def _byte_iter() -> AsyncIterator[bytes]:
+        yield full
+
+    msg_starts: list[str] = []
+    async for event_name, data in SseParser.iter_frames(_byte_iter()):
+        if event_name == "message_start":
+            msg = data.get("message", {})
+            msg_starts.append(msg.get("role", ""))
+
+    # turn1 assistant + 合成 tool_result(role=user) + turn2 assistant
+    assert msg_starts == ["assistant", "user", "assistant"]
 
 
-async def test_stream_in_fast_path_no_replay(
+async def test_stream_in_fast_path_no_loop(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """fast path + stream=True → 单次调用 stream=True,无重发。"""
-    model = SequentialMockModel([_final_response("ok")])
+    """fast path + stream=True → 单次调用 stream=True,直接透传(不进 slow path)。"""
+    del session
+    model = SequentialMockModel([[{"type": "text", "text": "ok"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
 
     body = json.dumps({"model": "m", "stream": True, "messages": []}).encode("utf-8")
     await agent.handle(body)
 
+    # fast path:1 次调用,stream=True
     assert len(model.calls) == 1
     assert model.calls[0][1] is True

@@ -20,7 +20,7 @@ from typing import Any, Self
 
 import pytest_asyncio
 from fastapi import FastAPI
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +48,61 @@ class _CapturingModel(Model):
 
     async def respond(self, body: bytes, *, stream: bool) -> Response:
         self.last = (body, stream)
+        if stream:
+            # Slow path 上游永远 stream=True;吐 minimal Anthropic SSE
+            # (一条 text 块 "ok",end_turn),让 agent 能 buffer 出 assistant content
+            def _frame(name: str, data: dict[str, Any]) -> bytes:
+                return f"event: {name}\ndata: {json.dumps(data)}\n\n".encode()
+
+            sse_frames = [
+                _frame(
+                    "message_start",
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "id": "m",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "capturing",
+                            "content": [],
+                            "stop_reason": None,
+                            "usage": {"input_tokens": 0, "output_tokens": 0},
+                        },
+                    },
+                ),
+                _frame(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                ),
+                _frame(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": "ok"},
+                    },
+                ),
+                _frame("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                _frame(
+                    "message_delta",
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn"},
+                        "usage": {"output_tokens": 1},
+                    },
+                ),
+                _frame("message_stop", {"type": "message_stop"}),
+            ]
+
+            async def _gen() -> AsyncIterator[bytes]:
+                for f in sse_frames:
+                    yield f
+
+            return StreamingResponse(_gen(), media_type="text/event-stream")
         return Response(
             content=json.dumps({"ok": True}).encode("utf-8"),
             status_code=200,

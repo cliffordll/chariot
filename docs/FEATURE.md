@@ -15,7 +15,7 @@
 
 ## 0.5.0 patch 列表
 
-### S.1 server agent 流式工具循环
+### S.1 ✅ server agent 流式工具循环
 
 **目标**:`Agent._run_tool_loop` 全程 streaming;一条响应里串多个 `message_start
 ... message_stop` 块,server 合成 `tool_result` message。
