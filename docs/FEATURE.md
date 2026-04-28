@@ -49,7 +49,7 @@
     或重写到流式
 - **验证**:`uv run pytest -q` + `uv run ruff check .` + `uv run pyright chariot/`
 
-### S.2 SDK 流解析适配 ChatStream
+### S.2 ✅ SDK 流解析适配 ChatStream
 
 **目标**:`ChatStream.events()` 吐 typed StreamEvent;`text_deltas` 保留兼容。
 
