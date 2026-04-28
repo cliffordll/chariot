@@ -105,6 +105,22 @@ def test_chat_has_conversation_option() -> None:
     assert result.exit_code == 0
     out = _plain(result.output)
     assert "--conversation" in out
+    # metavar 让用户立刻看到取值范围,不必读 help 长文(0.4.0 后加)
+    assert "new|ULID" in out
+
+
+def test_chat_conversation_invalid_value_dies_locally() -> None:
+    """非法 --conversation 值 → CLI 立刻 die,不打到 server。
+
+    早期版本会原样透传到 server,server 返 400 + 中文错误,但 CLI 端把它抬成
+    Renderer.error_bubble 后再 typer.Exit;非法值的反馈链路过长,且空字符串会
+    silent fall through 到 stateless,体验差。改为本地正则校验。
+    """
+    result = runner.invoke(app, ["chat", "--conversation", "foo", "hi"])
+    assert result.exit_code != 0
+    out = _plain(result.output)
+    # 错误文案应包含合法取值提示("new" 或 ULID)
+    assert "new" in out and "ULID" in out
 
 
 def test_tool_enable_requires_name() -> None:

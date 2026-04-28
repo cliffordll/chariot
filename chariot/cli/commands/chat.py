@@ -14,6 +14,7 @@ flags:
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Annotated
 
 import typer
@@ -22,6 +23,11 @@ from ulid import ULID
 from chariot.cli.core.context import DEFAULT_MODEL, ChatContext
 from chariot.cli.core.render import Renderer
 from chariot.sdk.client import ProxyClient
+
+_ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
+"""ULID 26 字符;跟 server `controller/dataplane.py` 里的 `_ULID_RE` 完全一致。
+偏宽:Crockford base32 严格排除 I / L / O / U,但 server 没收紧,CLI 这里也别比 server 严
+(否则会出现"CLI 不让传但 server 接受"的反向不一致)。"""
 
 
 def chat_cmd(
@@ -40,7 +46,11 @@ def chat_cmd(
         str | None,
         typer.Option(
             "--conversation",
-            help="走 stateful path:'new' → CLI 生成 ULID 并打印;ULID 字面量 → 接续该会话",
+            metavar="new|ULID",
+            help=(
+                "走 stateful path。值二选一:'new' → 现场生成新 ULID 并打印;"
+                "26 字符 ULID 字面量 → 接续该会话。不传 = stateless 单轮"
+            ),
         ),
     ] = None,
 ) -> None:
@@ -58,7 +68,8 @@ def chat_cmd(
 def _resolve_conversation_id(raw: str | None) -> str | None:
     """- None → None(stateless)
     - 'new' → 生成新 ULID,打印 hint 给用户记住,返该 id
-    - 其它 → 原样返(server dataplane 会做 ULID 校验,失败 400)
+    - 26 字符 ULID 字面量 → 原样返
+    - 其它(空串 / 非法 ULID) → 立刻 die,避免后续走到 server 拿 400 traceback
     """
     if raw is None:
         return None
@@ -66,7 +77,13 @@ def _resolve_conversation_id(raw: str | None) -> str | None:
         new_id = str(ULID())
         Renderer.out(f"(new conversation: {new_id})")
         return new_id
-    return raw
+    if _ULID_RE.match(raw):
+        return raw
+    Renderer.die(
+        f"--conversation 取值非法: {raw!r};"
+        "应为 'new' 或 26 字符 ULID(`chariot conversation list` 看现有 id)",
+    )
+    return None  # pragma: no cover · die 已退出
 
 
 async def _run(
