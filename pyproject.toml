@@ -1,6 +1,6 @@
 [project]
 name = "chariot-proxy"
-version = "0.4.1"
+version = "0.4.2"
 description = "本地跑的智能体 server(Anthropic Messages 协议;可热插拔 Model:Mock / Anthropic / 后续真实后端)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -14,6 +14,7 @@ dependencies = [
     "psutil>=6.0",
     "typer>=0.13",
     "python-ulid>=2.0",
+    "prompt_toolkit>=3.0",
 ]
 
 [project.scripts]

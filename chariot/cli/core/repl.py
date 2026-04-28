@@ -1,7 +1,7 @@
 """`chariot chat` 的终端 REPL 循环。
 
 `ChatRepl` 实例类持有 `ChatContext`,职责:
-- 读用户输入(`input()`)
+- 读用户输入(`prompt_toolkit.PromptSession`)
 - `/` 开头分派 slash 命令,否则作为新一轮 user message
 - 每轮调 `ctx.run_turn()` 流式打印 assistant + meta 行
 
@@ -24,6 +24,14 @@ slash 命令(0.4.0 扩展)
 单数命令只读 ctx / 不打 server(`/model` / `/conversation`)或只展示 enabled
 子集(`/tool`),复数走 server list API 全量列。
 
+输入交互(0.4.1)
+----------------
+用 prompt_toolkit 取代裸 `input()`,跨平台获得:
+- ↑ / ↓ 翻历史(持久化到 `~/.chariot/repl_history`,跨 session 沿用)
+- Ctrl-R 反向搜索历史
+- Tab 触发 slash 命令补全(候选见 `_SLASH_COMMANDS`)
+- Ctrl-C / Ctrl-D 仍抛 KeyboardInterrupt / EOFError(语义跟 `input()` 一致)
+
 状态持有
 --------
 会话状态(model / max_tokens / messages / conversation_id)全部在 `ChatContext`
@@ -35,9 +43,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar
 
 import httpx
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import FileHistory
 from ulid import ULID
 
 from chariot.cli.core.context import ChatContext, ChatError
@@ -56,6 +68,23 @@ class ChatRepl:
 
     # U+203A 单右尖引号,和普通 > 视觉上有区别,便于识别 REPL 提示符
     _PROMPT: ClassVar[str] = "› "  # noqa: RUF001
+
+    _HISTORY_PATH: ClassVar[Path] = Path.home() / ".chariot" / "repl_history"
+    """REPL 输入历史文件,跨 session 持久化。位置跟 `endpoint.json` / `chariot.db` 同根。"""
+
+    _SLASH_COMMANDS: ClassVar[list[str]] = [
+        "/exit",
+        "/quit",
+        "/reset",
+        "/help",
+        "/model",
+        "/models",
+        "/conversation",
+        "/conversations",
+        "/tool",
+        "/tools",
+    ]
+    """Tab 补全候选。新增 slash 命令时同步加这里(`_HELP` 文案是另一个真源)。"""
 
     _HELP: ClassVar[str] = (
         "slash 命令:\n"
@@ -84,10 +113,11 @@ class ChatRepl:
             + (f" · conv={self.ctx.conversation_id}" if self.ctx.conversation_id else "")
             + " · /help 查看命令",
         )
+        session = self._make_prompt_session()
 
         while True:
             try:
-                line = input(self._PROMPT)
+                line = await session.prompt_async(self._PROMPT)
             except (EOFError, KeyboardInterrupt):
                 Renderer.stream_newline()
                 return
@@ -102,6 +132,24 @@ class ChatRepl:
                 continue
 
             await self._one_turn(line)
+
+    def _make_prompt_session(self) -> PromptSession[str]:
+        """搭一个 PromptSession:历史持久化 + slash 命令 Tab 补全。
+
+        - 历史文件父目录懒建,跟其它 ~/.chariot/* 资源(endpoint.json / chariot.db)同位
+        - WordCompleter 只在 Tab 时触发(`complete_while_typing=False`),不打扰正常打字;
+          普通文本 Tab 也会触发但匹配不到任何候选,实际无副作用
+        """
+        self._HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        return PromptSession(
+            history=FileHistory(str(self._HISTORY_PATH)),
+            completer=WordCompleter(
+                self._SLASH_COMMANDS,
+                ignore_case=False,
+                sentence=False,
+            ),
+            complete_while_typing=False,
+        )
 
     async def _one_turn(self, user_text: str) -> None:
         """发一轮请求;失败撤回 user,避免污染后续上下文。"""
