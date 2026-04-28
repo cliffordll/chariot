@@ -24,6 +24,7 @@ from chariot.server.agent import Agent
 from chariot.server.database.session import dispose_db, init_db
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
+from chariot.server.tool.registry import ToolRegistry
 
 
 @pytest_asyncio.fixture
@@ -50,6 +51,18 @@ def isolate_model_registry() -> Iterator[None]:
     yield
     ModelRegistry._builders.clear()
     ModelRegistry._builders.update(snap)
+
+
+@pytest.fixture(autouse=True)
+def isolate_tool_registry() -> Iterator[None]:
+    """快照 + 恢复 `ToolRegistry._builders`,防止用例间相互污染。
+
+    模式跟 `isolate_model_registry` 完全一致(0.4.0 起 Tool 层加入)。
+    """
+    snap = dict(ToolRegistry._builders)
+    yield
+    ToolRegistry._builders.clear()
+    ToolRegistry._builders.update(snap)
 
 
 @pytest.fixture(autouse=True)

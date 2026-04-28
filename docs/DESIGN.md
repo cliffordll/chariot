@@ -453,7 +453,7 @@ class Tool(ABC):
 |---|---|---|
 | `read_file` | `{path: str}` | 限 `max_bytes` 截断;路径绝对化、检查存在;返回文件内容字符串(text 类) + UTF-8 解码失败时 base64 |
 | `list_dir` | `{path: str, recursive?: bool}` | 默认非递归;返回 `[{name, type: 'file'\|'dir', size}]` JSON |
-| `shell_exec` | `{cmd: str, args?: list[str]}` | 在 `options.workdir` 下跑(目录不存在则 mkdir);`timeout_s` 限时;**Windows 下用 PowerShell,Unix 下用 bash**;stdout / stderr / exit_code 都返回 |
+| `shell_exec` | `{cmd: str, args?: list[str]}` | 在 `options.workdir` 下跑(目录不存在则 mkdir);`timeout_s` 限时;**直接 `asyncio.create_subprocess_exec(cmd, *args)`,不走 shell**(0.4.0 实施期决定,见下);stdout / stderr / exit_code / timed_out 都返回 |
 | `http_get` | `{url: str, headers?: dict}` | URL 解析后域必须在 `options.allowed_domains` 白名单(子串 / 子域名匹配语义详见实现);`max_bytes` 限响应大小;返回 `{status, body, headers}` |
 
 `shell_exec` 沙盒目录策略:
@@ -462,6 +462,18 @@ class Tool(ABC):
 - **不**按 conversation_id 切子目录(0.4.0 简化;若需要,Agent 在 execute 前注入
   `effective_workdir`)
 - 用户清理沙盒方式:CLI `chariot tool sandbox clean`(0.4.0 选做,先靠手动 rm)
+
+`shell_exec` 不走 shell 的决策(0.4.0 M.2 实施期偏离原计划):
+
+- 原计划:Windows PowerShell / Unix bash 分支,LLM 用 shell 内置 + pipe / glob
+- 实际改为:`asyncio.create_subprocess_exec(cmd, *args)`,argv 直传,跨平台一致
+- 原因:PowerShell 跟 Python argv 的 quoting 互动很糟(`python -c "print('hello')"`
+  stdout 被 PowerShell 解析吞掉),quoting 修复代码量 + 跨平台测试矩阵不值得在
+  0.4.0 起步阶段付
+- 收益:免费拒掉 shell metachar(`; rm -rf /` 这种 injection 路径不存在);
+  0 quoting bug;测试干净
+- 代价:LLM 用不了 pipe / glob / shell builtins,要 pipe 就在工具循环里多步拆开
+- 0.4.x 看真实需求:可能加 `use_shell` 选项给希望走 shell 的用户
 
 `http_get` 域白名单匹配规则(0.4.0 简化版):
 
