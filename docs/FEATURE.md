@@ -75,7 +75,7 @@ S.x 标号不动(commit message 引用稳定),只是按文档章节顺序读时�
   - `tests/sdk/test_streams.py` 旧 `text_deltas` case 全部仍通过(回归)
 - **验证**:`uv run pytest -q tests/sdk/`
 
-### S.3 跨客户端协调 + CLI fetch_history + advisory lock
+### S.3 ✅ 跨客户端协调 + CLI fetch_history + advisory lock
 
 **目标**:解决 issue 2(CLI 不知 UI 写入)和 issue 3(并发写时 model 看到错乱)。
 

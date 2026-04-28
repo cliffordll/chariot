@@ -41,6 +41,7 @@ slash 命令(0.4.0 扩展)
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -157,7 +158,13 @@ class ChatRepl:
         0.5.0 起 server 可能返多 turn(slow path 工具循环),`Renderer.render_event`
         把 typed StreamEvent 分派为屏幕输出:text 逐 token 流,tool_use / tool_result
         各自单行渲染。
+
+        send 前先 refresh_from_server(stateful only):另一个 client(UI / 第二个
+        CLI)写入后,本地视图能赶上 server canonical history。env
+        `CHARIOT_CLI_AUTO_REFRESH=0` 关掉(离线 demo / refresh 影响延迟时用)。
         """
+        if self._auto_refresh_enabled():
+            await self.ctx.refresh_from_server()
         self.ctx.append_user(user_text)
         try:
             result = await self.ctx.run_turn(Renderer.render_event)
@@ -176,6 +183,17 @@ class ChatRepl:
             latency_ms=result.latency_ms,
             path=_PROTOCOL_LABEL,
         )
+
+    @staticmethod
+    def _auto_refresh_enabled() -> bool:
+        """`CHARIOT_CLI_AUTO_REFRESH=0` → 关;其它(含未设)→ 开。
+
+        关掉的场景:离线 demo 没 server / refresh 增加每轮往返延迟受不了 / 测
+        试需要本地视图不被 server 干涉。
+        """
+        # pyright stubs 对 os.environ.get 推断不全(reportUnknownMemberType)
+        raw: str | None = os.environ.get("CHARIOT_CLI_AUTO_REFRESH")  # pyright: ignore[reportUnknownMemberType]
+        return raw != "0"
 
     # ---------- slash dispatch ----------
 

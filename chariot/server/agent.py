@@ -32,6 +32,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -39,6 +40,7 @@ from fastapi.responses import Response, StreamingResponse
 from ulid import ULID
 
 from chariot.server.config import ChariotConfig, ToolConfig
+from chariot.server.conversation_lock import ConversationLockManager
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.repository.conversation_repo import ConversationRepo
@@ -269,6 +271,11 @@ class Agent:
     ) -> AsyncIterator[bytes]:
         """流式工具循环。yield SSE 字节给 client;`final` dict 在最后一轮 message_stop
         后被填充(给非 stream client 用),或 max_iter 超时填 `error` ServiceError。
+
+        stateful(conversation_id != None)模式下整个循环包在
+        `ConversationLockManager.acquire(conv_id)` 里 —— 同 conv 的并发请求被串行,
+        避免两个客户端各自 load history 看到对方写之前的快照(issue 3)。锁超时
+        (default 30s,env `CHARIOT_CONV_LOCK_TIMEOUT_S`)→ 503 conversation_busy。
         """
         conv_repo = (
             ConversationRepo(session)
@@ -276,6 +283,38 @@ class Agent:
             else None
         )
 
+        # Advisory lock:仅 stateful 时持锁;stateless 走 nullcontext no-op
+        lock_ctx = (
+            ConversationLockManager.acquire(conversation_id)
+            if conversation_id is not None
+            else nullcontext()
+        )
+        async with lock_ctx:
+            async for chunk in self._stream_tool_loop_body(
+                body_dict=body_dict,
+                model=model,
+                model_name=model_name,
+                conv_repo=conv_repo,
+                conversation_id=conversation_id,
+                final=final,
+                t0=t0,
+            ):
+                yield chunk
+
+    async def _stream_tool_loop_body(
+        self,
+        *,
+        body_dict: dict[str, Any],
+        model: Model,
+        model_name: str,
+        conv_repo: ConversationRepo | None,
+        conversation_id: str | None,
+        final: dict[str, Any],
+        t0: float,
+    ) -> AsyncIterator[bytes]:
+        """`_stream_tool_loop` 的循环体本身,跟 lock 解耦方便测试与读;
+        整个流程跟 0.4.x 的 `_run_tool_loop` 工具循环逻辑同构,只是从非流式
+        + 收尾重发改成全程 streaming(详见 DESIGN §9.1 流程对比图)。"""
         # Stateful 起步:确保 conversation 存在 + load history + persist client 这次发的新 messages
         if conv_repo is not None and conversation_id is not None:
             await conv_repo.ensure_exists(conversation_id)

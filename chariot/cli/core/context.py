@@ -51,8 +51,12 @@ from chariot.sdk.streams import ChatStream, StreamEvent
 DEFAULT_MODEL: str = "claude-haiku-4-5"
 
 
-def _empty_messages() -> list[dict[str, str]]:
-    """messages 字段的 default_factory;helper 函数显式标注类型避免 pyright 报 Unknown。"""
+def _empty_messages() -> list[dict[str, Any]]:
+    """messages 字段的 default_factory;helper 函数显式标注类型避免 pyright 报 Unknown。
+
+    content 既可能是 str(本地 append 出的)也可能是 anthropic content blocks 数组
+    (server canonical history refresh 回来的),用 Any 覆盖两种形态。
+    """
     return []
 
 
@@ -85,7 +89,7 @@ class ChatContext:
     client: ProxyClient
     model: str
     max_tokens: int = 1024
-    messages: list[dict[str, str]] = field(default_factory=_empty_messages)
+    messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
     # 0.4.0:可选 conversation id(ULID)。给了则 SDK 附 X-Chariot-Conversation header,
     # server 走 stateful 路径(load 历史 + persist 这轮)。注意:server-side 持久化
     # 后,本地 self.messages 跟 server 的 history 可能重复,但 server 端约定 client
@@ -112,6 +116,33 @@ class ChatContext:
 
     def set_model(self, model: str) -> None:
         self.model = model
+
+    async def refresh_from_server(self) -> None:
+        """从 server canonical history 拉 messages 替换本地 self.messages。
+
+        解决跨客户端协调(0.5.0 issue 2):另一个 client(UI / 第二个 CLI session)
+        往同一 conversation_id 写后,本地 self.messages 仍是上次发请求时的快照,
+        导致 REPL 看不到对方写入。每轮 send 前调一次,把本地视图对齐到 server。
+
+        - **stateless**(`conversation_id is None`):server 没存,直接 no-op
+        - **stateful**:GET /admin/conversations/{id} 拿 messages,**整段替换** self.messages
+          (不 merge,server 是真源)
+        - 网络 / 4xx 错:静默吞 —— refresh 失败不应该阻塞用户发消息;
+          下游 `_messages_to_send()` 在 stateful 模式只发末尾那条 user,本地视图
+          滞后只影响 `/conversation` 显示的 msg count,实际上行 body 不受影响
+
+        刚 append_user 完了再调?**不要**。调用方应在 `append_user` 之前 refresh,
+        否则刚 append 的本轮 user msg 会被 server 历史(还没看到这条)覆盖丢掉。
+        """
+        if self.conversation_id is None:
+            return
+        try:
+            detail = await self.client.get_conversation(self.conversation_id)
+        except Exception:
+            # 静默降级,refresh 不应阻塞 send
+            return
+        # MessageOut.content 已是反序列化后的原形态(str 或 anthropic content blocks)
+        self.messages = [{"role": m.role, "content": m.content} for m in detail.messages]
 
     # ---------- 核心:一轮请求 ----------
 
@@ -173,7 +204,7 @@ class ChatContext:
             "messages": self._messages_to_send(),
         }
 
-    def _messages_to_send(self) -> list[dict[str, str]]:
+    def _messages_to_send(self) -> list[dict[str, Any]]:
         """决定 body.messages 装什么。
 
         - stateful(有 conversation_id):只发末尾那条(本轮新增 user msg);server
