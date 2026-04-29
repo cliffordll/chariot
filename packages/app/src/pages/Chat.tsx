@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -694,8 +695,12 @@ function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
 
 function AssistantTextBubble({ text }: { text: string }) {
   return (
-    <div className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-background px-3 py-2 text-sm">
-      {text || <span className="text-muted-foreground">(empty)</span>}
+    <div className="max-w-[85%] rounded-lg border border-border bg-background px-3 py-2 text-sm">
+      {text ? (
+        <MarkdownText text={text} />
+      ) : (
+        <span className="text-muted-foreground">(empty)</span>
+      )}
     </div>
   );
 }

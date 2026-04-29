@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import ClassVar
 
@@ -54,7 +54,7 @@ class ConversationLockManager:
         conv_id: str,
         *,
         timeout_s: float | None = None,
-    ) -> AsyncIterator[None]:
+    ) -> AsyncGenerator[None]:
         """获取 conv_id 对应锁;async with 块结束时自动释放。"""
         if timeout_s is None:
             timeout_s = cls._read_timeout_env()
