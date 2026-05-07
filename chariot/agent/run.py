@@ -1,0 +1,264 @@
+"""AIAgent — 0.6.0 内核主入口。
+
+替代 0.5.0 `chariot/server/agent.py` 的 `Agent` 类(`Agent` → `AIAgent`,
+明确"AI 主体" vs 一般意义"代理 / 客户端")。
+
+职责:
+1. 持有 `name → BaseProvider` 实例字典(从 DB models 表装载)
+2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
+3. `run(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
+
+差异(vs 0.5.0 Agent):
+- 输入:`ChatRequest`(typed,跟 Claude API 1:1)而非 raw bytes
+- 输出:`AsyncIterator[ChatEvent]`(协议无关)而非 fastapi `Response`
+- **撤 fast / slow path 二分**:0.6.0 全部走 streaming AgentLoop
+- 错误传播:全部转 `ChatEvent(kind="error", error_type=...)` yield 给 surface
+  (上层 server / sidecar / CLI 各自映射成自己的错误形态)
+
+详见 `docs/DESIGN.md` §6.1。
+
+模块级零自由函数(CLAUDE.md ⭐)。
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, Self
+
+from chariot.agent.chat_event import ChatEvent
+from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
+from chariot.agent.conversation_lock import ConversationLockManager
+from chariot.agent.exceptions import ConversationLockTimeout
+from chariot.agent.loop import AgentLoop
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from chariot.providers.base import BaseProvider
+    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.tools.base import BaseTool
+
+
+class AIAgent:
+    """0.6.0 内核入口。每个 surface 进程构造一个实例。
+
+    使用方式::
+
+        # 生产路径(CLI / sidecar / Gateway 进程启动时)
+        agent = await AIAgent.from_db(db_path)
+        async for event in agent.run(req):
+            # 消费 ChatEvent
+
+        # 测试路径(直接注入 mock providers / tools)
+        agent = AIAgent(
+            providers={"mock": MockProvider.from_options({})},
+            tools={},
+            sessionmaker=test_sm,
+        )
+    """
+
+    # 单例(每进程一个);`from_db` 装载完写入,`uninstall` 清空
+    _current: ClassVar[AIAgent | None] = None
+
+    def __init__(
+        self,
+        *,
+        providers: dict[str, BaseProvider],
+        tools: dict[str, BaseTool],
+        sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
+        self._providers = dict(providers)
+        self._tools = dict(tools)
+        self._sessionmaker = sessionmaker
+
+    # ---- 装载 / 单例 ----
+
+    @classmethod
+    async def from_db(cls, db_path: Path) -> Self:
+        """从 ~/.chariot/chariot.db 装载 ModelEntry / ToolEntry,构造所有
+        Provider / Tool 实例,返就绪 AIAgent 并设为 `_current` 单例。
+
+        每个 surface 进程启动时调一次。
+        """
+        from chariot.agent.config import ChariotConfig, ToolConfig
+        from chariot.database.session import init_db
+        from chariot.providers.registry import ProviderRegistry
+        from chariot.tools.registry import ToolRegistry
+
+        sm = await init_db(db_path)
+        async with sm() as session:
+            cfg = await ChariotConfig.from_db(session)
+            tool_cfg = await ToolConfig.from_db(session)
+
+        providers: dict[str, BaseProvider] = {
+            entry.name: ProviderRegistry.build(entry.type, entry.options) for entry in cfg.models
+        }
+        tools: dict[str, BaseTool] = {
+            entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
+        }
+
+        instance = cls(providers=providers, tools=tools, sessionmaker=sm)
+        cls._current = instance
+        return instance
+
+    @classmethod
+    def current(cls) -> AIAgent:
+        """获取当前进程单例;未装载抛 RuntimeError。"""
+        if cls._current is None:
+            raise RuntimeError("AIAgent 未装载;先调 AIAgent.from_db(db_path)")
+        return cls._current
+
+    @classmethod
+    def uninstall(cls) -> None:
+        """清空单例(测试 / shutdown 用)。"""
+        cls._current = None
+
+    # ---- 主入口 ----
+
+    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
+
+        路由:按 `req.model` 找 provider;缺失 → yield error event 退出。
+        default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
+        stateful(`req.conversation_id` 非空)→ 在 conv lock 内开 session 跑;
+        stateless → 直接跑 AgentLoop 不开 session。
+        """
+        provider = self._providers.get(req.model)
+        if provider is None:
+            yield ChatEvent.error_event(
+                error_type="unknown_model",
+                error_message=(
+                    f"unknown model entry {req.model!r}; known: {sorted(self._providers.keys())}"
+                ),
+            )
+            return
+
+        effective_req = self._inject_default_tools(req)
+
+        if req.is_stateful():
+            async for event in self._run_stateful(effective_req, provider):
+                yield event
+        else:
+            async for event in self._run_stateless(effective_req, provider):
+                yield event
+
+    async def _run_stateless(
+        self, req: ChatRequest, provider: BaseProvider
+    ) -> AsyncIterator[ChatEvent]:
+        """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
+        loop = AgentLoop(
+            provider=provider,
+            tools=self._tools,
+            repo=None,
+            conversation_id=None,
+        )
+        async for event in loop.run(req):
+            yield event
+
+    async def _run_stateful(
+        self, req: ChatRequest, provider: BaseProvider
+    ) -> AsyncIterator[ChatEvent]:
+        """有 conversation_id:开 session + 进 conv lock + load history + AgentLoop。
+
+        约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
+        server 端 load 历史 prepend。stateful 调用方不发完整对话历史。
+        """
+        if self._sessionmaker is None:
+            yield ChatEvent.error_event(
+                error_type="no_sessionmaker",
+                error_message="AIAgent 未装载 sessionmaker;stateful 模式需 from_db 装载",
+            )
+            return
+
+        conv_id = req.conversation_id
+        assert conv_id is not None  # is_stateful() 保证
+
+        async with self._sessionmaker() as session:
+            try:
+                async with ConversationLockManager.acquire(conv_id, db_session=session):
+                    async for event in self._stateful_critical_section(
+                        req, conv_id, provider, session
+                    ):
+                        yield event
+            except ConversationLockTimeout as e:
+                yield ChatEvent.error_event(
+                    error_type=f"conversation_busy_{e.layer}",
+                    error_message=str(e),
+                )
+
+    async def _stateful_critical_section(
+        self,
+        req: ChatRequest,
+        conv_id: str,
+        provider: BaseProvider,
+        session: AsyncSession,
+    ) -> AsyncIterator[ChatEvent]:
+        """conv lock 内的实际工作:ensure conv / persist new user / load history /
+        跑 AgentLoop。"""
+        from chariot.repos.conversation_repo import ConversationRepo
+
+        repo = ConversationRepo(session)
+        await repo.ensure_exists(conv_id)
+        await self._persist_new_user_messages(repo, conv_id, req)
+        history = await self._load_history_as_messages(repo, conv_id)
+        full_req = dataclasses.replace(req, messages=history)
+
+        loop = AgentLoop(
+            provider=provider,
+            tools=self._tools,
+            repo=repo,
+            conversation_id=conv_id,
+        )
+        async for event in loop.run(full_req):
+            yield event
+
+    @staticmethod
+    async def _persist_new_user_messages(
+        repo: ConversationRepo, conv_id: str, req: ChatRequest
+    ) -> None:
+        """req.messages 里新增的 user 消息(末尾若干条 role='user')落库。
+
+        简化策略:把 req.messages 整体当"新增"持久化(假设 client 在 stateful
+        模式下只发新增消息;若发了完整 history,下一轮 load 会重复,这里不防御
+        —— 由 client 契约保证)。
+        """
+        for msg in req.messages:
+            if msg.role != "user":
+                continue
+            content = (
+                msg.content
+                if isinstance(msg.content, list)
+                else [{"type": "text", "text": msg.content}]
+            )
+            await repo.append_message(conv_id, role="user", content=content)
+
+    @staticmethod
+    async def _load_history_as_messages(repo: ConversationRepo, conv_id: str) -> list[Message]:
+        """SELECT messages → list[Message](Claude 形态,直接喂 Provider)。"""
+        rows = await repo.load_messages_as_anthropic(conv_id)
+        return [Message(role=row["role"], content=row["content"]) for row in rows]
+
+    # ---- default tools 注入 ----
+
+    def _inject_default_tools(self, req: ChatRequest) -> ChatRequest:
+        """req.tools 是 None → 挂当前装载的所有 tool schema;
+        req.tools 是 [] → 关闭工具调用(透传);
+        req.tools 是 list → 用调用方指定的(透传)。
+        """
+        if req.tools is not None:
+            return req
+        if not self._tools:
+            return req  # 没装载 tool,保持 None
+        schemas: list[ToolSchema] = [self._tool_schema(tool) for tool in self._tools.values()]
+        return dataclasses.replace(req, tools=schemas)
+
+    @staticmethod
+    def _tool_schema(tool: BaseTool) -> ToolSchema:
+        raw = tool.schema()
+        return ToolSchema(
+            name=raw.get("name", tool.name),
+            description=raw.get("description", ""),
+            input_schema=raw.get("input_schema", {}),
+        )
