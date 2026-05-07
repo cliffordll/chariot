@@ -19,9 +19,9 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig, ModelEntry
+from chariot.database.models import LogEntry
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig, ModelEntry
-from chariot.server.database.models import LogEntry
 from chariot.server.model.base import Model
 from chariot.server.model.mock import MockModel
 from chariot.server.service.exceptions import ServiceError

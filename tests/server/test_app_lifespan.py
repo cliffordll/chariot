@@ -18,15 +18,15 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from chariot.database.models import ModelRow, ToolRow
+from chariot.database.session import DBState
+from chariot.database.session import init_db as _real_init_db
+from chariot.repos.model_repo import ModelRepo
+from chariot.repos.tool_repo import ToolRepo
 from chariot.server import app as app_module
 from chariot.server.agent import Agent
 from chariot.server.app import create_app, lifespan
-from chariot.server.database.models import ModelRow, ToolRow
-from chariot.server.database.session import DBState
-from chariot.server.database.session import init_db as _real_init_db
 from chariot.server.model.mock import MockModel
-from chariot.server.repository.model_repo import ModelRepo
-from chariot.server.repository.tool_repo import ToolRepo
 
 
 @pytest_asyncio.fixture

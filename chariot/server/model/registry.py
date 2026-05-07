@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from chariot.server.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ModelEntry
 from chariot.server.model.base import Model
 
 # 每个 builder 是一个 callable:options dict → Model 实例

@@ -32,13 +32,13 @@ from __future__ import annotations
 import base64
 from typing import Any, ClassVar, Self
 
-from chariot.server.config import ToolEntry
-from chariot.server.tool.base import Tool
+from chariot.agent.config import ToolEntry
+from chariot.tools.base import BaseTool
 
 _DEFAULT_MAX_BYTES = 1048576  # 1 MiB
 
 
-class ReadFileTool(Tool):
+class ReadFileTool(BaseTool):
     """读文件工具,内容超大截断 + UTF-8 fallback base64。"""
 
     _DESCRIPTION: ClassVar[str] = (
@@ -55,7 +55,7 @@ class ReadFileTool(Tool):
     def from_config(cls, entry: ToolEntry) -> Self:
         max_bytes = entry.options.get("max_bytes", _DEFAULT_MAX_BYTES)
         if not isinstance(max_bytes, int) or max_bytes <= 0:
-            from chariot.server.config import ConfigError
+            from chariot.agent.config import ConfigError
 
             raise ConfigError(f"read_file.options.max_bytes 必须是正整数,得到 {max_bytes!r}")
         return cls(name=entry.name, max_bytes=max_bytes)

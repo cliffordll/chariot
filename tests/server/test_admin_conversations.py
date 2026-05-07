@@ -17,11 +17,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig
+from chariot.database.session import get_session
+from chariot.repos.conversation_repo import ConversationRepo
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig
 from chariot.server.controller import admin_router, register_exception_handlers
-from chariot.server.database.session import get_session
-from chariot.server.repository.conversation_repo import ConversationRepo
 
 ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
 ULID_B = "01JD7K8YQXM2N8R5VF3PCWE4ZC"

@@ -30,7 +30,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from chariot.server.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ModelEntry
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 

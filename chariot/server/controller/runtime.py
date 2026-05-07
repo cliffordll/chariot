@@ -19,9 +19,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from chariot import __version__
+from chariot.database.models import ConversationRow
+from chariot.database.session import SessionDep
 from chariot.server.agent import Agent
-from chariot.server.database.models import ConversationRow
-from chariot.server.database.session import SessionDep
 
 router = APIRouter()
 

@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from chariot.server.conversation_lock import ConversationLockManager
+from chariot.agent.conversation_lock import ConversationLockManager
 from chariot.server.service.exceptions import ServiceError
 
 

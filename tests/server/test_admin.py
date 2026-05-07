@@ -17,10 +17,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig
+from chariot.database.session import get_session
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig
 from chariot.server.controller import admin_router
-from chariot.server.database.session import get_session
 
 
 @pytest_asyncio.fixture
@@ -68,7 +68,7 @@ async def test_logs_since_strictly_greater(client: AsyncClient, session: AsyncSe
     """`?since=T` 只返 created_at > T 的记录(严格大于,为 polling 游标服务)。"""
     from datetime import UTC, datetime, timedelta
 
-    from chariot.server.database.models import LogEntry
+    from chariot.database.models import LogEntry
 
     base = datetime.now(UTC).replace(microsecond=0)
     for i, delta in enumerate([0, 10, 20]):  # 三条,间隔 10s

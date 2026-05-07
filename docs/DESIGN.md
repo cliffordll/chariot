@@ -26,7 +26,7 @@
 > 6. **新增协议无关核心类型 `ChatRequest` / `ChatEvent`**:AIAgent 的输入 / 输出。
 >    AIAgent 内核不知道任何 wire format(SSE / JSON-RPC),编码由 surface 层各自负责
 > 7. **`Provider` 抽象**(替代旧 `Model`):产 `AsyncIterator[ChatEvent]`。
->    AnthropicProvider / LocalMockProvider 等。`ToolLoop` 同步改名 `AgentLoop`
+>    AnthropicProvider / MockProvider 等。`ToolLoop` 同步改名 `AgentLoop`
 >    (撤 fast/slow path 二分后,这就是 chat 主循环本体)
 > 8. **撤 `chariot/server/runtime/`**:`endpoint.json` / `spawn.lock` / watcher
 >    这套"单实例 daemon 锁"机制,在库化模式下不再需要(每个 surface 进程独立)
@@ -396,7 +396,7 @@ class BaseProvider(ABC):
 - SSE 解析复用 `chariot/providers/_sse.py`(共享 utility,后续 OpenAIProvider 也用)
 - 错误码映射沿用 0.5.0:401/403 → upstream_auth_failed,5xx → upstream_server_error
 
-### 5.2 `LocalMockProvider`(`chariot/providers/builtin/mock.py`)
+### 5.2 `MockProvider`(`chariot/providers/builtin/mock.py`)
 
 - 不走任何 HTTP / SSE,直接 `yield` Claude 形态的 ChatEvent 序列:
   `message_start` → `content_block_start(text)` → `content_block_delta(text_delta)+`

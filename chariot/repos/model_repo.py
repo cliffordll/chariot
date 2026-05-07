@@ -26,13 +26,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import (
+from chariot.agent.config import (
     ConfigError,
     DuplicateModelName,
     ModelEntry,
     ModelNotFound,
 )
-from chariot.server.database.models import ModelRow
+from chariot.database.models import ModelRow
 
 
 class ModelRepo:

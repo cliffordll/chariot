@@ -18,8 +18,8 @@ import re
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import Response
 
+from chariot.database.session import SessionDep
 from chariot.server.agent import Agent
-from chariot.server.database.session import SessionDep
 from chariot.server.service.exceptions import ServiceError
 
 router = APIRouter()

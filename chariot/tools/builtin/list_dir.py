@@ -26,11 +26,11 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from chariot.server.config import ToolEntry
-from chariot.server.tool.base import Tool
+from chariot.agent.config import ToolEntry
+from chariot.tools.base import BaseTool
 
 
-class ListDirTool(Tool):
+class ListDirTool(BaseTool):
     """列目录工具。返回 JSON 数组,可选递归。"""
 
     _DESCRIPTION: ClassVar[str] = (

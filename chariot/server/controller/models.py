@@ -33,17 +33,17 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from chariot.server.agent import Agent
-from chariot.server.config import (
+from chariot.agent.config import (
     ChariotConfig,
     ConfigError,
     DuplicateModelName,
     ModelEntry,
     ModelNotFound,
 )
-from chariot.server.database.session import SessionDep
+from chariot.database.session import SessionDep
+from chariot.repos.model_repo import ModelRepo
+from chariot.server.agent import Agent
 from chariot.server.model.registry import ModelRegistry
-from chariot.server.repository.model_repo import ModelRepo
 from chariot.server.service.exceptions import ServiceError
 from chariot.server.service.model_prober import ModelProber, ProbeError, ProbeResult
 

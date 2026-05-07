@@ -16,10 +16,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from chariot.server.database.session import SessionDep
-from chariot.server.repository.conversation_repo import Conversation, ConversationRepo
-from chariot.server.repository.log import LogRepo
-from chariot.server.repository.tool_repo import ToolRepo
+from chariot.database.session import SessionDep
+from chariot.repos.conversation_repo import Conversation, ConversationRepo
+from chariot.repos.log_repo import LogRepo
+from chariot.repos.tool_repo import ToolRepo
 
 
 def _log_repo(session: SessionDep) -> LogRepo:

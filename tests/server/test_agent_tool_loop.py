@@ -24,13 +24,13 @@ import pytest
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ToolEntry
+from chariot.repos.conversation_repo import ConversationRepo
 from chariot.server.agent import Agent
-from chariot.server.config import ToolEntry
 from chariot.server.model.base import Model
-from chariot.server.repository.conversation_repo import ConversationRepo
 from chariot.server.service.exceptions import ServiceError
-from chariot.server.tool.base import Tool
 from chariot.shared.sse import SseParser
+from chariot.tools.base import BaseTool
 
 ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
 
@@ -205,7 +205,7 @@ class SequentialMockModel(Model):
 # ============================================================
 
 
-class CountingTool(Tool):
+class CountingTool(BaseTool):
     """记录每次调用 input,按预设列表返 tool_result content text。"""
 
     def __init__(self, name: str, results: list[str]) -> None:
@@ -248,7 +248,7 @@ def _setup_agent_with_tools(
     make_test_agent: MakeTestAgent,
     *,
     model: Model,
-    tools: dict[str, Tool],
+    tools: dict[str, BaseTool],
     model_name: str = "m",
 ) -> Agent:
     agent = make_test_agent({model_name: model})

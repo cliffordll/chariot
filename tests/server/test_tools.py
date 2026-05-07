@@ -1,4 +1,4 @@
-"""Tool 层测试 —— ToolRegistry + 4 内置工具的 happy path + 边界。
+"""BaseTool 层测试 —— ToolRegistry + 4 内置工具的 happy path + 边界。
 
 shell_exec / http_get 的真实子进程 / 网络访问会被相应替代:
 - shell_exec:跑 `python -c "..."` 真子进程(测试机有 python),timeout 用 0.5s
@@ -15,20 +15,20 @@ from typing import Any, Self
 import httpx
 import pytest
 
-from chariot.server.config import ConfigError, ToolEntry
-from chariot.server.tool.base import Tool
-from chariot.server.tool.httpget import HttpGetTool
-from chariot.server.tool.listdir import ListDirTool
-from chariot.server.tool.readfile import ReadFileTool
-from chariot.server.tool.registry import ToolRegistry
-from chariot.server.tool.shellexec import ShellExecTool
+from chariot.agent.config import ConfigError, ToolEntry
+from chariot.tools.base import BaseTool
+from chariot.tools.builtin.http_get import HttpGetTool
+from chariot.tools.builtin.list_dir import ListDirTool
+from chariot.tools.builtin.read_file import ReadFileTool
+from chariot.tools.builtin.shell_exec import ShellExecTool
+from chariot.tools.registry import ToolRegistry
 
 # ============================================================
 # ToolRegistry
 # ============================================================
 
 
-class _StubTool(Tool):
+class _StubTool(BaseTool):
     """测试用 tool;最小满足 Tool ABC 契约。"""
 
     def __init__(self, name: str, options: dict[str, Any]) -> None:

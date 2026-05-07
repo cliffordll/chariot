@@ -19,8 +19,8 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from chariot.server.database.models import LogEntry
-from chariot.server.repository import LogRepoDep
+from chariot.database.models import LogEntry
+from chariot.repos import LogRepoDep
 
 router = APIRouter()
 

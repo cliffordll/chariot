@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import ColumnElement, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.database.models import LogEntry
+from chariot.database.models import LogEntry
 
 
 class LogRepo:

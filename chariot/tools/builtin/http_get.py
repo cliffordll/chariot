@@ -37,14 +37,14 @@ from urllib.parse import urlparse
 
 import httpx
 
-from chariot.server.config import ConfigError, ToolEntry
-from chariot.server.tool.base import Tool
+from chariot.agent.config import ConfigError, ToolEntry
+from chariot.tools.base import BaseTool
 
 _DEFAULT_MAX_BYTES = 524288  # 512 KiB
 _REQUEST_TIMEOUT_S = 30.0
 
 
-class HttpGetTool(Tool):
+class HttpGetTool(BaseTool):
     """HTTP GET 工具,带域白名单 + 响应体大小限制。"""
 
     _DESCRIPTION: ClassVar[str] = (

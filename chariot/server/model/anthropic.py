@@ -31,7 +31,7 @@ from typing import Any, ClassVar, cast
 import httpx
 from fastapi.responses import Response, StreamingResponse
 
-from chariot.server.config import ConfigError
+from chariot.agent.config import ConfigError
 from chariot.server.model.base import Model
 from chariot.server.service.exceptions import ServiceError
 

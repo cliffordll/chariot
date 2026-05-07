@@ -16,7 +16,7 @@ from typing import Any, Self
 import pytest
 from fastapi.responses import Response
 
-from chariot.server.config import ModelEntry
+from chariot.agent.config import ModelEntry
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError

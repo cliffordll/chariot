@@ -5,9 +5,12 @@
 0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
 `ModelEntry` / `ChariotConfig` 同结构。本模块汇总:
 
-- `ConfigError`:配置层错误(startup 期 raise,不是 HTTP)
 - `ModelEntry` / `ChariotConfig`:model 配置(0.3.x)
 - `ToolEntry` / `ToolConfig`:tool 配置(0.4.0);`from_db(session)` 从 ToolRepo 装载
+
+异常类型(`ConfigError` 及子类)0.6.0 起统一在 `chariot/agent/exceptions.py`;
+本模块仅 re-export 维持向后兼容(`from chariot.agent.config import ConfigError`
+旧 import 仍能拿到同一个类)。
 
 历史:0.2.x 时这里有 `ConfigLoader`(读 `~/.chariot/config.toml`)+
 `ChariotConfig.from_dict(raw)`(TOML dict 校验)。0.3.0 一并删除,见
@@ -21,57 +24,37 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+# 异常类型 0.6.0 起 re-export 自 exceptions.py,本模块不重复定义
+from chariot.agent.exceptions import (
+    ConfigError,
+    ConversationNotFound,
+    DuplicateConversationId,
+    DuplicateModelName,
+    ModelNotFound,
+    ToolNotFound,
+)
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+
+__all__ = [
+    "ChariotConfig",
+    "ConfigError",
+    "ConversationNotFound",
+    "DuplicateConversationId",
+    "DuplicateModelName",
+    "ModelEntry",
+    "ModelNotFound",
+    "ToolConfig",
+    "ToolEntry",
+    "ToolNotFound",
+]
 
 
 def _empty_params() -> dict[str, Any]:
     """frozen dataclass 默认值工厂;内联 lambda pyright 推断不出 dict[str, Any]。"""
     return {}
-
-
-class ConfigError(Exception):
-    """配置层错误;startup 时 raise(不是 HTTP 错误)。
-
-    子类用于让 controller 精确映射 HTTP 状态码,不靠 message 文本子串判断。
-    """
-
-
-class ModelNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好,语义明显是异常
-    """指定 name 在 DB 里找不到(update / delete / duplicate src)。
-
-    Controller 转 HTTP 404。
-    """
-
-
-class DuplicateModelName(ConfigError):  # noqa: N818 — 同上
-    """name 已存在(create / duplicate 目标名冲突)。
-
-    Controller 转 HTTP 409。
-    """
-
-
-class ToolNotFound(ConfigError):  # noqa: N818 — 同 ModelNotFound
-    """指定 tool name 在 DB 里找不到(0.4.0 update_tool 路径)。
-
-    Controller 转 HTTP 404。0.4.0 tools 是 4 条 seeded fixture,只在 DB
-    被外部破坏(手动 DELETE)或 seed 没跑完时会触发。
-    """
-
-
-class ConversationNotFound(ConfigError):  # noqa: N818 — 同 ModelNotFound
-    """指定 conversation id 在 DB 里找不到(0.4.0 update_title / delete 路径)。
-
-    Controller 转 HTTP 404。
-    """
-
-
-class DuplicateConversationId(ConfigError):  # noqa: N818 — 同 DuplicateModelName
-    """conversation id 已存在(0.4.0 显式 create 路径)。
-
-    Controller 转 HTTP 409。`ensure_exists` 不会触发(它是 idempotent upsert);
-    只 `POST /admin/conversations` 显式创建并指定已用 id 时会撞。
-    """
 
 
 @dataclass(frozen=True)
@@ -109,7 +92,7 @@ class ChariotConfig:
     @classmethod
     async def from_db(cls, session: AsyncSession) -> ChariotConfig:
         """从 DB(`models` 表)装载完整配置。表空 → `empty()`。"""
-        from chariot.server.repository.model_repo import ModelRepo  # 避免循环 import
+        from chariot.repos.model_repo import ModelRepo  # 避免循环 import
 
         repo = ModelRepo(session)
         entries = tuple(await repo.list_entries())
@@ -164,7 +147,7 @@ class ToolConfig:
     @classmethod
     async def from_db(cls, session: AsyncSession) -> ToolConfig:
         """从 DB(`tools` 表)装载 enabled entries。表空(seed 未跑)/ 全 disabled → `empty()`。"""
-        from chariot.server.repository.tool_repo import ToolRepo  # 避免循环 import
+        from chariot.repos.tool_repo import ToolRepo  # 避免循环 import
 
         repo = ToolRepo(session)
         entries = tuple(await repo.list_enabled())

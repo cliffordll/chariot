@@ -24,10 +24,10 @@ from fastapi.responses import Response, StreamingResponse
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig, ModelEntry
+from chariot.database.session import get_session
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig, ModelEntry
 from chariot.server.controller import dataplane_router, register_exception_handlers
-from chariot.server.database.session import get_session
 from chariot.server.model.base import Model
 
 MakeTestAgent = Callable[[dict[str, Model]], Agent]
@@ -237,7 +237,7 @@ async def test_no_header_behaves_stateless(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """不带 header → 等价 0.3.1 stateless,messages 表不写。"""
-    from chariot.server.repository.conversation_repo import ConversationRepo
+    from chariot.repos.conversation_repo import ConversationRepo
 
     client, _ = client_and_model
     resp = await client.post(
@@ -256,7 +256,7 @@ async def test_header_with_unknown_id_auto_creates(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """带 header + ULID 不存在 → Agent.handle 内 ensure_exists 自动创建并落库。"""
-    from chariot.server.repository.conversation_repo import ConversationRepo
+    from chariot.repos.conversation_repo import ConversationRepo
 
     client, _ = client_and_model
     resp = await client.post(
@@ -282,7 +282,7 @@ async def test_header_with_existing_id_loads_history(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """带 header + ULID 存在 → 历史 prepend 到 body.messages 给 model。"""
-    from chariot.server.repository.conversation_repo import ConversationRepo
+    from chariot.repos.conversation_repo import ConversationRepo
 
     repo = ConversationRepo(session)
     await repo.create(ULID_A)
@@ -326,7 +326,7 @@ async def test_header_empty_string_treated_as_absent(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """空字符串 header 等价没传(stateless)。"""
-    from chariot.server.repository.conversation_repo import ConversationRepo
+    from chariot.repos.conversation_repo import ConversationRepo
 
     client, _ = client_and_model
     resp = await client.post(

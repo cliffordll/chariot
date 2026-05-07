@@ -7,8 +7,8 @@ import json
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError
-from chariot.server.repository.model_repo import ModelRepo
+from chariot.agent.config import ConfigError
+from chariot.repos.model_repo import ModelRepo
 
 # ---------- create / get / list ----------
 

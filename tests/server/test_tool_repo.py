@@ -7,8 +7,8 @@ import json
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError, ToolNotFound
-from chariot.server.repository.tool_repo import ToolRepo
+from chariot.agent.config import ConfigError, ToolNotFound
+from chariot.repos.tool_repo import ToolRepo
 
 # ---------- seed_if_empty ----------
 
@@ -152,7 +152,7 @@ async def test_seed_sets_timestamps(session: AsyncSession) -> None:
     + ORM `default=_utcnow`)。"""
     from sqlalchemy import select
 
-    from chariot.server.database.models import ToolRow
+    from chariot.database.models import ToolRow
 
     repo = ToolRepo(session)
     await repo.seed_if_empty()
@@ -166,7 +166,7 @@ async def test_seed_options_persisted_as_json(session: AsyncSession) -> None:
     """options 列在 DB 里是合法 JSON 字符串(确认 _serialize_json 路径)。"""
     from sqlalchemy import select
 
-    from chariot.server.database.models import ToolRow
+    from chariot.database.models import ToolRow
 
     repo = ToolRepo(session)
     await repo.seed_if_empty()

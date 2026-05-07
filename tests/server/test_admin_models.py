@@ -23,11 +23,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig
+from chariot.database.session import get_session
+from chariot.repos.model_repo import ModelRepo
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig
 from chariot.server.controller import admin_router, register_exception_handlers
-from chariot.server.database.session import get_session
-from chariot.server.repository.model_repo import ModelRepo
 
 
 @pytest_asyncio.fixture

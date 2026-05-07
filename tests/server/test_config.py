@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ChariotConfig, ModelEntry
-from chariot.server.repository.model_repo import ModelRepo
+from chariot.agent.config import ChariotConfig, ModelEntry
+from chariot.repos.model_repo import ModelRepo
 
 # ---------- ChariotConfig.empty / find_entry(纯数据形态)----------
 

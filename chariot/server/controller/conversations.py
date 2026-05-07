@@ -30,13 +30,13 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from ulid import ULID
 
-from chariot.server.config import (
+from chariot.agent.config import (
     ConfigError,
     ConversationNotFound,
     DuplicateConversationId,
 )
-from chariot.server.database.session import SessionDep
-from chariot.server.repository.conversation_repo import (
+from chariot.database.session import SessionDep
+from chariot.repos.conversation_repo import (
     Conversation,
     ConversationRepo,
 )

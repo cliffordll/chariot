@@ -1,6 +1,6 @@
-"""`ToolRegistry` —— 按 type 名字派发 `Tool` 构造(类比 ModelRegistry)。
+"""`ToolRegistry` —— 按 type 名字派发 `BaseTool` 构造(类比 ModelRegistry)。
 
-把"type 字符串(`tools` 表 type 列)→ 对应 Tool 类的 from_config"关系收在
+把"type 字符串(`tools` 表 type 列)→ 对应 BaseTool 子类的 from_config"关系收在
 一个类里。Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,
 完全不感知"有哪些工具"。
 
@@ -29,19 +29,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import ClassVar
 
-from chariot.server.config import ConfigError, ToolEntry
-from chariot.server.tool.base import Tool
+from chariot.agent.config import ConfigError, ToolEntry
+from chariot.tools.base import BaseTool
 
 # 每个 builder 是一个 callable:ToolEntry → Tool 实例
-ToolBuilder = Callable[[ToolEntry], Tool]
+ToolBuilder = Callable[[ToolEntry], BaseTool]
 
 
 class ToolRegistry:
-    """type_name → `Tool.from_config` 的注册中心(类级单例)。
+    """type_name → `BaseTool.from_config` 的注册中心(类级单例)。
 
     类承担三件事(完全镜像 ModelRegistry):
     1. `register(type_name, tool_cls)`:把 `tool_cls.from_config` 收进 `_builders`
-    2. `build(entry)`:按 `entry.type` 派发到 builder,调用它构造 Tool
+    2. `build(entry)`:按 `entry.type` 派发到 builder,调用它构造 BaseTool 子类实例
     3. `known_types()`:枚举所有已注册 type 名
 
     模块级不暴露任何状态;`_builders` ClassVar 是唯一注册表。
@@ -52,11 +52,11 @@ class ToolRegistry:
     # ---- 注册 ----
 
     @classmethod
-    def register(cls, type_name: str, tool_cls: type[Tool]) -> None:
+    def register(cls, type_name: str, tool_cls: type[BaseTool]) -> None:
         """显式注册一个 tool 类。
 
         - type 重复 → `ValueError`
-        - `tool_cls` 静态保证是 `type[Tool]`,`from_config` 必有
+        - `tool_cls` 静态保证是 `type[BaseTool]`,`from_config` 必有
         - 调用时机:`chariot/server/tool/__init__.py` 模块加载阶段集中调用
         """
         if type_name in cls._builders:
@@ -66,7 +66,7 @@ class ToolRegistry:
     # ---- 构造 ----
 
     @classmethod
-    def build(cls, entry: ToolEntry) -> Tool:
+    def build(cls, entry: ToolEntry) -> BaseTool:
         """按 `entry.type` 派发到对应 `from_config(entry)`。
 
         type 未注册 → `ConfigError`(startup 期 raise)。

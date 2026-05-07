@@ -27,8 +27,8 @@ from typing import Any, ClassVar, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError, ToolEntry, ToolNotFound
-from chariot.server.database.models import ToolRow
+from chariot.agent.config import ConfigError, ToolEntry, ToolNotFound
+from chariot.database.models import ToolRow
 
 
 class ToolRepo:

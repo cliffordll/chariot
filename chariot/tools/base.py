@@ -1,7 +1,7 @@
-"""Tool 接口定义 —— Agent 工具调用的抽象基类(0.4.0)。
+"""BaseTool 接口定义 —— Agent 工具调用的抽象基类(0.4.0)。
 
 任何具体工具(read_file / list_dir / shell_exec / http_get / 未来扩展)继承
-`Tool` 并实现:
+`BaseTool` 并实现:
 
 - `from_config(entry)` classmethod —— `ToolRegistry` 用它构造实例
 - `schema()` —— 返回 Anthropic tool definition JSON
@@ -10,7 +10,7 @@
 ABC + abstractmethod 强制子类实现这些(缺则实例化即抛 TypeError);
 `ToolRegistry.register` 因此不必在运行期再做 callable 兜底校验。
 
-职责边界(严格,类比 Model 接口)
+职责边界(严格,类比 BaseProvider 接口)
 -------------------------------
 - **无状态**:每次 execute 独立,实例之间不共享内存,失败不影响下一次
 - **不碰 DB**:Tool 只做"输入 → 输出";`messages` 表持久化由 Agent 负责
@@ -26,10 +26,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Self
 
-from chariot.server.config import ToolEntry
+from chariot.agent.config import ToolEntry
 
 
-class Tool(ABC):
+class BaseTool(ABC):
     """Agent 工具调用抽象基类。
 
     实现 checklist:

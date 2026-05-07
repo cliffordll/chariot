@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from chariot.server.repository import LogRepoDep
+from chariot.repos import LogRepoDep
 
 router = APIRouter()
 

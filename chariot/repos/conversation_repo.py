@@ -25,20 +25,24 @@ messages,行为不被全局开关影响。
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import (
+from chariot.agent.config import (
     ConfigError,
     ConversationNotFound,
     DuplicateConversationId,
 )
-from chariot.server.database.models import ConversationRow, MessageRow
+from chariot.agent.exceptions import ConversationLockTimeout
+from chariot.database.models import ConversationRow, MessageRow
 
 
 @dataclass(frozen=True)
@@ -65,8 +69,78 @@ class ConversationRepo:
     ROLE_ASSISTANT = "assistant"
     _VALID_ROLES = frozenset({ROLE_USER, ROLE_ASSISTANT})
 
+    # SQLite advisory lock 默认参数
+    _DEFAULT_DB_LOCK_TIMEOUT_S = 5.0
+    _DEFAULT_DB_LOCK_MAX_RETRIES = 3
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    # ---- 跨进程 advisory lock(0.6.0+,详见 DESIGN §7.2) ----
+
+    @asynccontextmanager
+    async def with_advisory_lock(
+        self,
+        conv_id: str,
+        *,
+        timeout_s: float | None = None,
+        max_retries: int | None = None,
+    ) -> AsyncIterator[None]:
+        """SQLite advisory lock 包 critical section(load history + append message)。
+
+        实现:每次 acquire 在本 session 上跑 `BEGIN IMMEDIATE`(获 RESERVED
+        锁,允许 read 禁其它写),立即 `ROLLBACK` 释放锁;然后调用方自己跑
+        critical section(进程内 asyncio.Lock 已经保证同进程串行,DB 锁只防
+        跨进程)。`busy_timeout` 控制等待时长,失败自动重试 `max_retries`
+        次,再失败抛 `ConversationLockTimeout(layer="db")`。
+
+        **设计取舍**(详见 DESIGN §7.2):
+        - 不持锁包整段 critical section —— SQLAlchemy session 内部各 repo
+          方法自己 commit,跟 outer BEGIN/COMMIT 嵌套冲突
+        - 改用"探测一次 RESERVED 锁可获 → 立即释放"模式:跨进程并发的两个
+          writer 会被 SQLite 内部 busy_timeout 串行;同进程并发由 asyncio.Lock
+          串行(0.5.0 行为)
+        - 严格 atomic"load + write"由调用方(AgentLoop)用短事务保证
+
+        **NOTE**:`conv_id` 仅作 logging 标识,SQLite advisory lock 是**整库
+        级别**(BEGIN IMMEDIATE 锁全库),不是 row-level。chariot 短事务用法
+        下问题不大;若多 conv 高频并发竞争,可改用 row-level 锁(SQLite 没原生
+        支持,得自己拼 + 自旋,留作 0.10.0+ 优化项)。
+        """
+        eff_timeout = timeout_s if timeout_s is not None else self._DEFAULT_DB_LOCK_TIMEOUT_S
+        eff_retries = max_retries if max_retries is not None else self._DEFAULT_DB_LOCK_MAX_RETRIES
+        last_busy_err: Exception | None = None
+        acquired = False
+        for _attempt in range(eff_retries):
+            try:
+                await self.session.execute(text(f"PRAGMA busy_timeout = {int(eff_timeout * 1000)}"))
+                await self.session.execute(text("BEGIN IMMEDIATE"))
+                # 探测成功 —— 立即 ROLLBACK 释放(否则后续 repo 方法自己 commit
+                # 会跟此事务冲突);跨进程并发的另一 writer 等过 busy_timeout 失败
+                await self.session.execute(text("ROLLBACK"))
+                acquired = True
+                break
+            except OperationalError as e:
+                if self._is_busy_error(e):
+                    last_busy_err = e
+                    continue
+                raise
+
+        if not acquired:
+            raise ConversationLockTimeout(
+                f"conversation {conv_id} DB advisory lock 等待超时"
+                f"(busy_timeout={eff_timeout}s, 重试 {eff_retries} 次)",
+                layer="db",
+            ) from last_busy_err
+
+        # critical section 由调用方运行,异常上抛(不在此处捕获)
+        yield
+
+    @staticmethod
+    def _is_busy_error(exc: OperationalError) -> bool:
+        """SQLite busy / locked 错误识别(各驱动 message 略不同)。"""
+        msg = str(exc).lower()
+        return "database is locked" in msg or "busy" in msg
 
     # ---- conversations CRUD ----
 

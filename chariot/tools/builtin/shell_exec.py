@@ -39,14 +39,14 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar, Self, cast
 
-from chariot.server.config import ConfigError, ToolEntry
-from chariot.server.tool.base import Tool
+from chariot.agent.config import ConfigError, ToolEntry
+from chariot.tools.base import BaseTool
 
 _DEFAULT_TIMEOUT_S = 30
 _DEFAULT_WORKDIR = "~/.chariot/sandbox"
 
 
-class ShellExecTool(Tool):
+class ShellExecTool(BaseTool):
     """在沙盒目录跑可执行命令,带 timeout。不走 shell。"""
 
     _DESCRIPTION: ClassVar[str] = (

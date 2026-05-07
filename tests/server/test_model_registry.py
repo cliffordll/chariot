@@ -12,7 +12,7 @@ from typing import Any, Self
 import pytest
 from fastapi.responses import Response
 
-from chariot.server.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ModelEntry
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 

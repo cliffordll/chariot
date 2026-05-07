@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from chariot.server.database.session import get_session_maker
-from chariot.server.repository.log import LogRepo
+from chariot.database.session import get_session_maker
+from chariot.repos.log_repo import LogRepo
 
 _log = logging.getLogger("chariot.server.log_writer")
 

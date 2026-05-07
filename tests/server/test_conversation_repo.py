@@ -6,8 +6,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.server.config import ConfigError
-from chariot.server.repository.conversation_repo import ConversationRepo
+from chariot.agent.config import ConfigError
+from chariot.repos.conversation_repo import ConversationRepo
 
 # 测试用 ULID-ish 形态(repo 不校验形态,但用真实长度的字符串避免误导)
 ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
@@ -167,7 +167,7 @@ async def test_delete_cascade_removes_messages(session: AsyncSession) -> None:
     # 直接查 messages 表确认 cascade 干净
     from sqlalchemy import select
 
-    from chariot.server.database.models import MessageRow
+    from chariot.database.models import MessageRow
 
     rows = (
         (

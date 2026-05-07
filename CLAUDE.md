@@ -105,7 +105,7 @@
 
 ## 实现原则
 
-- **优先面向对象**:新功能优先用类封装(参考现有:`AIAgent` / `AgentLoop` / `LocalMockProvider` / `AnthropicProvider` / `ChatContext` / `Renderer` / `LogRepo` / `LogWriter`)。类承载配置 + 状态,模块尾部暴露单例 `xxx = Xxx()` 供调用方直接 import 使用;纯无状态工具才散函数
+- **优先面向对象**:新功能优先用类封装(参考现有:`AIAgent` / `AgentLoop` / `MockProvider` / `AnthropicProvider` / `ChatContext` / `Renderer` / `LogRepo` / `LogWriter`)。类承载配置 + 状态,模块尾部暴露单例 `xxx = Xxx()` 供调用方直接 import 使用;纯无状态工具才散函数
 - **分层窄接口**:Surface 只调 `AIAgent.run`,不知道有 `BaseProvider` 子类;`AIAgent` 只调 `BaseProvider.generate`,不知道具体实现;`AgentLoop` 跑工具循环但不知 wire format。加新能力(新 Provider 实现 / 新 Tool / AIAgent 进化逻辑)**绝不**穿层 —— 接口契约见 `DESIGN.md` §5 / §6(0.6.0+)
 - **优先复用已有抽象**:动手前先扫一眼相邻层有无现成函数 / 类可用(`AIAgent.from_db()` / `lock_manager.acquire()` / `log_writer.record()` / `ProviderProber.probe()` 等)。重写一遍之前先问"能不能调用它",避免两套代码各自漂移
 - **例外**:一次性脚本 / 实验性验证可以散函数,但落入生产路径前要按上面两条重构

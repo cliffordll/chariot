@@ -39,16 +39,16 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from fastapi.responses import Response, StreamingResponse
 from ulid import ULID
 
-from chariot.server.config import ChariotConfig, ToolConfig
-from chariot.server.conversation_lock import ConversationLockManager
+from chariot.agent.config import ChariotConfig, ToolConfig
+from chariot.agent.conversation_lock import ConversationLockManager
+from chariot.repos.conversation_repo import ConversationRepo
+from chariot.repos.log_writer import log_writer
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
-from chariot.server.repository.conversation_repo import ConversationRepo
 from chariot.server.service.exceptions import ServiceError
-from chariot.server.service.log_writer import log_writer
-from chariot.server.tool.base import Tool
-from chariot.server.tool.registry import ToolRegistry
 from chariot.shared.sse import SseParser
+from chariot.tools.base import BaseTool
+from chariot.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,7 +93,7 @@ class Agent:
 
     def __init__(self) -> None:
         self.models: dict[str, Model] = {}
-        self.tools: dict[str, Tool] = {}
+        self.tools: dict[str, BaseTool] = {}
 
     # ---- 单例管理 ----
 

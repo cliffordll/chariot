@@ -105,7 +105,7 @@
   - kind literal 名跟 Claude SSE 不一致(`turn_start` / `text` / `tool_use_*`
     等旧名残留)
 
-### S.2 ⏳ Provider 抽象 + LocalMockProvider
+### S.2 ⏳ Provider 抽象 + MockProvider
 
 **目标**:`BaseProvider` ABC 落地 + 第一个实现(协议无关 mock)。
 
@@ -119,7 +119,7 @@
   `ModelRegistry`,接 `BaseProvider` 子类;`register(type_name, cls)` /
   `build(entry) -> BaseProvider` / `known_types()`)
 - 新建 `chariot/providers/builtin/__init__.py`
-- 新建 `chariot/providers/builtin/mock.py`:`LocalMockProvider`
+- 新建 `chariot/providers/builtin/mock.py`:`MockProvider`
   - 不发任何 HTTP / 不拼 SSE,直接 yield Claude 形态的 ChatEvent 序列:
     `message_start` → `content_block_start(text)` →
     `content_block_delta(text_delta)+` → `content_block_stop` →
@@ -135,23 +135,23 @@
     `["message_start", "content_block_start", "content_block_delta",
     "content_block_stop", "message_delta", "message_stop"]` 顺序;
     text_delta 内容含 req 末轮 user content 的 echo
-  - `register("mock", LocalMockProvider)` 后 `build(entry)` 返实例;二次注册
+  - `register("mock", MockProvider)` 后 `build(entry)` 返实例;二次注册
     同 type_name 抛 `ValueError("duplicate provider type: mock")`
   - `known_types()` 返集合含已注册 type_name
   - `BaseProvider` 不能直接实例化(`pytest.raises(TypeError)`),`generate`
     是抽象方法
 - **静态**:三件套全绿
 - **手测**:
-  - `uv run python -c "import asyncio; from chariot.providers.builtin.mock import LocalMockProvider; from chariot.agent.chat_request import ChatRequest, Message; p = LocalMockProvider.from_options({}); req = ChatRequest(model='mock', messages=[Message(role='user', content='hi')]); asyncio.run((lambda: [print(e.kind) async for e in p.generate(req)])())"`
+  - `uv run python -c "import asyncio; from chariot.providers.builtin.mock import MockProvider; from chariot.agent.chat_request import ChatRequest, Message; p = MockProvider.from_options({}); req = ChatRequest(model='mock', messages=[Message(role='user', content='hi')]); asyncio.run((lambda: [print(e.kind) async for e in p.generate(req)])())"`
     → 依次打印 `message_start` / `content_block_start` / `content_block_delta`
     × N / `content_block_stop` / `message_delta` / `message_stop`
 - **回归**:`uv run pytest -q` 全套绿;旧 `tests/server/test_mock_model.py`
-  仍绿(LocalMockProvider 是新增,不动旧 MockModel)
+  仍绿(MockProvider 是新增,不动旧 MockModel)
 - **不通过特征**:
   - `BaseProvider.generate` 返同步迭代器(应 `AsyncIterator[ChatEvent]`)
-  - LocalMockProvider 产了 `turn_start` / `text` 等 chariot 内部命名(应该用
+  - MockProvider 产了 `turn_start` / `text` 等 chariot 内部命名(应该用
     Claude SSE 命名)
-  - LocalMockProvider 产了 `stream_done`(那是 AgentLoop 职责)
+  - MockProvider 产了 `stream_done`(那是 AgentLoop 职责)
 
 ### S.3 ⏳ AnthropicProvider 重写 + SSE 共享
 
@@ -178,7 +178,7 @@
     **不抛**(对标 0.1.0"200 已发后断 TCP"契约)
 - `providers/__init__.py` 加
   `ProviderRegistry.register("anthropic", AnthropicProvider)` +
-  `register("mock", LocalMockProvider)`(收一处)
+  `register("mock", MockProvider)`(收一处)
 
 **验收**:
 
@@ -408,7 +408,7 @@
 **验收**:
 
 - **单测**(`tests/cli/test_repl.py` 等重写):
-  - `chariot chat "hi"` 用 `LocalMockProvider` + 内存 SQLite 跑,stdout 含
+  - `chariot chat "hi"` 用 `MockProvider` + 内存 SQLite 跑,stdout 含
     mock echo + 退出码 0
   - `chariot model add foo --type=mock` → repo 多一行;`chariot model rm foo`
     → 减一行
