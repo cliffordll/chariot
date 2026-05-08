@@ -5,12 +5,9 @@
 - ConfigError 子类层级
 - ConvoLockTimeout 的 layer 字段
 - ToolExecutionError 的 tool_name 字段
-- 模块**不依赖 fastapi**(import 时不引入)
 """
 
 from __future__ import annotations
-
-import sys
 
 import pytest
 
@@ -96,26 +93,3 @@ class TestConvoLockTimeout:
     def test_db_layer(self) -> None:
         exc = ConvoLockTimeout("retried 3 times", layer="db")
         assert exc.layer == "db"
-
-
-class TestNoFastapiDependency:
-    """`chariot.agent.exceptions` 模块不依赖 fastapi(库化的关键约束)。"""
-
-    def test_module_does_not_import_fastapi(self) -> None:
-        """import 链上不应引入 fastapi。
-
-        靠 sys.modules 间接验证:已经 import 过 chariot.agent.exceptions
-        (顶部 import 触发),如果它依赖 fastapi,fastapi 也会在 sys.modules
-        里。但本仓库其它测试可能也会 import fastapi,所以这条断言不强;
-        更强的 assertion 是直接读源码 grep,放 FEATURE.md「不通过特征」。
-        """
-        # 弱断言:exceptions 模块本身可被 import 且其全局命名空间没有 fastapi
-        import chariot.agent.exceptions as mod
-
-        assert "fastapi" not in dir(mod)
-        # 也确保 ProviderError 类不是从 fastapi.HTTPException 继承
-        assert not any("fastapi" in base.__module__ for base in ProviderError.__mro__)
-        # 防 lint 报 import 未用
-        assert mod.ProviderError is ProviderError
-        # 防被裁剪的 stdlib check
-        assert sys is sys

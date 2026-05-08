@@ -1,12 +1,8 @@
-"""Provider 抽象基类(0.6.0+)。
+"""Provider 抽象基类。
 
-替代 0.5.0 `chariot/server/model/base.py` 的 `Model` ABC。差异:
-
-- 输入:0.5.0 是 raw JSON 字节(`body: bytes`);0.6.0 是 `ChatRequest`(typed)
-- 输出:0.5.0 是 fastapi `Response`(可 stream / 可 unary);0.6.0 是统一
-  `AsyncIterator[ChatEvent]`(协议无关,纯流式)
-- 错误:0.5.0 通过返回值或 raise `ServiceError`;0.6.0 通过 raise `ProviderError`
-  (200 前)/ yield `ChatEvent(kind="error")`(200 后),统一表达
+- 输入:`ChatRequest`(typed Claude 形态 IR)
+- 输出:`AsyncIterator[ChatEvent]`(协议无关,纯流式)
+- 错误:200 前 raise `ProviderError`;200 后 yield `ChatEvent(kind="error")`
 
 详见 `docs/DESIGN.md` §5。
 

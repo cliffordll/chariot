@@ -1,16 +1,13 @@
-"""AIAgent 内核异常(0.6.0+)。
+"""AIAgent 内核异常。
 
-替代 0.5.0 `chariot/server/service/exceptions.py` 的 `ServiceError`,**不依赖
-fastapi**。库化后 chariot 不暴露 HTTP,异常由 surface 层(CLI / sidecar /
-gateways)各自映射成自己的呈现形态:CLI 红字 / sidecar JSON-RPC error /
-Gateway 平台消息。
+库化后 chariot 不暴露 HTTP,异常由 surface 层(CLI / sidecar / gateways)
+各自映射成自己的呈现形态:CLI 红字 / sidecar JSON-RPC error / Gateway 平台消息。
 
 四个异常类型:
 
 - `ProviderError`:Provider 层(LLM 上游)出错。code / message / status 三元组,
   status 给后续 surface 想转 HTTP 时参考(默认 502 = upstream)
-- `ConfigError`:配置层错(startup 装 ChariotConfig 时 / DB schema 错时);
-  沿用 0.5.0 server/config.py 语义,从 fastapi 依赖里抽出
+- `ConfigError`:配置层错(startup 装 ChariotConfig 时 / DB schema 错时)
 - `ToolExecutionError`:工具执行错;**作为 ChatEvent 的输入**(被 AgentLoop
   捕获后转 `tool_result(is_error=True)` 而非直接抛给 surface)
 - `ConvoLockTimeout`:双层锁等待超时(进程内 30s / DB 锁重试 3 次失败);
@@ -28,15 +25,15 @@ from typing import Any
 class ProviderError(Exception):
     """Provider 层错误(LLM 上游或 Provider 自身配置)。
 
-    沿用 0.5.0 `ServiceError` 的 status / code / message 三元组,但去掉
-    `extra` 字段(具体附加字段由调用方在子类里加,避免泛 dict)。
+    status / code / message 三元组(无 `extra` 字段,具体附加字段由调用方在
+    子类里加,避免泛 dict)。
 
     使用场景:
     - 200 前的 HTTP 错(401 / 5xx / 网络断)→ Provider.generate raise
       ProviderError → AIAgent 捕获后转 ChatEvent(kind="error")
     - Provider 配置不合法(api_key 缺失等)→ 在 create 时 raise
 
-    code 枚举(0.6.0 起):
+    code 枚举:
     - upstream_auth_failed(401 / 403)
     - upstream_unreachable(connect / DNS / TLS 错)
     - upstream_server_error(5xx)
@@ -56,8 +53,7 @@ class ProviderError(Exception):
 class ConfigError(Exception):
     """配置层错误;startup 装 ChariotConfig / DB schema 错时 raise。
 
-    抽自 0.5.0 `server/config.py`。子类用于让 surface 精确映射呈现形态,
-    不靠 message 文本子串判断。
+    子类用于让 surface 精确映射呈现形态,不靠 message 文本子串判断。
     """
 
 

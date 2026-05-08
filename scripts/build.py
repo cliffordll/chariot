@@ -2,22 +2,20 @@
 
 用法
 ----
-默认打 sidecar + cli(0.6.5 S.9 起;server 是过渡期 fallback,不默认打):
+默认打 sidecar + cli:
     uv run --group build python scripts/build.py
 
 只打其一:
     uv run --group build python scripts/build.py --target sidecar
     uv run --group build python scripts/build.py --target cli
-    uv run --group build python scripts/build.py --target server   # 过渡期保留
 
 打完自动同步 sidecar 到 Tauri(packages/desktop/tauri/binaries/):
     uv run --group build python scripts/build.py --target sidecar --sync-sidecar
 
 产物
 ----
-    dist/chariot-sidecar.exe   (0.6.5+ Tauri sidecar,stdio JSON-RPC)
-    dist/chariot.exe            (CLI)
-    dist/chariot-server.exe     (0.5.0 fastapi server,过渡期保留;S.11 删)
+    dist/chariot-sidecar.exe   (Tauri sidecar,stdio JSON-RPC)
+    dist/chariot.exe           (CLI)
 
 中间产物落在 `build/work/<spec-name>/`(.gitignore 已覆盖),不污染 spec 源目录。
 """
@@ -39,10 +37,9 @@ _TARGETS: dict[str, tuple[str, str]] = {
     # key → (spec 文件名, 最终 exe 名 · 用于打印和产物校验)
     "sidecar": ("chariot-sidecar.spec", "chariot-sidecar.exe"),
     "cli": ("chariot.spec", "chariot.exe"),
-    "server": ("chariot-server.spec", "chariot-server.exe"),  # 过渡期 S.11 删
 }
 
-# `--target all` 默认打哪几个(server 是 0.5.0 过渡期 fallback,不进默认集合)
+# `--target all` 默认打哪几个
 _DEFAULT_TARGETS: tuple[str, ...] = ("sidecar", "cli")
 
 
@@ -80,11 +77,7 @@ def _report(exe_name: str) -> None:
 
 
 def _sync_sidecar() -> None:
-    """调 packages/desktop/scripts/sync-sidecar.mjs 同步 sidecar.exe 到 Tauri 期待位置。
-
-    0.6.5 S.9 起同步 `chariot-sidecar.exe`(stdio JSON-RPC);0.5.0 时同步的是
-    `chariot-server.exe`(HTTP)。`sync-sidecar.mjs` 内部识别新 exe 名。
-    """
+    """调 packages/desktop/scripts/sync-sidecar.mjs 同步 sidecar.exe 到 Tauri 期待位置。"""
     script = _REPO_ROOT / "packages" / "desktop" / "scripts" / "sync-sidecar.mjs"
     if not script.exists():
         raise RuntimeError(f"sync-sidecar 脚本不存在:{script}")
@@ -103,12 +96,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="PyInstaller 打包驱动")
     parser.add_argument(
         "--target",
-        choices=["sidecar", "cli", "server", "all"],
+        choices=["sidecar", "cli", "all"],
         default="all",
-        help=(
-            "打哪个;all = sidecar + cli(默认集合,server 是过渡期 fallback,"
-            "需要时显式 `--target server`)"
-        ),
+        help="打哪个;all = sidecar + cli",
     )
     parser.add_argument(
         "--sync-sidecar",
@@ -119,7 +109,7 @@ def main() -> int:
 
     targets: list[str] = list(_DEFAULT_TARGETS) if args.target == "all" else [args.target]
 
-    # 只清要重打的 exe,不动另一个 target(`--target cli` 不应波及 server.exe)
+    # 只清要重打的 exe,不动另一个 target
     for t in targets:
         stale = _DIST_DIR / _TARGETS[t][1]
         if stale.exists():

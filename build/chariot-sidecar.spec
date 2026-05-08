@@ -1,11 +1,8 @@
-# PyInstaller spec — chariot-sidecar.exe(0.6.5 S.9 起 · 单文件,控制台)。
+# PyInstaller spec — chariot-sidecar.exe(单文件,控制台)。
 #
-# 跟 chariot-server.spec 区别:
-# - entry:`launch-sidecar.py` → `chariot.sidecar` 模块;无 fastapi / uvicorn
-# - hidden imports:撤 uvicorn.* / h11 / fastapi 相关(sidecar 不跑 HTTP);
-#   保留 aiosqlite / sqlalchemy / certifi
-# - migrations data:沿用 0.6.0 后路径 `chariot/database/migrations`(不是
-#   旧的 chariot/server/database/migrations)
+# - entry:`launch-sidecar.py` → `chariot.sidecar` 模块(stdio JSON-RPC)
+# - hidden imports:aiosqlite / sqlalchemy / anyio / sniffio
+# - migrations data:`chariot/database/migrations`
 # - **`console=True`**:sidecar 通过 stdin/stdout 跟父进程通信,console 子系统
 #   保证 sys.stdout / sys.stderr 在子进程模式下正常工作。`console=False`
 #   时 PyInstaller bootloader 重定向 stdout 到 NULL,sidecar 写不出 RPC 帧
