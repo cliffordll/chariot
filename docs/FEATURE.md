@@ -996,3 +996,69 @@ Tauri `invoke()` + `event.listen()`,且消费 Claude 形态 ChatEvent。
 - **0.10.0+** TUI 升级 / ACP / MCP / 剩余 Gateway 平台 / Subagent 派生
 - **0.11.0+** Plugins 系统(`tools/external/` / `providers/external/` /
   `gateways/external/`)
+
+---
+
+## 占位:HTTP API Surface(多租户服务端模式)
+
+> **状态**:**未排期 / 占位**(2026-05-08 立),具体落到 0.x 哪个版本待定。
+> 不是 0.5.0 fastapi server 的"复活" —— 那套是把 chariot 伪装成 Anthropic
+> 代理。这条是**新建一个干净的 HTTP API surface**,语义改为"多租户 LLM 网关
+> + 自家 chariot 协议"。
+
+**架构基础(0.6.5 已就位,无须改动)**:
+- `AgentRegistry`(per-tenant AIAgent;session_key = `tenant:{tenant_id}`)
+- `ClientCache`(同 spec 共享 httpx 连接池;多租户用同 key 时连接池池化)
+- `AIAgent.run` 协议无关流;ChatEvent 可一对一序列化为 SSE / WebSocket / gRPC
+- `ConvoLockManager` + SQLite 双层锁(per-conv 串行)
+- `LogRepo` / `LogWriter`(请求日志已经就位,加 Prometheus exporter 即可)
+
+**新增 Surface**(`chariot/server/`,跟 sidecar / gateways / acp / mcp 平级):
+- HTTP framework 选型(FastAPI / litestar / starlette / aiohttp,定后再说)
+- `POST /v1/chat`:接 ChatRequest(JSON) → 返 SSE 流(ChatEvent → SSE event)
+- `POST /v1/chat/ws`(可选):WebSocket bidirectional(同样跑 ChatEvent)
+- `GET /v1/conversations` / `GET /v1/conversations/{id}` / `DELETE /v1/conversations/{id}`
+- `GET /v1/tools` / 工具开关(per-tenant)
+- `GET /v1/health` / `GET /v1/metrics`
+
+**多租户基础设施**(全新):
+- DB 加 `tenants` 表(tenant_id, name, api_key_hash, created_at,
+  rate_limit_config JSON, ...)
+- DB `providers` 表加 `tenant_id` 列(NULL = 系统默认 entry,共享给无配置的
+  租户;非 NULL = 租户专属,只对该 tenant 可见)
+- DB `conversations` / `logs` 加 `tenant_id` 索引(强隔离 + 检索快)
+- API key 鉴权中间件:`Authorization: Bearer <key>` → 查 `tenants` 表 → 注
+  `tenant_id` 进 request context;失败返 401
+- `ProviderRepo.list_for_tenant(tenant_id)`:tenant 专属 + 系统默认 union
+  (按 tenant 优先)
+- `session_key = f"tenant:{tenant_id}"` 进 AgentRegistry.acquire
+
+**Rate limiting**(全新):
+- 进程内 token bucket / sliding window(per tenant)
+- 命中限流 → 转 ChatEvent error_type="rate_limited" 返客户端,**不 502**
+- 上游 quota 共享时,租户级配额由这层兜底(避免单租户耗光 key)
+
+**横向扩展(看流量)**:
+- < 100 RPS:单进程 + SQLite WAL(0.6.5 现状直接撑)
+- 100~1K RPS:多进程(uvicorn `--workers N`)+ SQLite WAL(BEGIN IMMEDIATE
+  跨进程串行)
+- ` > 1K RPS`:换 PostgreSQL + Redis 替 ConvoLockManager(目前进程内
+  asyncio.Lock,Redis pub/sub 跨进程);AgentRegistry / ClientCache 仍进程级
+- `_MAX_AGENTS` / `_MAX_VARIANTS` 调大(默认 32 / 16,服务端按租户活跃度调)
+- `entry.options.max_connections` 按租户 RPS 估调(默认 20,服务端按容量给
+  100~500)
+
+**前置决策**(实施前要 align):
+1. 服务端形态 —— 自家 SaaS / 私有部署 / 兼商业版?
+2. 协议选择 —— SSE(简单,流式)/ WebSocket(双向)/ gRPC(强类型,生态杂)?
+3. 鉴权方案 —— API key(简单)/ JWT(无状态)/ OAuth(企业)?
+4. 多租户隔离深度 —— DB schema 加 tenant_id 列(轻,共享 DB)/ 按租户分库
+   (重,强隔离)?
+5. 上线路径 —— 0.7.0 / 0.8.0 / 单独成 1.0?
+
+**不做的事**(明确边界):
+- **不复活** 0.5.0 fastapi proxy server(那是协议代理,新 surface 是 chariot
+  自家 API)
+- **不改** ChatRequest / ChatEvent IR(已经协议无关,直接序列化即可)
+- **不动** AIAgent / AgentLoop / Provider 内核(0.6.5 架构基础已经为这条服务,
+  不需要二次重构)
