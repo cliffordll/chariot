@@ -120,10 +120,10 @@ async def test_put_tool_enabled_then_appears_in_agent(
 async def test_put_tool_invalid_options_rejected(
     admin_client: AsyncClient,
 ) -> None:
-    """options 不通过 BaseTool.from_config 校验 → rebuild_failed 502。
+    """options 不通过 BaseTool.create 校验 → rebuild_failed 502。
 
     read_file 的 max_bytes 必须正整数,传 -1 → repo 写入成功(JSON 有效),
-    但 rebuild Tool 时 from_config 抛 ConfigError,_refresh_agent_tools 转 502。
+    但 rebuild Tool 时 create 抛 ConfigError,_refresh_agent_tools 转 502。
     """
     r = await admin_client.put(
         "/admin/tools/read_file",

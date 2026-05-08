@@ -34,7 +34,7 @@ class ProviderError(Exception):
     使用场景:
     - 200 前的 HTTP 错(401 / 5xx / 网络断)→ Provider.generate raise
       ProviderError → AIAgent 捕获后转 ChatEvent(kind="error")
-    - Provider 配置不合法(api_key 缺失等)→ 在 from_options 时 raise
+    - Provider 配置不合法(api_key 缺失等)→ 在 create 时 raise
 
     code 枚举(0.6.0 起):
     - upstream_auth_failed(401 / 403)
@@ -43,7 +43,7 @@ class ProviderError(Exception):
     - upstream_stream_error(200 已发后中途 IO 错;但这种**不抛**,
       yield ChatEvent kind="error" 即可。这里留作子类语义对齐)
     - rate_limited(429)
-    - invalid_options(from_options 配置错)
+    - invalid_options(create 配置错)
     """
 
     def __init__(self, code: str, message: str, *, status: int = 502) -> None:

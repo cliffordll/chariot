@@ -64,7 +64,7 @@ class HttpGetTool(BaseTool):
         self.max_bytes = max_bytes
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         allowed_raw = entry.options.get("allowed_domains", [])
         max_bytes = entry.options.get("max_bytes", _DEFAULT_MAX_BYTES)
         if not isinstance(allowed_raw, list) or not all(

@@ -214,7 +214,7 @@ class CountingTool(BaseTool):
         self.calls: list[dict[str, Any]] = []
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:  # pragma: no cover -- 测试不走
+    def create(cls, entry: ToolEntry) -> Self:  # pragma: no cover -- 测试不走
         return cls(name=entry.name, results=[])
 
     def schema(self) -> dict[str, Any]:

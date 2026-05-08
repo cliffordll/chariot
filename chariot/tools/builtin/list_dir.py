@@ -43,7 +43,7 @@ class ListDirTool(BaseTool):
         self.name = name
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         return cls(name=entry.name)
 
     def schema(self) -> dict[str, Any]:

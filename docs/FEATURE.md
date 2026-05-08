@@ -119,7 +119,7 @@
 - 新建 `chariot/providers/base.py`:
   - `BaseProviderConfig`(`@dataclass(frozen=True)`,通用字段:name / model;
     `Base` 前缀表"子类可继承扩展")
-  - `BaseProvider`(ABC):`from_options(options)` classmethod +
+  - `BaseProvider`(ABC):`create(options)` classmethod +
     `generate(req: ChatRequest) -> AsyncIterator[ChatEvent]` async 抽象方法
 - 新建 `chariot/providers/registry.py`:`ProviderRegistry`(类比旧
   `ModelRegistry`,接 `BaseProvider` 子类;`register(type_name, cls)` /
@@ -131,7 +131,7 @@
     `content_block_delta(text_delta)+` → `content_block_stop` →
     `message_delta(stop_reason=end_turn)` → `message_stop`
   - **不产 `stream_done`**(Provider 不管跨轮收敛,这是 AgentLoop 职责)
-  - `from_options` 不消费任何字段(沿用旧 MockModel 行为)
+  - `create` 不消费任何字段(沿用旧 MockModel 行为)
 
 **验收**:
 
@@ -148,7 +148,7 @@
     是抽象方法
 - **静态**:三件套全绿
 - **手测**:
-  - `uv run python -c "import asyncio; from chariot.providers.builtin.mock import MockProvider; from chariot.agent.chat_request import ChatRequest, Message; p = MockProvider.from_options({}); req = ChatRequest(model='mock', messages=[Message(role='user', content='hi')]); asyncio.run((lambda: [print(e.kind) async for e in p.generate(req)])())"`
+  - `uv run python -c "import asyncio; from chariot.providers.builtin.mock import MockProvider; from chariot.agent.chat_request import ChatRequest, Message; p = MockProvider.create({}); req = ChatRequest(model='mock', messages=[Message(role='user', content='hi')]); asyncio.run((lambda: [print(e.kind) async for e in p.generate(req)])())"`
     → 依次打印 `message_start` / `content_block_start` / `content_block_delta`
     × N / `content_block_stop` / `message_delta` / `message_stop`
 - **回归**:`uv run pytest -q` 全套绿;旧 `tests/server/test_mock_model.py`
@@ -332,7 +332,7 @@
 - 新建 `chariot/agent/run.py`:`AIAgent` 类
   - `__init__(*, providers: dict[str, BaseProvider], tools: dict[str, BaseTool],
     repo, lock_manager)`
-  - `from_db(db_path) -> Self` classmethod —— 装载所有 ModelEntry 构造 Provider /
+  - `bootstrap(db_path) -> Self` classmethod —— 装载所有 ModelEntry 构造 Provider /
     所有 ToolEntry 构造 Tool
   - `async def run(req: ChatRequest) -> AsyncIterator[ChatEvent]`:
     - 路由:按 `req.model` 找 provider(缺失 → yield
@@ -369,7 +369,7 @@
     provider → 返 ProviderError 包装
 - **静态**:三件套全绿
 - **手测**:
-  - `uv run python -c "import asyncio; from chariot.agent.run import AIAgent; agent = AIAgent.from_db('~/.chariot/chariot.db'); ..."`
+  - `uv run python -c "import asyncio; from chariot.agent.run import AIAgent; agent = AIAgent.bootstrap('~/.chariot/chariot.db'); ..."`
     → 跑出非空 ChatEvent 序列
 - **回归**:旧 `tests/server/test_agent.py`(0.5.0)整体仍绿(过渡期 server/agent.py
   不动)
@@ -598,11 +598,11 @@ base_url / api_key inline"实现最高优先级。
   - 加 `_BASE_URL_ENV = "ANTHROPIC_BASE_URL"` 常量(对齐 Anthropic Python SDK)
   - 抽 `_resolve_base_url(options)` static 方法,优先级 inline → env → 默认;
     空串 inline → ConfigError(同 `_resolve_api_key` 校验)
-  - `from_options` 改用 `_resolve_base_url`(替代 `options.get("base_url",
+  - `create` 改用 `_resolve_base_url`(替代 `options.get("base_url",
     DEFAULT)`)
 - `chariot/agent/run.py`:`AIAgent` 加 `patch_provider_options(name, *,
   options_overrides)` 方法 —— 浅 merge `entry.options` + 重建 Provider 实例,
-  替换 `_providers[name]`。空 patch / 未知 name 静默 no-op;`from_options` 抛
+  替换 `_providers[name]`。空 patch / 未知 name 静默 no-op;`create` 抛
   ConfigError 透传给 caller
 - `chariot/cli/commands/chat.py`:加 `--model` / `--base-url` / `--api-key` 三个
   typer flag;`_run` 收集为 patch dict,resolve provider 后调
@@ -693,8 +693,8 @@ base_url / api_key inline"实现最高优先级。
 - 撤 `AIAgent._current` ClassVar / `current()` / `uninstall()` /
   `patch_provider_options()`(S.7.3 临时方案)
 - 新建 `chariot/agent/registry.py`:`AgentRegistry`(LRU 32,asyncio.Lock)
-- `AIAgent.from_db(db_path, *, provider_overrides=None)` —— 装载时一次性把
-  `overrides[name]` merge 进 `entry.options`,落 Provider.from_options
+- `AIAgent.bootstrap(db_path, *, provider_overrides=None)` —— 装载时一次性把
+  `overrides[name]` merge 进 `entry.options`,落 Provider.create
 - `init_db` 改幂等(同 path 复用 engine);多 AIAgent 共享 engine
 - `tests/agent/test_registry.py` 10 个 case;`tests/agent/test_run.py` 改写
   `TestPatchProviderOptions` → `TestFromDbProviderOverrides`
@@ -702,8 +702,8 @@ base_url / api_key inline"实现最高优先级。
 ### S.3 ✅ CLI surface 适配(撤 patch_provider_options)
 
 - `chariot/cli/_runtime.py`:`installed_runtime(provider_overrides=...)` ——
-  → `AgentRegistry.acquire("process", db_path=..., provider_overrides=...)`;
-  退出顺序 `AgentRegistry.aclose_all` → `ClientCache.aclose_all` → `dispose_db`
+  → `AgentRegistry.reserve("process", db_path=..., provider_overrides=...)`;
+  退出顺序 `AgentRegistry.clear` → `ClientCache.aclose_all` → `dispose_db`
 - `chariot/cli/commands/chat.py`:撤 `agent.patch_provider_options(...)` 调用,
   改预处理把 `--base-url` / `--api-key` 收成 `provider_overrides` dict(`--model`
   不在,见 S.4)
@@ -728,7 +728,7 @@ base_url / api_key inline"实现最高优先级。
   - §3.1 ChatRequest 加 `model` 字段说明 + per-call 设计动机
   - §5 整章重写(四层生命周期 + ClientCache / ClientSpec / BaseProvider 新接口
     / 三种 override 路径 / AgentRegistry)
-  - §6.1 AIAgent 类描述加并发约束 + from_db 新签名
+  - §6.1 AIAgent 类描述加并发约束 + bootstrap 新签名
 - `docs/FEATURE.md`:本节(0.6.5 patch 列表 S.0~S.5)
 - 版本号 bump:`pyproject.toml` / `chariot/__init__.py`(若有)
 - README 不动(用户层无 visible 变化,只是底层架构)
@@ -1031,7 +1031,7 @@ Tauri `invoke()` + `event.listen()`,且消费 Claude 形态 ChatEvent。
   `tenant_id` 进 request context;失败返 401
 - `ProviderRepo.list_for_tenant(tenant_id)`:tenant 专属 + 系统默认 union
   (按 tenant 优先)
-- `session_key = f"tenant:{tenant_id}"` 进 AgentRegistry.acquire
+- `session_key = f"tenant:{tenant_id}"` 进 AgentRegistry.reserve
 
 **Rate limiting**(全新):
 - 进程内 token bucket / sliding window(per tenant)

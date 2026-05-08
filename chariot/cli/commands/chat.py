@@ -1,6 +1,6 @@
 """`chariot chat` — 一次性 + REPL 流式聊天(0.6.0 库化版)。
 
-撤旧 ProxyClient / SDK 路径;直接构造 AIAgent.from_db 实例 + 进程内调
+撤旧 ProxyClient / SDK 路径;直接构造 AIAgent.bootstrap 实例 + 进程内调
 `agent.run(req)`,不再起独立 server。
 
 flags:
@@ -198,7 +198,7 @@ async def _resolve_provider_name(override: str | None) -> str:
 
     在 installed_runtime 之前调用 —— 用 idempotent `init_db` 临时开 session 查
     默认 provider name。返回 entry name(给 ChatContext.provider_name + provider_overrides
-    keying 用);后续 AIAgent.from_db 会复用同一个 engine,不会重复 init。
+    keying 用);后续 AIAgent.bootstrap 会复用同一个 engine,不会重复 init。
     """
     if override is not None and override.strip():
         return override.strip()

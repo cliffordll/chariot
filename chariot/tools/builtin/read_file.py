@@ -52,7 +52,7 @@ class ReadFileTool(BaseTool):
         self.max_bytes = max_bytes
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         max_bytes = entry.options.get("max_bytes", _DEFAULT_MAX_BYTES)
         if not isinstance(max_bytes, int) or max_bytes <= 0:
             from chariot.agent.config import ConfigError

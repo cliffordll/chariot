@@ -1,6 +1,6 @@
 """chariot 工具实现层(0.4.0)。
 
-`BaseTool` 是协议接口(`base.py`),任何具体工具都要实现 `from_config(entry)` /
+`BaseTool` 是协议接口(`base.py`),任何具体工具都要实现 `create(entry)` /
 `schema()` / `execute(input)`。
 
 Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,放进

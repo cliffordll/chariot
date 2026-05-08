@@ -28,7 +28,7 @@ class ProviderRegistry:
         # 子类定义文件末尾 / __init__.py 注册
         ProviderRegistry.register("anthropic", AnthropicProvider)
 
-        # AIAgent.from_db 装载时构造实例
+        # AIAgent.bootstrap 装载时构造实例
         provider = ProviderRegistry.build("anthropic", entry.options)
     """
 
@@ -55,17 +55,17 @@ class ProviderRegistry:
 
     @classmethod
     def build(cls, type_name: str, options: dict[str, Any]) -> BaseProvider:
-        """根据 type_name 找 Provider 类,调 `from_options(options)` 构造实例。
+        """根据 type_name 找 Provider 类,调 `create(options)` 构造实例。
 
-        type_name 未注册抛 `ConfigError`(让上层 AIAgent.from_db 报"models 表
-        含未知 provider type")。options 不合法由 `from_options` 自己抛
-        ConfigError 子类。
+        type_name 未注册抛 `ConfigError`(让上层 AIAgent.bootstrap 报"models 表
+        含未知 provider type")。options 不合法由 `create` 自己抛 ConfigError
+        子类。
         """
         provider_cls = cls._registry.get(type_name)
         if provider_cls is None:
             known = sorted(cls._registry.keys())
             raise ConfigError(f"unknown provider type: {type_name!r}; known types: {known}")
-        return provider_cls.from_options(options)
+        return provider_cls.create(options)
 
     @classmethod
     def known_types(cls) -> set[str]:

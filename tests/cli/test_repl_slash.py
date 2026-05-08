@@ -6,7 +6,7 @@ slash 命令分单 / 复数:**单数 = 显示当前状态(只读)**,**复数 = �
 REPL 主循环不测(input 阻塞难自动化);只针对 `_handle_slash` + `_slash_*`
 方法,直接 await 调,断 ctx 状态变化 + Renderer 输出 + DB 形态变化。
 
-每个 case 都用 tmp_path 起一个全新的 SQLite DB(`AIAgent.from_db` 跑
+每个 case 都用 tmp_path 起一个全新的 SQLite DB(`AIAgent.bootstrap` 跑
 migrations + seed 默认 mock entry + 4 条 disabled tool fixture),保证测试隔离。
 """
 
@@ -37,10 +37,10 @@ from chariot.repos.tool_repo import ToolRepo
 async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
     """每个 test 一个全新 DB + 全新 AIAgent;退出释放连接池避免文件锁残留。
 
-    0.6.5 起 AIAgent 撤了单例,直接调 from_db 拿实例;teardown 清 DB engine。
+    0.6.5 起 AIAgent 撤了单例,直接调 bootstrap 拿实例;teardown 清 DB engine。
     """
     db_path = tmp_path / "chariot.db"
-    inst = await AIAgent.from_db(db_path)
+    inst = await AIAgent.bootstrap(db_path)
     try:
         yield inst
     finally:

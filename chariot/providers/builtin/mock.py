@@ -4,7 +4,7 @@
 
 - **不再手工拼 Anthropic SSE 字节**:0.5.0 MockModel 为了走 server 透传路径,
   得手工构造 SSE 帧;0.6.0 直接 yield `ChatEvent`(typed),协议无关
-- **不消费 options**:`from_options(options)` 完全不读 options(沿用 0.5.0
+- **不消费 options**:`create(options)` 完全不读 options(沿用 0.5.0
   MockModel 行为);options 不合法不报错(mock 本来就是宽容的)
 
 输出形态(Claude 形态序列,详见 DESIGN §3.2):
@@ -37,7 +37,7 @@ class MockProvider(BaseProvider):
 
     设计上:`name` / `model` 字段都是 mock 默认值(因为不需要真 LLM 后端),
     用户在 `chariot model add foo --type=mock` 时填的 name 也不会传到这里
-    (`from_options(options)` 不读 options)。
+    (`create(options)` 不读 options)。
     """
 
     _MODEL_ID = "mock-1"
@@ -46,11 +46,11 @@ class MockProvider(BaseProvider):
         self.config = config
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         """`options` 不消费(沿用 0.5.0 MockModel 行为)。
 
         Provider 实例的 `name` / `model` 都用 mock 默认 —— 用户填的 entry name
-        在外层(`AIAgent.from_db`)做路由,不需要传进 Provider 自身。
+        在外层(`AIAgent.bootstrap`)做路由,不需要传进 Provider 自身。
         """
         del options  # 标记参数已知未用,避免 ruff ARG003
         return cls(config=BaseProviderConfig(name="mock", model=cls._MODEL_ID))

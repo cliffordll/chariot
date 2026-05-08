@@ -37,7 +37,7 @@ class _ScriptedProvider(BaseProvider):
         self._turns = list(turns)
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> _ScriptedProvider:
+    def create(cls, options: dict[str, Any]) -> _ScriptedProvider:
         return cls(turns=[])
 
     async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -101,7 +101,7 @@ class _StubTool(BaseTool):
         self.last_input: dict[str, Any] | None = None
 
     @classmethod
-    def from_config(cls, entry: Any) -> _StubTool:
+    def create(cls, entry: Any) -> _StubTool:
         return cls(name="stub")
 
     def schema(self) -> dict[str, Any]:

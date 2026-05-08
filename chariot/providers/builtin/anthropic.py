@@ -48,7 +48,7 @@ from chariot.providers.clients import ClientCache, ClientSpec
 class AnthropicProvider(BaseProvider):
     """Anthropic Messages API 适配器。
 
-    0.6.5 起构造:走 `from_options(options)`(由 `ProviderRegistry.build` 调);
+    0.6.5 起构造:走 `create(options)`(由 `ProviderRegistry.build` 调);
     实例持 `self._options`(merged effective options)+ `self._spec`(ClientSpec,
     构造时算一次,后续 generate 复用)。**不持 httpx client** —— client 由
     `ClientCache` 进程级缓存,Provider 重建零成本。
@@ -91,7 +91,7 @@ class AnthropicProvider(BaseProvider):
         实例持 effective options + 构造时算一次的 ClientSpec(给 generate 复用)。
         校验失败(api_key / base_url 不合法)在 `_build_spec` 阶段抛 ConfigError。
 
-        测试场景:`from_options(...)` 构造 + monkeypatch `ClientCache.get` 注入
+        测试场景:`create(...)` 构造 + monkeypatch `ClientCache.get` 注入
         mock httpx client(详见 tests/providers/builtin/test_anthropic.py 的
         `_make_provider` helper)。
         """
@@ -102,7 +102,7 @@ class AnthropicProvider(BaseProvider):
     # ---- 构造契约 ----
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         """从 `ProviderEntry.options` 构造;关键字段缺 / 非法 → `ConfigError`。
 
         options 字段(优先级 = inline → env → 默认;CLI flag 通过 inline 注入):

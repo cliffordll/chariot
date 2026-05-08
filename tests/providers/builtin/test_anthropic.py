@@ -13,7 +13,7 @@
 - F 200 已发后中途 IO 错:yield ChatEvent(kind="error",
   error_type="upstream_stream_error"),**不抛**
 
-`from_options` 配置错路径单独覆盖(`ConfigError` 子类)。
+`create` 配置错路径单独覆盖(`ConfigError` 子类)。
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def _make_provider(
 
     monkeypatch.setattr(ClientCache, "get", _fake_get)
 
-    return AnthropicProvider.from_options(
+    return AnthropicProvider.create(
         {
             "model": "claude-test",
             "api_key": "test_key",
@@ -390,36 +390,36 @@ class TestCaseF200ThenStreamError:
 
 
 # ---------------------------------------------------------------------------
-# from_options 配置校验
+# create 配置校验
 # ---------------------------------------------------------------------------
 
 
-class TestFromOptions:
+class TestCreate:
     def test_missing_model_raises_config_error(self) -> None:
         with pytest.raises(ConfigError, match="model"):
-            AnthropicProvider.from_options({"api_key": "x"})
+            AnthropicProvider.create({"api_key": "x"})
 
     def test_inline_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # 防意外 fallback 到 env
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        provider = AnthropicProvider.from_options(
+        provider = AnthropicProvider.create(
             {"model": "claude-3-5-sonnet-20241022", "api_key": "sk-ant-xxx"}
         )
         assert provider.config.model == "claude-3-5-sonnet-20241022"
 
     def test_env_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-yyy")
-        provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022"})
         assert provider.config.model == "claude-3-5-sonnet-20241022"
 
     def test_missing_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(ConfigError, match="api_key"):
-            AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+            AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022"})
 
     def test_custom_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-        provider = AnthropicProvider.from_options(
+        provider = AnthropicProvider.create(
             {"model": "claude-3-5-sonnet-20241022", "base_url": "https://custom.api"}
         )
         # base_url 在 _build_body 不暴露,只能间接验:_spec.base_url 字段
@@ -429,14 +429,14 @@ class TestFromOptions:
         """S.7.3 起:options 无 inline base_url → 读 ANTHROPIC_BASE_URL env(Anthropic SDK 约定)。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
-        provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022"})
         assert provider._spec.base_url == "https://env.api"
 
     def test_inline_base_url_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """inline > env(CLI flag 通过 inline 注入,所以 CLI > env;DB 显式 inline 也 > env)。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
-        provider = AnthropicProvider.from_options(
+        provider = AnthropicProvider.create(
             {"model": "claude-3-5-sonnet-20241022", "base_url": "https://inline.api"}
         )
         assert provider._spec.base_url == "https://inline.api"
@@ -445,14 +445,14 @@ class TestFromOptions:
         """都没设 → 默认 https://api.anthropic.com。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
-        provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022"})
         assert provider._spec.base_url == "https://api.anthropic.com"
 
     def test_empty_inline_base_url_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """inline base_url 是空串 → 校验失败(让用户改成"整条删掉")。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         with pytest.raises(ConfigError, match="base_url"):
-            AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022", "base_url": ""})
+            AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022", "base_url": ""})
 
 
 # ---------------------------------------------------------------------------
@@ -463,8 +463,8 @@ class TestFromOptions:
 class TestBuildBody:
     @staticmethod
     def _provider() -> AnthropicProvider:
-        """provider 实例;_build_body 不需要 client,直接 from_options 构造。"""
-        return AnthropicProvider.from_options(
+        """provider 实例;_build_body 不需要 client,直接 create 构造。"""
+        return AnthropicProvider.create(
             {
                 "model": "claude-test",
                 "api_key": "test_key",

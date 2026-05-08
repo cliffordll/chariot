@@ -48,7 +48,7 @@ class AIAgent:
 
         # 生产路径(CLI / sidecar / Gateway 通过 AgentRegistry 拿)
         from chariot.agent.registry import AgentRegistry
-        agent = await AgentRegistry.acquire(
+        agent = await AgentRegistry.reserve(
             session_key="...",
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": X, "api_key": Y}} or None,
@@ -58,15 +58,17 @@ class AIAgent:
 
         # 测试路径(直接注入 mock providers / tools)
         agent = AIAgent(
-            providers={"mock": MockProvider.from_options({})},
+            providers={"mock": MockProvider.create({})},
             tools={},
             sessionmaker=test_sm,
         )
 
     0.6.5 起:
     - 撤 `_current` ClassVar 单例 / `current()` / `uninstall()`(改 AgentRegistry per-session)
-    - 撤 `patch_provider_options`(S.7.3 临时方案;改 from_db 时 provider_overrides 一次性 merge)
-    - 加 `from_db(db_path, *, provider_overrides=None)` 参数
+    - 撤 `patch_provider_options`(S.7.3 临时方案;改 bootstrap 时 provider_overrides 一次性 merge)
+    - 加 `bootstrap(db_path, *, provider_overrides=None)` 类方法(替代 0.6.0 的 `from_db`;
+      新名表"从零完整装载 = 读 DB + 跑 migrations + 装 N 个 Provider/Tool 实例 + 接 sessionmaker",
+      不再用 `from_*` 那种"轻量反序列化"语义)
     """
 
     def __init__(
@@ -83,14 +85,18 @@ class AIAgent:
     # ---- 装载 ----
 
     @classmethod
-    async def from_db(
+    async def bootstrap(
         cls,
         db_path: Path,
         *,
         provider_overrides: dict[str, dict[str, str]] | None = None,
     ) -> Self:
-        """从 ~/.chariot/chariot.db 装载 ProviderEntry / ToolEntry,构造所有
-        Provider / Tool 实例,返就绪 AIAgent。
+        """从零装载 AIAgent —— 开 DB + 跑 migrations + 装 ProviderEntry / ToolEntry
+        + 实例化所有 Provider / Tool + 配 sessionmaker,返就绪 AIAgent。
+
+        命名:0.6.5 起改 `bootstrap`(原 `from_db`);新名表"从零引导启动"全套
+        动作语义,不再用 `from_*` 那种"轻量反序列化"误导(参考 web framework /
+        k8s 通用术语)。
 
         `provider_overrides`(0.6.5 起):per-session 注入到 entry.options 的 patch
         dict,形如 `{"claude": {"base_url": X, "api_key": Y}}`。merge 进 entry.options
@@ -103,7 +109,7 @@ class AIAgent:
         seeded 工具默认 disabled,所以新装的 AIAgent 无 tool;mock provider
         已可用。
 
-        典型由 `AgentRegistry.acquire` 调用;直接调也 OK(测试或 single-session
+        典型由 `AgentRegistry.reserve` 调用;直接调也 OK(测试或 single-session
         场景)。
         """
         from chariot.agent.config import ChariotConfig, ToolConfig
@@ -147,7 +153,7 @@ class AIAgent:
                 entries = await repo.list_entries()
         """
         if self._sessionmaker is None:
-            raise RuntimeError("AIAgent 未装载 sessionmaker;先调 AIAgent.from_db(db_path)")
+            raise RuntimeError("AIAgent 未装载 sessionmaker;先调 AIAgent.bootstrap(db_path)")
         return self._sessionmaker
 
     @property
@@ -215,7 +221,7 @@ class AIAgent:
         if self._sessionmaker is None:
             yield ChatEvent.error_event(
                 error_type="no_sessionmaker",
-                error_message="AIAgent 未装载 sessionmaker;stateful 模式需 from_db 装载",
+                error_message="AIAgent 未装载 sessionmaker;stateful 模式需 bootstrap 装载",
             )
             return
 

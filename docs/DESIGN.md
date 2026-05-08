@@ -62,7 +62,7 @@ MCP 等多种 surface 各自启动独立进程,内部直接构造 AIAgent 实例
    │ ─────────────────────── │    │ ─────────────────────── │
    │ from chariot.agent       │    │ from chariot.agent       │
    │   .run import AIAgent   │    │   .run import AIAgent   │
-   │ agent = AIAgent.from_db │    │ agent = AIAgent.from_db │
+   │ agent=AIAgent.bootstrap │    │ agent=AIAgent.bootstrap │
    │ events = agent.run(req) │    │ # bridge → Telegram /   │
    │ → terminal renderer     │    │       Discord / ...     │
    │                         │    │ (long-live process)     │
@@ -398,8 +398,8 @@ class AIAgent:
 │   首次 acquire(session_key) → 装载 AIAgent + cache;后续命中  │
 │   provider_overrides 仅首次 acquire 时 merge 进 entry.options │
 └─────────────────────────────────────────────────────────────┘
-                              │ AIAgent.from_db(db_path,
-                              │                provider_overrides=...)
+                              │ AIAgent.bootstrap(db_path,
+                              │                   provider_overrides=...)
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Layer 2 — `BaseProvider` 实例(per-session,挂 AIAgent 上)   │
@@ -426,7 +426,7 @@ class AIAgent:
 |---|---|---|---|
 | Layer 1 client | `ClientCache.get` 首次未命中 | 进程内首次需要某个 ClientSpec | 进程退出 / `aclose_all` 显式调 |
 | Layer 2 Provider 实例 | `ProviderRegistry.build` | 每个 AIAgent 装载时 | AIAgent GC 时(随 session 退出) |
-| Layer 3 AIAgent | `AgentRegistry.acquire` | 每个 session_key 首次 acquire | LRU evict / `release` / `aclose_all` |
+| Layer 3 AIAgent | `AgentRegistry.reserve` | 每个 session_key 首次 reserve | LRU evict / `release` / `clear` |
 | Layer 4 surface | 业务方 | 业务事件触发(CLI 启动 / 用户消息到达) | 业务方决定 |
 
 **关键性质**:
@@ -436,7 +436,7 @@ class AIAgent:
 - **session 间互不影响**:Gateway 同时跑 100 个 chat session,各自独立
   AIAgent + 各自 entry.options;但底下的 httpx client 共享(同 spec 池化)
 - **零静默状态**:模块级零自由函数 + 零可变变量(CLAUDE.md ⭐),所有状态挂在
-  类的 ClassVar 上,生命周期由 classmethod 管(`acquire` / `aclose_all`)
+  类的 ClassVar 上,生命周期由 classmethod 管(`reserve` / `clear`)
 
 ### 5.1 `BaseProvider`(`chariot/providers/base.py`)
 
@@ -458,7 +458,7 @@ class BaseProvider(ABC):
 
     @classmethod
     @abstractmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         """从 ProviderEntry.options 构造;options 不合法 raise ConfigError。"""
 
     @abstractmethod
@@ -561,7 +561,7 @@ class ClientCache:
 | Override 路径 | 触发器 | 改谁 | 谁重建 | 谁不变 |
 |---|---|---|---|---|
 | **per-process** | DB 改 entry.options | entry.options | 整个进程下次启动起的 Provider | DB / 已有进程 |
-| **per-session** `provider_overrides` | CLI `--base-url` / `--api-key`、Gateway session 配置 | merged options(进 AgentRegistry.acquire) | session 内的 Provider 实例 | 其它 session;若 spec 同则连 client 都不变 |
+| **per-session** `provider_overrides` | CLI `--base-url` / `--api-key`、Gateway session 配置 | merged options(进 AgentRegistry.reserve) | session 内的 Provider 实例 | 其它 session;若 spec 同则连 client 都不变 |
 | **per-call** `req.model` | CLI `--model`、ChatContext.model_override | 单次 ChatRequest.model 字段 | **零**(只走 wire body) | Provider / Client / Spec 全部不变 |
 
 **为什么这么分**:
@@ -588,10 +588,10 @@ options patch  {"base_url": "Y", "api_key": "Z"}
 provider_overrides = {"<provider_name>": patch}
    │
    ▼
-AgentRegistry.acquire(session_key, db_path=..., provider_overrides=...)
-   │ 首次 acquire 时把 overrides[name] merge 进 entry.options
+AgentRegistry.reserve(session_key, db_path=..., provider_overrides=...)
+   │ 首次 reserve 时把 overrides[name] merge 进 entry.options
    ▼
-AIAgent.from_db(db_path, provider_overrides=...)
+AIAgent.bootstrap(db_path, provider_overrides=...)
    │ 内部对每个 entry.name,merged_options = {**entry.options, **overrides[name]}
    │ → ProviderRegistry.build(type, merged_options)
    ▼
@@ -630,7 +630,7 @@ wire body 写入 "claude-haiku-4-5"
 2. **per-session override 重建 Provider 但不必重建 client**:同 spec 命中
    `ClientCache`,连接 keepalive 保住
 3. **per-call override 零重建**:`--model` 切来切去都不动 Provider / Client
-4. **AIAgent 不参与 override 解释**:`provider_overrides` 在 `from_db` 装载时
+4. **AIAgent 不参与 override 解释**:`provider_overrides` 在 `bootstrap` 装载时
    merge 进 entry.options,落到 Provider `__init__`;之后 AIAgent 只看
    `req.provider_name`(路由)+ `req.model`(per-call wire 覆盖)
 
@@ -721,22 +721,27 @@ class AIAgent:
     ) -> None: ...
 
     @classmethod
-    async def from_db(
+    async def bootstrap(
         cls,
         db_path: Path,
         *,
         provider_overrides: dict[str, dict[str, str]] | None = None,
     ) -> Self:
-        """从 `~/.chariot/chariot.db` 装载 ProviderEntry / ToolEntry,
-        构造所有 Provider / Tool 实例,返就绪 AIAgent。
+        """从零装载 AIAgent —— 开 DB + 跑 migrations + 装 ProviderEntry / ToolEntry
+        + 实例化所有 Provider / Tool + 配 sessionmaker,返就绪 AIAgent。
+
+        命名(0.6.5):原 `from_db` 改 `bootstrap`。`from_*` 通常表"轻量反序列化"
+        (`datetime.fromisoformat` / `dict.fromkeys`),跟这里"开 DB + 跑迁移 +
+        装 N 个 Provider / Tool 实例 + 配 lock + 接 sessionmaker"全套引导动作
+        语义不符;`bootstrap` 是 web framework / k8s 通用术语,贴合实际行为。
 
         `provider_overrides`(0.6.5+):per-session inline patch,形如
         `{"claude": {"base_url": X, "api_key": Y}}`。装载时对每个 entry,
         merged_options = {**entry.options, **overrides[entry.name]} 落到
-        Provider.from_options。**注意**:`--model` 走 per-call ChatRequest.model
+        Provider.create。**注意**:`--model` 走 per-call ChatRequest.model
         路径,不在这里(详 §5.6)。
 
-        通常由 `AgentRegistry.acquire` 调用,而不是业务方直接 from_db。
+        通常由 `AgentRegistry.reserve` 调用,而不是业务方直接 bootstrap。
         """
 
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -1080,7 +1085,7 @@ tool_result / image / thinking),跟 §3.1 `ChatRequest.messages` / §3.2
 ```
 cli/
 ├── __main__.py
-├── _runtime.py              ── installed_runtime(): AIAgent.from_db + dispose
+├── _runtime.py              ── installed_runtime(): AIAgent.bootstrap + dispose
 ├── commands/                ── 命令注册层
 │   ├── chat.py              ── delegate 到 cli/repl.py / batch.py / once.py
 │   ├── convo.py             ── 调 ConvoRepo(v5 起;原 conversation.py)
@@ -1152,7 +1157,7 @@ Tauri 前端(TS)        chariot.sidecar(Python)
                 ─────► spawn child process
                        └─ stdio JSON-RPC bidirectional
 ─ rpc("chat", req) ───►
-                       agent = AIAgent.from_db(...)
+                       agent = AIAgent.bootstrap(...)
                        async for event in agent.run(req):
                            ◄─── notify("chat_event", event_dict)
 ─ rpc("list_conv") ───►
@@ -1300,9 +1305,11 @@ rpc/
 ## 12. 单例 / lifespan
 
 0.5.0 的 `Agent._current` ClassVar 单例 + `install_from_config` 改:
-- **保留单例语义**,但每个进程一个实例(不再有"全局 chariot 进程")
-- `AIAgent.from_db(db_path)` classmethod = 装载 + 设单例 + 返实例
-- 进程退出时 sqlalchemy session / httpx client 各自关闭(沿用 0.5.0 lifespan)
+- 0.6.0:**保留单例语义**,每个进程一个实例(不再有"全局 chariot 进程")
+- 0.6.5:撤单例 → `AgentRegistry`(per-session,LRU 32);`AIAgent.bootstrap(db_path)`
+  classmethod = 装载 + 返实例,**不再设单例**
+- 进程退出时 `AgentRegistry.clear` → `ClientCache.aclose_all` → `dispose_db`
+  顺序释放
 
 ## 13. 依赖移除 / 保留
 

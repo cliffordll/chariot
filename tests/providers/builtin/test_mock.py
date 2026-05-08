@@ -1,7 +1,7 @@
 """MockProvider 单测。
 
 覆盖:
-- `from_options(options)` 不消费 options(任意 dict 都能构造)
+- `create(options)` 不消费 options(任意 dict 都能构造)
 - `generate(req)` yield 序列形态符合 Claude 形态(message_start /
   content_block_* / message_delta / message_stop)
 - text_delta 内容含 req 末轮 user content 的 echo
@@ -18,7 +18,7 @@ from chariot.providers.builtin.mock import MockProvider
 
 @pytest.fixture
 def provider() -> MockProvider:
-    return MockProvider.from_options({})
+    return MockProvider.create({})
 
 
 @pytest.fixture
@@ -29,15 +29,15 @@ def req() -> ChatRequest:
     )
 
 
-class TestFromOptions:
+class TestCreate:
     def test_empty_options(self) -> None:
-        p = MockProvider.from_options({})
+        p = MockProvider.create({})
         assert p.config.name == "mock"
         assert p.config.model == "mock-1"
 
     def test_arbitrary_options_ignored(self) -> None:
         """options 不消费(任意 dict 都能构造)。"""
-        p = MockProvider.from_options({"foo": "bar", "api_key": "xxx"})
+        p = MockProvider.create({"foo": "bar", "api_key": "xxx"})
         assert p.config.name == "mock"
 
 

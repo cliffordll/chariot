@@ -31,7 +31,7 @@ class _DummyProvider(BaseProvider):
         self.config = config
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls(config=BaseProviderConfig(name="dummy", model="dummy-1"))
 
@@ -92,8 +92,8 @@ class TestBaseProviderIsAbstract:
             BaseProvider()  # type: ignore[abstract]
 
     def test_abstract_methods(self) -> None:
-        """`from_options` / `generate` 都标了 abstract。"""
-        assert "from_options" in BaseProvider.__abstractmethods__
+        """`create` / `generate` 都标了 abstract。"""
+        assert "create" in BaseProvider.__abstractmethods__
         assert "generate" in BaseProvider.__abstractmethods__
 
 

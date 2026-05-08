@@ -62,7 +62,7 @@ class ShellExecTool(BaseTool):
         self.timeout_s = timeout_s
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         workdir_raw = entry.options.get("workdir", _DEFAULT_WORKDIR)
         timeout_s = entry.options.get("timeout_s", _DEFAULT_TIMEOUT_S)
         if not isinstance(workdir_raw, str) or not workdir_raw:

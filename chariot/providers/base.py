@@ -77,7 +77,7 @@ class BaseProvider(ABC):
 
     @classmethod
     @abstractmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         """从 ModelEntry.options 构造 Provider 实例。
 
         options 的 schema 由具体 Provider 定义(`AnthropicProvider` 要 api_key /
@@ -85,7 +85,7 @@ class BaseProvider(ABC):
         `ConfigError`**(包括子类如 `InvalidProviderOptions`)。
 
         注:0.6.0 阶段 `options` 是从 DB `models` 表的 `options` JSON 列读出来
-        的 dict;实际 Provider 实例化在 `AIAgent.from_db` 时统一发生。
+        的 dict;实际 Provider 实例化在 `AIAgent.bootstrap` 时统一发生。
         """
 
     @abstractmethod

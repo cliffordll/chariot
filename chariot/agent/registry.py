@@ -15,8 +15,8 @@ Surface 各自决定 session_key 语义:
 
 并发安全:
 - 全局 asyncio.Lock 包查 / 建 / 缓存写。临界区只有 dict op + 一次
-  `AIAgent.from_db`(后者主要 IO 是 DB 装载,不是连接池)
-- 同 session_key 的并发 acquire → 第一个建,其余等锁 → 看到已建好直接返
+  `AIAgent.bootstrap`(后者主要 IO 是 DB 装载,不是连接池)
+- 同 session_key 的并发 reserve → 第一个建,其余等锁 → 看到已建好直接返
 - 不同 session_key 并发 → 串行 build(每个 build 内部 IO 是 sync DB 装载,
   跑得快;实测必要时再细化锁粒度)
 
@@ -45,7 +45,7 @@ class AgentRegistry:
     使用方式::
 
         # surface 启动一段会话:
-        agent = await AgentRegistry.acquire(
+        agent = await AgentRegistry.reserve(
             session_key="my_session_id",
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": "...", "api_key": "..."}},
@@ -57,7 +57,7 @@ class AgentRegistry:
         await AgentRegistry.release("my_session_id")
 
         # 进程退出:
-        await AgentRegistry.aclose_all()
+        await AgentRegistry.clear()
     """
 
     _MAX_AGENTS: ClassVar[int] = 32
@@ -66,21 +66,21 @@ class AgentRegistry:
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     @classmethod
-    async def acquire(
+    async def reserve(
         cls,
         session_key: str,
         *,
         db_path: Path,
         provider_overrides: dict[str, dict[str, str]] | None = None,
     ) -> AIAgent:
-        """命中 cache 返已有 agent;未命中调 `AIAgent.from_db` 装载并缓存。
+        """命中 cache 返已有 agent;未命中调 `AIAgent.bootstrap` 装载并缓存。
 
         `provider_overrides`:形如 `{"claude": {"base_url": X, "api_key": Y}}`,
-        仅在**首次** acquire 同 session_key 时生效(命中已有 agent 时忽略后续
+        仅在**首次** reserve 同 session_key 时生效(命中已有 agent 时忽略后续
         overrides)。语义:overrides 是 session-bound 的,session 创建时定,
         per-call 不再变;要换 overrides 用新的 session_key。
 
-        失败处理:`AIAgent.from_db` 抛(DB 装载错 / Provider 配置错)→ 透传
+        失败处理:`AIAgent.bootstrap` 抛(DB 装载错 / Provider 配置错)→ 透传
         给 caller;cache 不写入。
         """
         # 惰性 import 避循环:registry → run.py → registry
@@ -92,7 +92,7 @@ class AgentRegistry:
                 cls._agents.move_to_end(session_key)
                 return existing
 
-            agent = await AIAgent.from_db(db_path, provider_overrides=provider_overrides)
+            agent = await AIAgent.bootstrap(db_path, provider_overrides=provider_overrides)
             cls._agents[session_key] = agent
 
             # LRU evict:超上限 → 弹最老的(不需 cleanup,GC 处理)
@@ -111,11 +111,14 @@ class AgentRegistry:
             cls._agents.pop(session_key, None)
 
     @classmethod
-    async def aclose_all(cls) -> None:
-        """清空所有 cached agent(进程退出时调)。
+    async def clear(cls) -> None:
+        """清空 cache 字典(进程退出时调)。
 
-        注意:不连同 close `ClientCache` / `DBState`;这俩独立由 surface 决定。
-        典型 surface 退出顺序:`AgentRegistry.aclose_all()` → `ClientCache.aclose_all()`
+        注意:**不**做资源 cleanup —— AIAgent 自身没昂贵资源(httpx client 归
+        `ClientCache`,DB engine 归 `DBState`)。这里只是删 dict entry 让 GC
+        回收。`ClientCache` / `DBState` 由 surface 自己关。
+
+        典型 surface 退出顺序:`AgentRegistry.clear()` → `ClientCache.aclose_all()`
         → `dispose_db()`。
         """
         async with cls._lock:

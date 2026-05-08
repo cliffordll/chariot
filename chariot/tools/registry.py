@@ -1,12 +1,12 @@
 """`ToolRegistry` —— 按 type 名字派发 `BaseTool` 构造(类比 ModelRegistry)。
 
-把"type 字符串(`tools` 表 type 列)→ 对应 BaseTool 子类的 from_config"关系收在
+把"type 字符串(`tools` 表 type 列)→ 对应 BaseTool 子类的 create"关系收在
 一个类里。Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,
 完全不感知"有哪些工具"。
 
 使用
 ----
-1. 在 tool 类上实现 `from_config(entry) -> Self` classmethod
+1. 在 tool 类上实现 `create(entry) -> Self` classmethod
 2. 在 `chariot/server/tool/__init__.py` 显式注册:
 
    ```python
@@ -37,10 +37,10 @@ ToolBuilder = Callable[[ToolEntry], BaseTool]
 
 
 class ToolRegistry:
-    """type_name → `BaseTool.from_config` 的注册中心(类级单例)。
+    """type_name → `BaseTool.create` 的注册中心(类级单例)。
 
     类承担三件事(完全镜像 ModelRegistry):
-    1. `register(type_name, tool_cls)`:把 `tool_cls.from_config` 收进 `_builders`
+    1. `register(type_name, tool_cls)`:把 `tool_cls.create` 收进 `_builders`
     2. `build(entry)`:按 `entry.type` 派发到 builder,调用它构造 BaseTool 子类实例
     3. `known_types()`:枚举所有已注册 type 名
 
@@ -56,18 +56,18 @@ class ToolRegistry:
         """显式注册一个 tool 类。
 
         - type 重复 → `ValueError`
-        - `tool_cls` 静态保证是 `type[BaseTool]`,`from_config` 必有
+        - `tool_cls` 静态保证是 `type[BaseTool]`,`create` 必有
         - 调用时机:`chariot/server/tool/__init__.py` 模块加载阶段集中调用
         """
         if type_name in cls._builders:
             raise ValueError(f"重复注册 tool type: {type_name!r}")
-        cls._builders[type_name] = tool_cls.from_config
+        cls._builders[type_name] = tool_cls.create
 
     # ---- 构造 ----
 
     @classmethod
     def build(cls, entry: ToolEntry) -> BaseTool:
-        """按 `entry.type` 派发到对应 `from_config(entry)`。
+        """按 `entry.type` 派发到对应 `create(entry)`。
 
         type 未注册 → `ConfigError`(startup 期 raise)。
         """

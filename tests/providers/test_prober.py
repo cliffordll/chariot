@@ -37,7 +37,7 @@ class _SuccessProvider(BaseProvider):
         self.config = BaseProviderConfig(name="success", model="success-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -58,7 +58,7 @@ class _YieldsErrorProvider(BaseProvider):
         self.config = BaseProviderConfig(name="yield_err", model="yield_err-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -78,7 +78,7 @@ class _RaisesProviderErrorProvider(BaseProvider):
         self.config = BaseProviderConfig(name="raises_pe", model="raises_pe-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -98,7 +98,7 @@ class _IncompleteStreamProvider(BaseProvider):
         self.config = BaseProviderConfig(name="incomplete", model="incomplete-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -117,7 +117,7 @@ class _GenericExceptionProvider(BaseProvider):
         self.config = BaseProviderConfig(name="generic_exc", model="generic-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         return cls()
 
@@ -128,13 +128,13 @@ class _GenericExceptionProvider(BaseProvider):
 
 
 class _MissingApiKeyProvider(BaseProvider):
-    """from_options 抛 ConfigError(模拟配置不全的 build 阶段失败)。"""
+    """create 抛 ConfigError(模拟配置不全的 build 阶段失败)。"""
 
     def __init__(self) -> None:
         self.config = BaseProviderConfig(name="missing_key", model="missing-1")
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> Self:
+    def create(cls, options: dict[str, Any]) -> Self:
         del options
         from chariot.agent.exceptions import ConfigError
 

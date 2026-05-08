@@ -36,7 +36,7 @@ class _StubTool(BaseTool):
         self.options = options
 
     @classmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         return cls(name=entry.name, options=entry.options)
 
     def schema(self) -> dict[str, Any]:
@@ -93,7 +93,7 @@ def test_builtins_registered_via_package_init() -> None:
 
 
 def _make_read_file(max_bytes: int = 1048576) -> ReadFileTool:
-    return ReadFileTool.from_config(
+    return ReadFileTool.create(
         ToolEntry(
             name="read_file",
             type="read_file",
@@ -158,7 +158,7 @@ def test_read_file_schema_has_path_required() -> None:
 
 def test_read_file_invalid_max_bytes_raises() -> None:
     with pytest.raises(ConfigError, match="max_bytes"):
-        ReadFileTool.from_config(
+        ReadFileTool.create(
             ToolEntry(
                 name="read_file",
                 type="read_file",
@@ -174,7 +174,7 @@ def test_read_file_invalid_max_bytes_raises() -> None:
 
 
 def _make_list_dir() -> ListDirTool:
-    return ListDirTool.from_config(
+    return ListDirTool.create(
         ToolEntry(name="list_dir", type="list_dir", enabled=True, options={}),
     )
 
@@ -264,7 +264,7 @@ def test_list_dir_schema_has_path_required() -> None:
 
 
 def _make_shell(workdir: Path, timeout_s: float = 5.0) -> ShellExecTool:
-    """直接构造,绕开 from_config 的 int 校验(测试用 sub-second timeout 方便)。"""
+    """直接构造,绕开 create 的 int 校验(测试用 sub-second timeout 方便)。"""
     return ShellExecTool(name="shell_exec", workdir=workdir, timeout_s=timeout_s)
 
 
@@ -324,7 +324,7 @@ async def test_shell_exec_invalid_args(tmp_path: Path) -> None:
 
 def test_shell_exec_invalid_options_workdir() -> None:
     with pytest.raises(ConfigError, match="workdir"):
-        ShellExecTool.from_config(
+        ShellExecTool.create(
             ToolEntry(
                 name="shell_exec",
                 type="shell_exec",
@@ -336,7 +336,7 @@ def test_shell_exec_invalid_options_workdir() -> None:
 
 def test_shell_exec_invalid_options_timeout() -> None:
     with pytest.raises(ConfigError, match="timeout"):
-        ShellExecTool.from_config(
+        ShellExecTool.create(
             ToolEntry(
                 name="shell_exec",
                 type="shell_exec",
@@ -358,7 +358,7 @@ def test_shell_exec_schema_has_cmd_required() -> None:
 
 
 def _make_http(allowed: list[str], max_bytes: int = 524288) -> HttpGetTool:
-    return HttpGetTool.from_config(
+    return HttpGetTool.create(
         ToolEntry(
             name="http_get",
             type="http_get",
@@ -466,7 +466,7 @@ async def test_http_get_missing_url_field() -> None:
 
 async def test_http_get_invalid_options_allowed_domains() -> None:
     with pytest.raises(ConfigError, match="allowed_domains"):
-        HttpGetTool.from_config(
+        HttpGetTool.create(
             ToolEntry(
                 name="http_get",
                 type="http_get",

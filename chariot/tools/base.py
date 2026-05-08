@@ -3,12 +3,16 @@
 任何具体工具(read_file / list_dir / shell_exec / http_get / 未来扩展)继承
 `BaseTool` 并实现:
 
-- `from_config(entry)` classmethod —— `ToolRegistry` 用它构造实例
+- `create(entry)` classmethod —— `ToolRegistry` 用它构造实例
 - `schema()` —— 返回 Anthropic tool definition JSON
 - `execute(input)` async —— 跑工具,返 tool_result content block
 
 ABC + abstractmethod 强制子类实现这些(缺则实例化即抛 TypeError);
 `ToolRegistry.register` 因此不必在运行期再做 callable 兜底校验。
+
+注:`create` 跟 `BaseProvider.create` 命名对齐 —— 同套"插件式抽象 +
+Registry dispatch + 子类工厂"模式,工厂 classmethod 名字统一;不耦合到
+具体参数(原名 `from_config`,改名后子类签名变了也不必重命名)。
 
 职责边界(严格,类比 BaseProvider 接口)
 -------------------------------
@@ -34,7 +38,7 @@ class BaseTool(ABC):
 
     实现 checklist:
     1. `name: str` 实例属性 —— 跟 ToolEntry.name 一致(用户面 ID)
-    2. `from_config(entry) -> Self` classmethod —— `ToolRegistry` 构造契约;
+    2. `create(entry) -> Self` classmethod —— `ToolRegistry` 构造契约;
        options 不合法 raise `ConfigError`
     3. `schema() -> dict` —— Anthropic tool definition JSON
        (`{"name", "description", "input_schema"}`),Agent 调 Model 前注入
@@ -48,7 +52,7 @@ class BaseTool(ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, entry: ToolEntry) -> Self:
+    def create(cls, entry: ToolEntry) -> Self:
         """从 ToolEntry 构造实例(读 entry.name + entry.options)。"""
 
     @abstractmethod

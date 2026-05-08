@@ -7,7 +7,7 @@
 - default tools:`req.tools=[<显式>]` → 透传(不替换)
 - stateless:无 convo_id → 不开 session(sessionmaker 不被调)
 - stateful:有 convo_id → ConvoLockManager.acquire 被调一次
-- 单例 / from_db:`current()` 未装载抛 RuntimeError;装载后可拿
+- 单例 / bootstrap:`current()` 未装载抛 RuntimeError;装载后可拿
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class _CapturingProvider(BaseProvider):
         self.last_req: ChatRequest | None = None
 
     @classmethod
-    def from_options(cls, options: dict[str, Any]) -> _CapturingProvider:
+    def create(cls, options: dict[str, Any]) -> _CapturingProvider:
         return cls()
 
     async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -54,7 +54,7 @@ class _StubTool(BaseTool):
         self.name = name
 
     @classmethod
-    def from_config(cls, entry: Any) -> _StubTool:
+    def create(cls, entry: Any) -> _StubTool:
         return cls("stub")
 
     def schema(self) -> dict[str, Any]:
@@ -210,12 +210,12 @@ class TestStatefulPath:
 
 
 # ---------------------------------------------------------------------------
-# from_db `provider_overrides` 参数(0.6.5 起 per-session override)
+# bootstrap `provider_overrides` 参数(0.6.5 起 per-session override)
 # ---------------------------------------------------------------------------
 
 
-class TestFromDbProviderOverrides:
-    """`AIAgent.from_db(db_path, provider_overrides=...)` 行为。
+class TestBootstrapProviderOverrides:
+    """`AIAgent.bootstrap(db_path, provider_overrides=...)` 行为。
 
     0.6.5 起替换 0.6.0 的 `patch_provider_options` 临时方案:overrides 在装载时
     一次性 merge 进 entry.options;Provider 实例从 merged 算 ClientSpec,
@@ -234,7 +234,7 @@ class TestFromDbProviderOverrides:
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
         db_path = tmp_path / "chariot.db"
-        agent = await AIAgent.from_db(db_path)
+        agent = await AIAgent.bootstrap(db_path)
         async with agent.session_maker() as session:
             await ProviderRepo(session).create(
                 name="claude",
@@ -253,22 +253,22 @@ class TestFromDbProviderOverrides:
 
     async def test_no_overrides_uses_db_options(self, _seed_anthropic_entry: Path) -> None:
         """provider_overrides=None → entry.options 原样进 Provider。"""
-        agent = await AIAgent.from_db(_seed_anthropic_entry)
+        agent = await AIAgent.bootstrap(_seed_anthropic_entry)
         provider = agent.providers["claude"]
         assert provider.config.model == "claude-old"
         assert provider._spec.base_url == "https://old.api"  # type: ignore[attr-defined]
 
-    async def test_model_override_at_from_db(self, _seed_anthropic_entry: Path) -> None:
+    async def test_model_override_at_bootstrap(self, _seed_anthropic_entry: Path) -> None:
         """`provider_overrides={"claude": {"model": ...}}` → Provider.config.model 反映新值。"""
-        agent = await AIAgent.from_db(
+        agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,
             provider_overrides={"claude": {"model": "claude-new"}},
         )
         assert agent.providers["claude"].config.model == "claude-new"
 
-    async def test_base_url_override_at_from_db(self, _seed_anthropic_entry: Path) -> None:
+    async def test_base_url_override_at_bootstrap(self, _seed_anthropic_entry: Path) -> None:
         """`provider_overrides[name][base_url]` → ClientSpec.base_url 反映。"""
-        agent = await AIAgent.from_db(
+        agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,
             provider_overrides={"claude": {"base_url": "https://override.api"}},
         )
@@ -279,18 +279,18 @@ class TestFromDbProviderOverrides:
         self, _seed_anthropic_entry: Path
     ) -> None:
         """overrides keyed 到不存在的 entry → 被忽略,不影响现有 entry。"""
-        agent = await AIAgent.from_db(
+        agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,
             provider_overrides={"ghost": {"model": "x"}},
         )
         assert agent.providers["claude"].config.model == "claude-old"
 
     async def test_invalid_override_raises_config_error(self, _seed_anthropic_entry: Path) -> None:
-        """空串 base_url 进 patch → ConfigError(from_options 校验阶段)。"""
+        """空串 base_url 进 patch → ConfigError(create 校验阶段)。"""
         from chariot.agent.exceptions import ConfigError
 
         with pytest.raises(ConfigError, match="base_url"):
-            await AIAgent.from_db(
+            await AIAgent.bootstrap(
                 _seed_anthropic_entry,
                 provider_overrides={"claude": {"base_url": ""}},
             )
