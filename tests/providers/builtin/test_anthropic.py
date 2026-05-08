@@ -26,8 +26,8 @@ import pytest
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.exceptions import ConfigError, ProviderError
-from chariot.providers.base import BaseProviderConfig
 from chariot.providers.builtin.anthropic import AnthropicProvider
+from chariot.providers.clients import ClientCache
 
 # ---------------------------------------------------------------------------
 # Fixture SSE bytes(模拟真实 Anthropic SSE 响应)
@@ -91,10 +91,17 @@ SSE_TOOL_USE: bytes = (
 # ---------------------------------------------------------------------------
 
 
-def _make_provider(handler: Callable[[httpx.Request], httpx.Response]) -> AnthropicProvider:
-    """构造一个挂 MockTransport handler 的 AnthropicProvider 实例。"""
+def _make_provider(
+    handler: Callable[[httpx.Request], httpx.Response],
+    monkeypatch: pytest.MonkeyPatch,
+) -> AnthropicProvider:
+    """构造一个 AnthropicProvider 实例,顺带 monkeypatch ClientCache.get 返回挂
+    MockTransport 的 mock client。
+
+    0.6.5 起 Provider 不持 client,改 monkeypatch ClientCache.get 注入 mock。
+    """
     transport = httpx.MockTransport(handler)
-    client = httpx.AsyncClient(
+    mock_client = httpx.AsyncClient(
         base_url="https://api.test",
         transport=transport,
         headers={
@@ -103,11 +110,19 @@ def _make_provider(handler: Callable[[httpx.Request], httpx.Response]) -> Anthro
             "content-type": "application/json",
         },
     )
-    return AnthropicProvider(
-        config=BaseProviderConfig(name="anthropic", model="claude-test"),
-        api_key="test_key",
-        base_url="https://api.test",
-        client=client,
+
+    async def _fake_get(spec: object) -> httpx.AsyncClient:
+        del spec  # 测试场景忽略 spec,所有 generate 都走同一个 mock client
+        return mock_client
+
+    monkeypatch.setattr(ClientCache, "get", _fake_get)
+
+    return AnthropicProvider.from_options(
+        {
+            "model": "claude-test",
+            "api_key": "test_key",
+            "base_url": "https://api.test",
+        }
     )
 
 
@@ -126,7 +141,7 @@ def _make_req() -> ChatRequest:
 class TestCaseATextOnly:
     """纯 text 响应的 ChatEvent 序列形态。"""
 
-    async def test_kind_sequence(self) -> None:
+    async def test_kind_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -134,7 +149,7 @@ class TestCaseATextOnly:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         kinds = [ev.kind for ev in events]
         assert kinds == [
@@ -147,7 +162,7 @@ class TestCaseATextOnly:
             "message_stop",
         ]
 
-    async def test_text_delta_payload(self) -> None:
+    async def test_text_delta_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -155,14 +170,14 @@ class TestCaseATextOnly:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         text_deltas = [ev for ev in events if ev.kind == "content_block_delta"]
         assert len(text_deltas) == 2
         assert text_deltas[0].delta == {"type": "text_delta", "text": "Hello"}
         assert text_deltas[1].delta == {"type": "text_delta", "text": " world"}
 
-    async def test_message_start_has_usage(self) -> None:
+    async def test_message_start_has_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -170,13 +185,13 @@ class TestCaseATextOnly:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         ms = events[0]
         assert ms.kind == "message_start"
         assert ms.usage == {"input_tokens": 10, "output_tokens": 1}
 
-    async def test_message_delta_stop_reason(self) -> None:
+    async def test_message_delta_stop_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -184,7 +199,7 @@ class TestCaseATextOnly:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         md = next(ev for ev in events if ev.kind == "message_delta")
         assert md.delta == {"stop_reason": "end_turn", "stop_sequence": None}
@@ -197,7 +212,7 @@ class TestCaseATextOnly:
 
 
 class TestCaseBToolUse:
-    async def test_tool_use_block_start(self) -> None:
+    async def test_tool_use_block_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -205,7 +220,7 @@ class TestCaseBToolUse:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         cb_start = next(ev for ev in events if ev.kind == "content_block_start")
         assert cb_start.content_block is not None
@@ -213,7 +228,7 @@ class TestCaseBToolUse:
         assert cb_start.content_block["id"] == "toolu_01"
         assert cb_start.content_block["name"] == "read_file"
 
-    async def test_input_json_delta(self) -> None:
+    async def test_input_json_delta(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -221,7 +236,7 @@ class TestCaseBToolUse:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         deltas = [ev for ev in events if ev.kind == "content_block_delta"]
         assert len(deltas) == 2
@@ -229,7 +244,9 @@ class TestCaseBToolUse:
             assert d.delta is not None
             assert d.delta["type"] == "input_json_delta"
 
-    async def test_message_delta_stop_reason_tool_use(self) -> None:
+    async def test_message_delta_stop_reason_tool_use(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -237,7 +254,7 @@ class TestCaseBToolUse:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         md = next(ev for ev in events if ev.kind == "message_delta")
         assert md.delta == {"stop_reason": "tool_use", "stop_sequence": None}
@@ -249,24 +266,24 @@ class TestCaseBToolUse:
 
 
 class TestCaseC401AuthFailed:
-    async def test_raises_provider_error(self) -> None:
+    async def test_raises_provider_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 401,
                 json={"error": {"type": "authentication_error", "message": "invalid key"}},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
         assert exc_info.value.code == "upstream_auth_failed"
 
-    async def test_403_also_auth_failed(self) -> None:
+    async def test_403_also_auth_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(403, json={"error": {"type": "permission_error"}})
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
@@ -279,21 +296,21 @@ class TestCaseC401AuthFailed:
 
 
 class TestCaseD500ServerError:
-    async def test_raises_provider_error(self) -> None:
+    async def test_raises_provider_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(500, json={"error": {"type": "internal_error"}})
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
         assert exc_info.value.code == "upstream_server_error"
 
-    async def test_503_also_server_error(self) -> None:
+    async def test_503_also_server_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(503, json={"error": {"type": "overloaded_error"}})
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
@@ -306,21 +323,21 @@ class TestCaseD500ServerError:
 
 
 class TestCaseEConnectError:
-    async def test_raises_provider_error(self) -> None:
+    async def test_raises_provider_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
         assert exc_info.value.code == "upstream_unreachable"
 
-    async def test_timeout_also_unreachable(self) -> None:
+    async def test_timeout_also_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("upstream slow")
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         with pytest.raises(ProviderError) as exc_info:
             async for _ in provider.generate(_make_req()):
                 pass
@@ -335,7 +352,7 @@ class TestCaseEConnectError:
 class TestCaseF200ThenStreamError:
     """SSE 流中途 IO 错 → yield ChatEvent(kind="error") + return,不抛。"""
 
-    async def test_stream_error_yields_event(self) -> None:
+    async def test_stream_error_yields_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """200 已发后中途 IO 错 → yield error event,不抛。"""
 
         class _FailingStream(httpx.AsyncByteStream):
@@ -363,7 +380,7 @@ class TestCaseF200ThenStreamError:
                 headers={"content-type": "text/event-stream"},
             )
 
-        provider = _make_provider(handler)
+        provider = _make_provider(handler, monkeypatch)
         events = [ev async for ev in provider.generate(_make_req())]
         # 必须有 message_start(在错误前 yield 出来)
         assert events[0].kind == "message_start"
@@ -405,15 +422,15 @@ class TestFromOptions:
         provider = AnthropicProvider.from_options(
             {"model": "claude-3-5-sonnet-20241022", "base_url": "https://custom.api"}
         )
-        # base_url 在 _build_body 不暴露,只能间接验:_base_url 字段
-        assert provider._base_url == "https://custom.api"
+        # base_url 在 _build_body 不暴露,只能间接验:_spec.base_url 字段
+        assert provider._spec.base_url == "https://custom.api"
 
     def test_base_url_falls_back_to_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """S.7.3 起:options 无 inline base_url → 读 ANTHROPIC_BASE_URL env(Anthropic SDK 约定)。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
         provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
-        assert provider._base_url == "https://env.api"
+        assert provider._spec.base_url == "https://env.api"
 
     def test_inline_base_url_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """inline > env(CLI flag 通过 inline 注入,所以 CLI > env;DB 显式 inline 也 > env)。"""
@@ -422,14 +439,14 @@ class TestFromOptions:
         provider = AnthropicProvider.from_options(
             {"model": "claude-3-5-sonnet-20241022", "base_url": "https://inline.api"}
         )
-        assert provider._base_url == "https://inline.api"
+        assert provider._spec.base_url == "https://inline.api"
 
     def test_base_url_default_when_no_inline_no_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """都没设 → 默认 https://api.anthropic.com。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
         provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
-        assert provider._base_url == "https://api.anthropic.com"
+        assert provider._spec.base_url == "https://api.anthropic.com"
 
     def test_empty_inline_base_url_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """inline base_url 是空串 → 校验失败(让用户改成"整条删掉")。"""
@@ -446,8 +463,14 @@ class TestFromOptions:
 class TestBuildBody:
     @staticmethod
     def _provider() -> AnthropicProvider:
-        """空 handler 的 provider 实例(只用 _build_body,不真发请求)。"""
-        return _make_provider(lambda _req: httpx.Response(200))
+        """provider 实例;_build_body 不需要 client,直接 from_options 构造。"""
+        return AnthropicProvider.from_options(
+            {
+                "model": "claude-test",
+                "api_key": "test_key",
+                "base_url": "https://api.test",
+            }
+        )
 
     def test_excludes_chariot_extension_fields(self) -> None:
         req = ChatRequest(
@@ -514,6 +537,33 @@ class TestBuildBody:
         # provider_name 不进 body
         assert "provider_name" not in body
         assert "ollama-qwen" not in str(body)
+
+    def test_per_call_model_override_takes_precedence(self) -> None:
+        """0.6.5+:`req.model` 非 None 时优先于 `self.config.model`。
+
+        CLI `--model` flag 走这条 —— per-call 覆盖,不重建 Provider /
+        ClientSpec / httpx client(零客户端开销)。
+        """
+        req = ChatRequest(
+            provider_name="anthropic",
+            messages=[Message(role="user", content="hi")],
+            model="claude-haiku-4-5",  # per-call 覆盖
+        )
+        # config.model 默认 "claude-test",req.model 应胜出
+        body = self._provider()._build_body(req)
+        assert body["model"] == "claude-haiku-4-5"
+
+    def test_per_call_model_none_falls_back_to_config(self) -> None:
+        """`req.model=None`(默认)→ 回退 self.config.model;不写 null。"""
+        req = ChatRequest(
+            provider_name="anthropic",
+            messages=[Message(role="user", content="hi")],
+            # model 默认 None
+        )
+        body = self._provider()._build_body(req)
+        assert body["model"] == "claude-test"
+        # None 字段已被滤;model 不应是 None
+        assert body["model"] is not None
 
 
 # ---------------------------------------------------------------------------

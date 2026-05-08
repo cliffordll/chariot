@@ -18,7 +18,14 @@
 - 429 → `rate_limited`
 - 200 后 IO 错 → `upstream_stream_error`(yield event,不抛)
 
-封装:client / model / api_key 等都在实例字段;模块级零自由函数(CLAUDE.md ⭐)。
+0.6.5 起架构调整(Hermes 哲学):
+- **不再持有 httpx client**:`self._client` 撤;实例只持 `_options` + `_spec`
+- httpx client 由 `ClientCache.get(spec)` 进程级共享(LRU + 并发安全)
+- per-call override(`--base-url`/`--api-key`)走"重建 Provider 实例 +
+  ClientSpec 自动命中或新建 client"路径,不重建已存在 (base_url, api_key)
+  对应的 client(连接 keepalive 保住)
+
+封装:`_options` / `_spec` 都是构造时 immutable;模块级零自由函数(CLAUDE.md ⭐)。
 """
 
 from __future__ import annotations
@@ -35,14 +42,20 @@ from chariot.agent.chat_request import ChatRequest
 from chariot.agent.exceptions import ConfigError, ProviderError
 from chariot.providers._sse import SseParser
 from chariot.providers.base import BaseProvider, BaseProviderConfig
+from chariot.providers.clients import ClientCache, ClientSpec
 
 
 class AnthropicProvider(BaseProvider):
     """Anthropic Messages API 适配器。
 
-    构造:走 `from_options(options)`(由 `ProviderRegistry.build` 调);
-    手工构造 `__init__` 也允许,主要给测试 inject 自定义 httpx client 用
-    (传 `client=httpx.AsyncClient(transport=MockTransport(...))`)。
+    0.6.5 起构造:走 `from_options(options)`(由 `ProviderRegistry.build` 调);
+    实例持 `self._options`(merged effective options)+ `self._spec`(ClientSpec,
+    构造时算一次,后续 generate 复用)。**不持 httpx client** —— client 由
+    `ClientCache` 进程级缓存,Provider 重建零成本。
+
+    并发安全(详 BaseProvider 类 docstring):实例所有字段 immutable;
+    `generate(req)` 内部从 `ClientCache.get(self._spec)` 拿 client,httpx 自身
+    保证 client 跨 coroutine 共用安全。
     """
 
     _DEFAULT_BASE_URL: ClassVar[str] = "https://api.anthropic.com"
@@ -50,11 +63,15 @@ class AnthropicProvider(BaseProvider):
     _BASE_URL_ENV: ClassVar[str] = "ANTHROPIC_BASE_URL"  # Anthropic SDK 标准 env
     _ANTHROPIC_VERSION: ClassVar[str] = "2023-06-01"
 
-    # 类级超时常量,测试可 monkeypatch
+    # 类级超时常量(默认值;options 不开放覆盖,如要调整改类常量)
     _CONNECT_TIMEOUT_SEC: ClassVar[float] = 10.0
     _READ_TIMEOUT_SEC: ClassVar[float] = 300.0
     _WRITE_TIMEOUT_SEC: ClassVar[float] = 30.0
     _POOL_TIMEOUT_SEC: ClassVar[float] = 10.0
+
+    # httpx 连接池上限(0.6.5 起;options 可覆盖,Gateway 高并发场景调高)
+    _DEFAULT_MAX_CONNECTIONS: ClassVar[int] = 20
+    _DEFAULT_MAX_KEEPALIVE: ClassVar[int] = 10
 
     # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发);
     # `provider_name` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
@@ -67,36 +84,20 @@ class AnthropicProvider(BaseProvider):
         self,
         *,
         config: BaseProviderConfig,
-        api_key: str,
-        base_url: str = _DEFAULT_BASE_URL,
-        client: httpx.AsyncClient | None = None,
+        options: dict[str, Any],
     ) -> None:
-        """构造 AnthropicProvider。
+        """构造 AnthropicProvider(0.6.5 起接口)。
 
-        - `client=None` → 自建 `httpx.AsyncClient`(生产路径)
-        - `client=<注入>` → 测试用,可塞 `MockTransport`(直接复用 headers /
-          base_url 为 None,只用注入 client 的 transport)
+        实例持 effective options + 构造时算一次的 ClientSpec(给 generate 复用)。
+        校验失败(api_key / base_url 不合法)在 `_build_spec` 阶段抛 ConfigError。
+
+        测试场景:`from_options(...)` 构造 + monkeypatch `ClientCache.get` 注入
+        mock httpx client(详见 tests/providers/builtin/test_anthropic.py 的
+        `_make_provider` helper)。
         """
         self.config = config
-        self._api_key = api_key
-        self._base_url = base_url
-        if client is not None:
-            self._client = client
-            return
-        self._client = httpx.AsyncClient(
-            base_url=base_url,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": self._ANTHROPIC_VERSION,
-                "content-type": "application/json",
-            },
-            timeout=httpx.Timeout(
-                connect=self._CONNECT_TIMEOUT_SEC,
-                read=self._READ_TIMEOUT_SEC,
-                write=self._WRITE_TIMEOUT_SEC,
-                pool=self._POOL_TIMEOUT_SEC,
-            ),
-        )
+        self._options = dict(options)
+        self._spec = self._build_spec()
 
     # ---- 构造契约 ----
 
@@ -110,16 +111,43 @@ class AnthropicProvider(BaseProvider):
         - `api_key_env`(可选,默认 `ANTHROPIC_API_KEY`):环境变量名;inline 缺时读
         - `base_url`(可选 inline):内联;缺时读 `ANTHROPIC_BASE_URL` env;
           再缺用默认 `https://api.anthropic.com`(Anthropic SDK 标准约定)
+        - `max_connections`(可选,默认 20):httpx 连接池上限
+        - `max_keepalive`(可选,默认 10):httpx keepalive 连接上限
         """
         model = options.get("model")
         if not isinstance(model, str) or not model:
             raise ConfigError("anthropic provider 配置缺少 'model' 或类型不对")
 
-        api_key = cls._resolve_api_key(options)
-        base_url = cls._resolve_base_url(options)
-
         config = BaseProviderConfig(name="anthropic", model=model)
-        return cls(config=config, api_key=api_key, base_url=base_url)
+        # api_key / base_url 校验在 __init__ → _build_spec 里发生
+        return cls(config=config, options=options)
+
+    def _build_spec(self) -> ClientSpec:
+        """从 `self._options` 算 ClientSpec;校验失败抛 `ConfigError`。
+
+        构造时调一次;后续 generate 用 `self._spec` 命中 ClientCache。同 spec 的
+        多个 Provider 实例(per-call override 重建)共用同一个 cached client。
+        """
+        api_key = self._resolve_api_key(self._options)
+        base_url = self._resolve_base_url(self._options)
+        max_conn_raw = self._options.get("max_connections", self._DEFAULT_MAX_CONNECTIONS)
+        max_keep_raw = self._options.get("max_keepalive", self._DEFAULT_MAX_KEEPALIVE)
+        return ClientSpec(
+            provider_type="anthropic",
+            base_url=base_url,
+            api_key=api_key,
+            headers=(
+                ("x-api-key", api_key),
+                ("anthropic-version", self._ANTHROPIC_VERSION),
+                ("content-type", "application/json"),
+            ),
+            max_connections=int(max_conn_raw),
+            max_keepalive=int(max_keep_raw),
+            connect_timeout_sec=self._CONNECT_TIMEOUT_SEC,
+            read_timeout_sec=self._READ_TIMEOUT_SEC,
+            write_timeout_sec=self._WRITE_TIMEOUT_SEC,
+            pool_timeout_sec=self._POOL_TIMEOUT_SEC,
+        )
 
     @classmethod
     def _resolve_api_key(cls, options: dict[str, Any]) -> str:
@@ -164,11 +192,15 @@ class AnthropicProvider(BaseProvider):
 
         body 从 ChatRequest 拼,**强制 stream=True**(chariot 内核固定流式;
         ChatRequest 自身没 stream 字段,这里在拼 body 时塞)。
+
+        client 从 `ClientCache.get(self._spec)` 拿:同 (base_url, api_key, ...)
+        命中已有 client,连接 keepalive 复用;未命中构造 + 缓存。
         """
         body = self._build_body(req)
+        client = await ClientCache.get(self._spec)
         try:
-            send_req = self._client.build_request("POST", "/v1/messages", json=body)
-            upstream = await self._client.send(send_req, stream=True)
+            send_req = client.build_request("POST", "/v1/messages", json=body)
+            upstream = await client.send(send_req, stream=True)
         except httpx.TimeoutException as e:
             raise ProviderError("upstream_unreachable", f"上游超时: {e}") from e
         except httpx.HTTPError as e:
@@ -209,10 +241,10 @@ class AnthropicProvider(BaseProvider):
           `provider_name` 是 chariot 路由 key,Anthropic API 不识别
         3. 剔除 `None` 值字段(Anthropic API 不接受 null,且 max_tokens 等
           有默认 4096 不能漏)
-        4. **写 `body["model"] = self.config.model`**:wire 字段名仍是 `model`
-          (Anthropic API 要求);值从 `entry.options.model` 来(实例化时落到
-          `self.config.model`)。`req.provider_name` 不参与 body 构造,只在
-          AIAgent 路由时用过
+        4. **写 `body["model"] = req.model or self.config.model`**(0.6.5+):
+          per-call `req.model` 优先(CLI `--model` flag 走这条);缺省回退到
+          `self.config.model`(实例化时从 entry.options.model 落)。注意 step 3
+          已把 `model=None` 滤掉,这步是单独覆写,确保非 None 时 wire 字段写对
         5. 强制 `stream=True`(chariot 内核固定流式)
         """
         full = dataclasses.asdict(req)
@@ -221,7 +253,7 @@ class AnthropicProvider(BaseProvider):
             for k, v in full.items()
             if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
         }
-        body["model"] = self.config.model
+        body["model"] = req.model or self.config.model
         body["stream"] = True
         return body
 

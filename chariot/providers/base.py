@@ -56,6 +56,21 @@ class BaseProvider(ABC):
       return,**不抛**
     - **不产 `stream_done`**(那是 AgentLoop 跨轮收敛职责)
     - 不知道工具循环、不写 DB、不记 log —— 纯输入输出
+
+    并发契约(0.6.5 起,长跑场景 sidecar / Gateway / ACP / MCP / Plugins 用):
+    - **实例必须并发安全**:多 coroutine 并发调 `generate(req)` 各自独立产
+      ChatEvent 流,不互相干扰
+    - **self 上不挂 per-request mutable state**:`self.config` / `self._options`
+      这种构造时确定的 immutable 字段 OK;**不要**在 generate 内写
+      `self.last_req` / `self.tokens_used` 之类(并发污染)
+    - **httpx client 不再由 Provider 持有**(0.6.0 旧实现持 self._client,
+      0.6.5 撤);Provider 在 generate 内调 `ClientCache.get(spec)` 拿,共享
+      进程级缓存,跨 Provider 实例 / 跨并发请求 keepalive 复用
+
+    Lifecycle:
+    - 实例无昂贵资源 → 不需 aclose;httpx client 由 `ClientCache` 统一管
+    - per-call override(`--base-url` / `--api-key`)走"重建 Provider 实例 +
+      ClientSpec 自动命中或新建 client"路径,Provider 实例本身重建零成本
     """
 
     config: BaseProviderConfig
