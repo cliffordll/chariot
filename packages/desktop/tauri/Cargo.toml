@@ -1,6 +1,6 @@
 [package]
 name = "chariot-desktop"
-version = "0.1.0"
+version = "0.6.5"
 description = "Chariot 桌面外壳"
 authors = ["lianaipeng"]
 edition = "2021"

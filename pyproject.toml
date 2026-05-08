@@ -1,6 +1,6 @@
 [project]
 name = "chariot-proxy"
-version = "0.5.0"
+version = "0.6.5"
 description = "本地跑的智能体(库 + CLI + Tauri sidecar;可热插拔 Provider:Mock / Anthropic / 后续真实后端)"
 readme = "README.md"
 requires-python = ">=3.12"

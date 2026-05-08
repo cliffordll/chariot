@@ -53,7 +53,7 @@ wheels = [
 
 [[package]]
 name = "chariot-proxy"
-version = "0.5.0"
+version = "0.6.5"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

@@ -2,41 +2,42 @@
 
 > **Self-evolving intelligence, in motion.** · 驾驭智能,向前。
 
-Chariot 是一个**本机跑的智能体 (agent) server**。对外接 Anthropic Messages
-协议(`POST /v1/messages`),server 自己生成响应。
+Chariot 是**本机跑的自演化 CLI agent**:核心是一个可 import 的 Python 库
+(`chariot/agent/`),提供协议无关的 `AIAgent` + `ChatRequest` / `ChatEvent` IR
+(三层都跟 Claude Messages API 1:1)。Surface 层平铺多种入口 —— `cli/`(本地终端
+直调) / `sidecar/`(Tauri 桌面壳的 stdio JSON-RPC 子进程),后续会加
+`gateways/`(Telegram / Discord)等。
 
-默认自带 `MockModel`(本地 echo,零外部依赖);通过 `Model` 接口可以挂真实后端
-(Anthropic / 本地 llama / 自研)或加进化循环。
-
-> **0.2.0 起单协议**:chariot 只对外暴露 `/v1/messages`。OpenAI 兼容性请通过外部
-> 转换器接入(见下方 [OpenAI 客户端怎么接](#openai-客户端怎么接))。架构变更详见
-> [`docs/DESIGN.md`](docs/DESIGN.md);0.1.0 三协议平等的旧设计归档在
-> [`docs/history/0.1.0/`](docs/history/0.1.0/)。
+默认自带 `MockProvider`(本地 echo,零外部依赖);通过 `BaseProvider` 可挂
+真实后端 —— 当前内置 `AnthropicProvider`(走 Claude Messages API),0.7.0+ 会加
+`OpenAIProvider` / `LocalLlamaProvider` 等。
 
 ## Quick start
 
 ```bash
-# 0. 一次性装依赖
+# 一次性装依赖
 uv sync
 bun install
 ```
 
-### CLI / server(最轻量,无需 Rust)
+### CLI(最轻量,无需 Rust)
 
 ```bash
-uv run python -m chariot.server            # 终端 A:起 server
-uv run chariot chat "hello"                # 终端 B:一次性对话
-uv run chariot chat                        # 或进 REPL
-uv run chariot logs -f                     # 看请求流水
+uv run chariot chat "hello"                # 一次性对话
+uv run chariot chat                        # 进 REPL
+uv run chariot logs                        # 看请求流水
 ```
+
+CLI 直接 in-process 调用 `AIAgent`,无 server / 无 IPC、不需要任何运行时握手
+文件。
 
 ### Tauri 桌面壳(带 UI)
 
-首次需要打 PyInstaller sidecar(Tauri 靠它起 server;只需做一次,之后改 Python
-代码要重打):
+首次需要打 PyInstaller sidecar(Tauri 通过 stdio JSON-RPC 跟它通信;只需做一次,
+之后改 Python 代码要重打):
 
 ```bash
-uv run --group build python scripts/build.py --target server --sync-sidecar
+uv run --group build python scripts/build.py --target sidecar --sync-sidecar
 ```
 
 然后:
@@ -45,17 +46,19 @@ uv run --group build python scripts/build.py --target server --sync-sidecar
 bun run --filter=@chariot/desktop tauri dev
 ```
 
-首次会编 Rust,**5-15 分钟**属正常;之后增量编译秒级。弹出窗口后 Dashboard /
-Chat / Logs 三页可用。
+首次会编 Rust,**5-15 分钟**属正常;之后增量编译秒级。窗口弹出后 Chat / Models
+/ Tools / Conversations / Logs 五页可用。
 
-### Web 前端(Vite dev server,浏览器访问)
+### Web 前端(Vite dev server,浏览器调试)
 
-不用桌面壳、只想快速迭代前端:
+不用桌面壳、只想快速迭代前端的 UI 部分:
 
 ```bash
-uv run python -m chariot.server            # 终端 A:server
-bun run --filter=@chariot/app dev          # 终端 B:Vite at http://localhost:5173
+bun run --filter=@chariot/app dev          # Vite at http://localhost:5173
 ```
+
+注意:Vite 浏览器模式下 `Tauri.invoke` 不可用,数据访问层会报错。这套用法仅
+适合纯样式 / 路由迭代;真正跑 chat / models 还是走 `tauri dev`。
 
 完整首次启动(含 Rust toolchain / MSVC / 常见报错排查)见
 [`docs/guides/first-run.md`](docs/guides/first-run.md)。
@@ -63,123 +66,116 @@ bun run --filter=@chariot/app dev          # 终端 B:Vite at http://localhost:5
 ## Architecture
 
 ```
-CLI / UI / Anthropic SDK / claude code
-        │  POST /v1/messages  [+ X-Chariot-Conversation: <ulid>?]
-        ▼
-Controller  →  Agent.handle(body, conversation_id?)
-                    │
-                    ├─ fast path:无 conv + 无 tools → 直接透传 Model.respond
-                    │
-                    └─ slow path:load 历史 / 工具循环
-                                │
-                                ├── Model.respond(body, *, stream)
-                                │     ├ MockModel (默认 · local echo)
-                                │     └ AnthropicModel (透传 Anthropic API)
-                                │
-                                └── tool 检测 / 执行 / 拼下一轮
-                                      └ Tool.execute()
-                                          read_file / list_dir / shell_exec / http_get
+                ┌─────────────────────────────────────────┐
+ Surface 层     │ cli/   sidecar/   gateways/(0.8.0+)  │
+                └──────────────────┬──────────────────────┘
+                                   │  调 AIAgent.run(req)
+                                   ▼
+ Agent 内核        AIAgent  →  AgentLoop  →  Provider.generate
+                       │              │            │
+                       └─ ConvoRepo   └─ ToolRegistry
+                                           │
+                                           └─ BaseTool.execute
+                                              read_file / list_dir / shell_exec / http_get
+
+ Provider 层      AnthropicProvider / MockProvider / 0.7.0+ OpenAI / LocalLlama
+                       │   每实例 build 一次 ClientSpec,httpx client 由
+                       │   ClientCache 进程级共享(LRU 16,asyncio.Lock 并发安全)
+                       ▼
+ Wire             Claude Messages API(SSE)/ 其它(0.7.0+ 内部翻译成 Claude IR)
 ```
 
-四层(Controller / Agent / Model / Tool)通过窄接口解耦,加一个模型或一个工具
-都不穿层。契约细节见 [`docs/DESIGN.md`](docs/DESIGN.md) §5 / §8。
+层间窄接口:Surface 只调 `AIAgent.run`,不知道 Provider;`AIAgent` 只调
+`BaseProvider.generate`,不知道 wire format;非 Claude Provider(0.7.0+)在
+内部翻译,不污染内核。详见 [`docs/DESIGN.md`](docs/DESIGN.md) §5–§7。
 
-## 接真实 Anthropic 模型
+## Claude 形态 IR(三层 1:1)
 
-> **0.3.0 起**模型配置不再走 `~/.chariot/config.toml` 文件,改存 chariot 内置
-> SQLite。所有 model entries 通过 Models 页 / `chariot model` CLI / admin API
-> 增删改查。首次启动会 seed 一条 `mock` entry,开箱可用。
->
-> **0.3.1 起**chariot 是 entry-name 路由网关:client 必须在 `body.model` 写
-> chariot 的 entry name(就是 Models 页给的 `name`),server 按 name dispatch
-> 到对应的 Model 实例;缺失或未知 → `400 unknown_model_name`。
+| Layer | Type | 跟 Claude 关系 |
+|---|---|---|
+| 请求 IR | `ChatRequest`(`@dataclass(frozen=True)`) | 14 字段跟 Claude Messages API request body 1:1 |
+| 流式事件 IR | `ChatEvent`(`@dataclass(frozen=True)`,`kind` literal 10 种) | 8 种 Claude 原生 SSE event(`message_start` / `content_block_*` / `message_*` / `ping` / `error`) + 2 种 chariot 自注(`tool_result` / `stream_done`) |
+| 落库 messages | `messages.content` JSON | 跟 Claude `messages[].content` blocks list 同形 |
 
-默认 seed 一条 `mock` entry。要让 chariot 真打到 Anthropic Messages API,
-**两种方式二选一**:
+`AnthropicProvider` 几乎透传(body 用 `dataclasses.asdict()` 拼);其它非
+Claude Provider 在自身内部翻译,翻译只发生在 Provider 内部,不污染内核 / 不污
+染落库 / 不污染 surface。
+
+## 接真实 Claude 模型
+
+默认 seed 一条 `mock` provider entry。要让 chariot 真打到 Anthropic Messages
+API,**两种方式二选一**:
 
 ### (A) 在 Models 页加(推荐)
 
-```bash
-uv run python -m chariot.server          # 起 server
-bun run --filter=@chariot/app dev         # 或者 Tauri 桌面壳:见上面 Quick start
-```
+打开 Tauri 应用 → Models tab → `[+ Add]` → 表单填:
 
-打开 Models tab → `[+ Add]` → 表单填 :
-- name: `claude`(任意 user-friendly id;client `body.model` 就写这个)
+- name: `claude`(任意 user-friendly id;`chat --provider` 就写这个)
 - type: `anthropic`
 - model: `claude-opus-4-5`(透传给上游 API)
 - api_key: `sk-ant-...`(或留空走 env)
 - api_key_env: `ANTHROPIC_API_KEY`(默认,可省)
 - base_url: 留空默认 `https://api.anthropic.com`
 
-加完去 Chat 页下拉切到 `claude`(localStorage 持久化)→ Send 一条试试。
-失败可在 Models 页对该 entry 点 `[Test]` 跑探针,看到具体错码
-(`upstream_auth_failed` / `upstream_unreachable` / ...)。
-
-行展开后看到两块:
-- `options`:只读展示 model / api_key(脱敏) / base_url;改要点行右上角 [Edit]
-- `params`:KV 编辑器,sampling 默认值(`temperature`、`top_p`、`top_k`、`max_tokens`、
-  `stop_sequences` 等);上方 `presets:` chips 一键加常用字段。值按 JSON 解析
-  (`0.7` → 数字,`true` → 布尔,普通文本免引号留字符串)
-
-Chat 页本身**没有 sampling UI**;发请求时直接从当前 entry 的 `params` 现取,
-改默认就来 Models 页改这一处。
+加完去 Chat 页选这个 provider 发一条试试。失败可在 Models 页对该 entry 点
+`[Test]` 跑探针,看到具体错码(`upstream_auth_failed` / `upstream_unreachable`
+/ ...)。
 
 ### (B) CLI 一条搞定
 
 ```bash
-uv run chariot model add --name claude --type anthropic \
+uv run chariot provider add --name claude --type anthropic \
     -o model=claude-opus-4-5 \
     -o api_key=sk-ant-... \
-    -p temperature=0.5         # params 也可以同时设
+    -p temperature=0.5
 
-uv run chariot model probe claude        # 探针验通断
+uv run chariot provider probe claude        # 探针验通断
 ```
 
 或不传 `api_key`,走 env:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."     # PowerShell:$env:ANTHROPIC_API_KEY="..."
-uv run chariot model add --name claude --type anthropic -o model=claude-opus-4-5
-uv run chariot model probe claude
+export ANTHROPIC_API_KEY="sk-ant-..."
+uv run chariot provider add --name claude --type anthropic -o model=claude-opus-4-5
+uv run chariot provider probe claude
 ```
 
-### 行为细节
+⚠️ **直填 api_key 安全提示**:密钥落地 `~/.chariot/chariot.db`(SQLite 文件)。
+务必把这个目录排除在版本库 / 备份 / 同步之外。
 
-- **client 在 body.model 写 entry name**(`claude` / `mock` / ...);chariot 内部把 body.model 改写成 entry.options.model 再转上游
-- entry 缺失 / 未知 → 400 `unknown_model_name`(0.3.1 起,**无 fallback**;mock 也要显式 `body.model = "mock"`)
-- 上游 401 / 403 → 502 `upstream_auth_failed`(检查 entry 的 api_key);429 透传;5xx → 502
-- 流式:`stream: true` 直接透传上游 SSE 字节,中途断开靠断 TCP 通知客户端
-- ⚠️ **直填 api_key 安全提示**:密钥落地 `~/.chariot/chariot.db`(SQLite 文件)。
-  务必把这个目录排除在版本库 / 备份 / 同步之外
+### Per-call override
 
-## 多轮对话 + 工具调用(0.4.0)
-
-### 多轮对话(`X-Chariot-Conversation` header)
-
-Chat 行为按 client 是否传 `X-Chariot-Conversation` 分流:
-
-| 模式 | header | 行为 |
-|---|---|---|
-| **stateless**(沿用 0.3.x) | 不传 | 单轮,不写 `messages` 表 |
-| **stateful · 既有会话** | 传已存在的 ULID | server 从 DB load 历史 prepend,持久化新轮 |
-| **stateful · 新建** | 传新 ULID | server auto-create + 持久化 |
-
-GUI Chat 页内置侧栏:`+ New` / 选 / rename / delete;首发自动创建 ULID。
-CLI 等价:
+CLI 支持单次调用覆盖 provider 配置,不改 DB:
 
 ```bash
-uv run chariot chat --conversation new  "你好"          # 新建会话
-uv run chariot conversation list                         # 列所有会话
-uv run chariot chat --conversation <ulid>  "继续之前的"  # 接着聊
-uv run chariot conversation show <ulid>                  # 看完整 messages
-uv run chariot conversation rename <ulid> "调试 SQL"      # 改标题
-uv run chariot conversation rm <ulid>                    # 删
+uv run chariot chat --provider claude --model claude-haiku-4-5 "hi"
+uv run chariot chat --provider claude --base-url https://proxy.test/ "hi"
+uv run chariot chat --provider claude --api-key sk-... "hi"
 ```
+
+`--model` 走 per-call wire 覆盖(不重建 Provider);`--base-url` / `--api-key`
+重建 Provider(ClientCache 自动命中或新建 client)。
+
+## 多轮对话 + 工具调用
+
+### 多轮对话(`--convo`)
+
+CLI:
+
+```bash
+uv run chariot chat --convo new "你好"          # 新建会话
+uv run chariot convo list                        # 列所有会话
+uv run chariot chat --convo <ulid> "继续之前的"  # 接着聊
+uv run chariot convo show <ulid>                 # 看完整 messages
+uv run chariot convo rename <ulid> "调试 SQL"     # 改标题
+uv run chariot convo rm <ulid>                   # 删
+```
+
+GUI Chat 页内置侧栏:`+ New` / 选 / rename / delete;首发自动创建 ULID。
 
 ### 工具调用
 
-Server 内置 4 条 fixture(默认全部 disabled,name + type 不可改):
+内置 4 条 fixture(默认全部 disabled,name + type 不可改):
 
 | name | 用途 | 关键 options |
 |---|---|---|
@@ -191,80 +187,56 @@ Server 内置 4 条 fixture(默认全部 disabled,name + type 不可改):
 GUI Tools 页或 CLI 启用:
 
 ```bash
-uv run chariot tool list                                       # 看状态
-uv run chariot tool enable shell_exec                          # 启用
+uv run chariot tool list
+uv run chariot tool enable shell_exec
 uv run chariot tool config http_get -o 'allowed_domains=["api.example.com"]'
 uv run chariot tool disable shell_exec
 ```
 
-Agent 在每轮请求 server 端注入所有 enabled tools 的 schema 到 `body.tools`
-(client 已传则不覆盖)。检测到 `tool_use` block → 执行 → 拼 `tool_result` 回
-LLM,直到收敛。max iterations 由 env `CHARIOT_MAX_TOOL_ITER` 控制(默认 10)。
+`AgentLoop` 在每轮请求注入所有 enabled tools 的 schema,LLM 产 `tool_use`
+block → 执行 → 拼 `tool_result` 回 LLM,直到收敛。max iterations 由 env
+`CHARIOT_MAX_TOOL_ITER` 控制(默认 10)。
 
-⚠️ **shell_exec / http_get 无沙箱**:工具直接以 server 进程身份跑命令 / 发请求。
-本机单用户场景下是可接受的;别把 chariot 暴露到公网或多用户共享环境,也别把
+⚠️ **shell_exec / http_get 无沙箱**:工具以 chariot 进程身份直接跑命令 / 发
+请求。本机单用户场景下可接受;别把 chariot 暴露到公网或多用户共享环境,也别把
 `workdir` 指到敏感目录。
-
-## OpenAI 客户端怎么接
-
-chariot 不内置 OpenAI ↔ Anthropic 协议翻译。如需用 OpenAI 客户端调 chariot,
-推荐架一层成熟的转换代理(把 chariot 当 Anthropic 后端配置即可):
-
-- **[LiteLLM](https://github.com/BerriAI/litellm)** —— 把 chariot 配成 anthropic
-  provider,对外仍暴露 OpenAI 兼容端点
-- **[claude-code-router](https://github.com/musistudio/claude-code-router)** ——
-  专门给 claude code 客户端做 routing 的轻量代理
-- **[oneapi](https://github.com/songquanpeng/one-api)** —— 多 LLM 协议聚合网关
-
-为什么不内置:协议翻译矩阵(schema + SSE × 三协议互译)是块独立工作,这些专门的
-项目做得比 chariot 自己写好。chariot 的差异化在 Agent 层(后续版本的多轮记忆 /
-工具调用 / 进化循环),不在协议适配。
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
-| Backend | Python 3.12+ · FastAPI · SQLAlchemy 2.x async · aiosqlite · Typer |
-| Frontend | React · TypeScript · Vite · Tailwind · shadcn/ui |
+| Core | Python 3.12+ · SQLAlchemy 2.x async · aiosqlite · httpx · Typer · prompt_toolkit |
+| Surface IPC | stdio JSON-RPC(sidecar / 后续 acp / mcp 共享 `chariot/rpc/jsonrpc.py`) |
+| Frontend | React 19 · TypeScript · Vite 6 · Tailwind 4 · shadcn/ui |
 | Desktop shell | Tauri 2.x (Rust) |
 | Package managers | uv (Python) · bun (frontend / Tauri workspace) |
-| Packaging | PyInstaller single exe (as Tauri sidecar) |
+| Packaging | PyInstaller single exe(`chariot-sidecar.exe` as Tauri sidecar) |
 
 ## Docs
 
 | File | Purpose |
 |---|---|
-| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.4.0)— Controller / Agent / Model / Tool 四层 + Conversation / Tool registry |
-| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.4.0:多轮对话记忆 + 工具调用 M.1–M.8) |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | 当前版本架构(0.6.5)— AIAgent 库化 + Claude 形态 IR + 多 surface |
+| [`docs/FEATURE.md`](docs/FEATURE.md) | 当前版本任务清单(0.6.0 主线 + 0.6.5 patch) |
 | [`docs/history/`](docs/history/) | 历史版本 DESIGN / FEATURE 归档(每个发布版本一份冻结快照) |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.5.0+ 方向(自我进化循环 / 多 Agent / 工具调用流式优化) |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 0.7.0+ 方向(OpenAIProvider / Memory / Skills / Gateways / Cron) |
 | [`docs/guides/first-run.md`](docs/guides/first-run.md) | **First-time setup** — tools, deps, sidecar, launch |
 | [`docs/guides/`](docs/guides/) | Developer guides (CLI, DB, Tauri, uv, etc.) |
 | [`CLAUDE.md`](CLAUDE.md) | Claude session conventions (project-level) |
 
 ## Status
 
-**0.4.0 ✅** — Agent 进化第一步:多轮对话记忆 + 工具调用。
-新增三表 `conversations` / `messages` / `tools`(migration v4)、`Tool` ABC +
-`ToolRegistry` + 4 内置工具(`read_file` / `list_dir` / `shell_exec` /
-`http_get`)、Agent 工具循环 + slow path / fast path 分流。Client 通过
-`X-Chariot-Conversation` header 触发 stateful 会话(不传 = 沿用 0.3.x stateless)。
-GUI 加 Tools 页 + Chat 会话侧栏(rename / delete / 自动创建 ULID),按 anthropic
-content blocks 分支渲染 text / tool_use / tool_result。CLI 加 `chariot
-conversation` / `chariot tool` 子命令组,`chariot chat --conversation <id|new>`。
+**0.6.5 ✅** — 架构修正,绝不留技术债:`AIAgent` 撤单例改 `AgentRegistry` per-session
+缓存;`BaseProvider` 不再持 httpx client,`ClientSpec` + `ClientCache` 进程级
+共享;`ChatRequest.model` per-call 字段加回支持 wire override。
 
-**0.3.1 ✅** — 路由模型重构:`active` 概念删除,client 在 `body.model` 写 entry
-name 直接路由。`models` 表加 `params` 列承载 runtime sampling 默认值。
-Chat 页极简化(只剩 entry 选择 + 输入框),sampling 配置归属 Models 页一个入口。
+**0.6.0 ✅** — 架构定位扭转:HTTP server 形态退役,`AIAgent` 库化(可 import
+库);Claude 形态 IR(`ChatRequest` / `ChatEvent` / 落库 messages 三层 1:1);
+CLI 直接 in-process 调内核;Tauri 切到 stdio JSON-RPC sidecar
+(`chariot/sidecar/`);protocol-agnostic 错误体系(`ProviderError` /
+`ConvoLockTimeout` / `ToolExecutionError`);`chariot/rpc/jsonrpc.py` 框架共享
+给后续 acp / mcp surface。
 
-**0.3.0 ✅** — 模型配置全面 DB 化:`~/.chariot/config.toml` 真源被 chariot 内置
-SQLite 替代。Models tab 提供 add / edit / delete / duplicate UI;CLI 同步加
-`chariot model add/edit/rm/duplicate`。
-
-**0.2.6 ✅** — 模型探针(`POST /admin/models/{name}/probe` + Models 页 [Test])
-+ Chat 页高级采样参数 UI。
-
-**0.5.0+** 方向:自我进化循环(读 logs feedback) / 多 Agent 实例 / 工具调用流式
-优化 —— 详见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。新加模型 = 写一个
-`chariot/server/model/<name>.py` + `ModelRegistry.register(...)`;新加工具同构 ——
-`chariot/server/tool/<name>.py` + `ToolRegistry.register(...)`。
+**0.7.0+** 方向:`OpenAIProvider`(协议翻译只在 Provider 内部) / Memory / Skills
+(自演化基础) / Gateways(Telegram + Discord) / Cron 调度 / 多 AIAgent 实例 /
+LocalLlamaProvider —— 详见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。

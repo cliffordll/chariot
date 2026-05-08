@@ -43,7 +43,7 @@
 
 ## 0.6.0 patch 列表
 
-### S.1 ⏳ 核心类型铺底:`ChatRequest` / `ChatEvent` / 异常
+### S.1 ✅ 核心类型铺底:`ChatRequest` / `ChatEvent` / 异常
 
 **目标**:落地 Claude 形态的协议无关 IO 类型(跟 Claude Messages API 1:1)。
 纯新增,不动现有代码。
@@ -111,7 +111,7 @@
   - kind literal 名跟 Claude SSE 不一致(`turn_start` / `text` / `tool_use_*`
     等旧名残留)
 
-### S.2 ⏳ Provider 抽象 + MockProvider
+### S.2 ✅ Provider 抽象 + MockProvider
 
 **目标**:`BaseProvider` ABC 落地 + 第一个实现(协议无关 mock)。
 
@@ -159,7 +159,7 @@
     Claude SSE 命名)
   - MockProvider 产了 `stream_done`(那是 AgentLoop 职责)
 
-### S.3 ⏳ AnthropicProvider 重写 + SSE 共享
+### S.3 ✅ AnthropicProvider 重写 + SSE 共享
 
 **目标**:从 `server/model/anthropic.py`(透传字节)重构成
 `providers/builtin/anthropic.py`(SSE 解析后 yield Claude 形态 ChatEvent),
@@ -224,7 +224,7 @@
   - error event 用了 `code=` / `message=` 字段(应该是 `error_type=` /
     `error_message=`)
 
-### S.4 ⏳ Tool / Repo / Database 迁到新结构
+### S.4 ✅ Tool / Repo / Database 迁到新结构
 
 **目标**:把跟 fastapi 无关的核心层从 `chariot/server/` 物理搬到顶层平铺
 位置。搬完后**现有 server 仍能跑**(过渡共存),为后面撤 server 铺路。
@@ -273,7 +273,7 @@
   - server 启动时报 `ModuleNotFoundError`
   - `Tool` 类名残留(应该全部改成 `BaseTool`)
 
-### S.5 ⏳ 双层锁(进程内 + 跨进程 SQLite advisory)
+### S.5 ✅ 双层锁(进程内 + 跨进程 SQLite advisory)
 
 **目标**:为库化模式下"多进程并发同 convo_id"加 SQLite 层保护。
 
@@ -312,7 +312,7 @@
   - `with_advisory_lock` 内吞了 `OperationalError` 没区分 timeout vs 别的 DB 错
   - error event 用了 `code=` 字段(应该 `error_type=`)
 
-### S.6 ⏳ AIAgent + AgentLoop(协议无关重写)
+### S.6 ✅ AIAgent + AgentLoop(协议无关重写)
 
 **目标**:`chariot/agent/run.py` + `chariot/agent/loop.py` 落地。
 **先共存,不撤旧 `server/agent.py`** —— 让 server 仍能 import 旧 Agent 跑(过渡)。
@@ -381,7 +381,7 @@
   - error event 用了 `code=` / 旧 error_type 字符串(`tool_iter_exceeded` 等
     旧名)
 
-### S.7 ⏳ CLI 切到直接 import core(撤 sdk/ + cli/core/ + daemon 命令)
+### S.7 ✅ CLI 切到直接 import core(撤 sdk/ + cli/core/ + daemon 命令)
 
 **目标**:CLI 不再走 HTTP `/v1/messages`,直接进程内构造 AIAgent;撤 SDK 整目录;
 撤 `cli/core/` 子目录(平铺到 `cli/`);撤 daemon 时代命令。
@@ -442,7 +442,7 @@
   - `chariot status` 仍显示 "daemon pid" / "endpoint" 等老字段
   - Renderer 用旧 ChatEvent 命名(`text` / `tool_use_done` 等)
 
-### S.7.1 ⏳ 默认 provider 机制 + AnthropicProvider body.model 改写
+### S.7.1 ✅ 默认 provider 机制 + AnthropicProvider body.model 改写
 
 **目标**:让 `chariot chat` 不带 flag 也能跑(走 DB 默认 provider);顺手修
 `AnthropicProvider` 漏改 `body.model` 的 bug(0.6.0 重写时丢的 0.5.0 行为)。
@@ -515,7 +515,7 @@ S.7 砍了 `--model "claude-haiku-4-5"` hardcoded 默认,但没提供替代,导�
   - REPL `/provider <name>` 误改 DB(应只改本地)
   - status 还引用 `DEFAULT_MODEL` 常量
 
-### S.7.2 ⏳ ChatRequest.model → provider_name(IR 字段命名跟 wire 解耦)
+### S.7.2 ✅ ChatRequest.model → provider_name(IR 字段命名跟 wire 解耦)
 
 **目标**:把 `ChatRequest.model` 重命名为 `provider_name`,跟 v6 rename 系列
 (model→provider 在 DB / Repo / CLI 层)在 IR 层收尾。同时把 wire 字段名 `model`
@@ -574,7 +574,7 @@ S.7 砍了 `--model "claude-haiku-4-5"` hardcoded 默认,但没提供替代,导�
   - `ChatRequest(model=` 还在(应该全部 `ChatRequest(provider_name=`)
   - error_type 仍叫 `unknown_model`
 
-### S.7.3 ⏳ CLI per-call override:`--model` / `--base-url` / `--api-key`
+### S.7.3 ✅ CLI per-call override:`--model` / `--base-url` / `--api-key`
 
 **目标**:`chariot chat` 和 `chariot provider probe` 加三个 per-call CLI flag,
 让用户不动 DB entry 就能临时换 LLM model id / 上游 URL / API key。常见场景:
@@ -721,7 +721,7 @@ base_url / api_key inline"实现最高优先级。
   `per_call_model_none_falls_back_to_config`(`tests/providers/builtin/test_anthropic.py`)
 - 全套测试 508 全绿(原 506 + 2 新 case)
 
-### S.5 ⏳ 文档全套(DESIGN §5 重写 + 0.6.5 主题段 + 版本号 bump)
+### S.5 ✅ 文档全套(DESIGN §5 重写 + 0.6.5 主题段 + 版本号 bump)
 
 - `docs/DESIGN.md`:
   - 顶部 banner 加 0.6.5 主题段(增量 vs 0.6.0)
@@ -750,7 +750,7 @@ base_url / api_key inline"实现最高优先级。
   - FEATURE.md 没立 0.6.5 段
   - 版本号没 bump
 
-### S.8 ⏳ rpc/jsonrpc.py + sidecar 新建(stdio JSON-RPC)
+### S.8 ✅ rpc/jsonrpc.py + sidecar 新建(stdio JSON-RPC)
 
 **目标**:JSON-RPC 框架放 `chariot/rpc/`(给后续 sidecar / acp / mcp 共享);
 Tauri 用的 sidecar 进程落地。
@@ -811,7 +811,7 @@ Tauri 用的 sidecar 进程落地。
   - chat_event payload 用了 chariot 旧命名(`turn_start` / `text` 等),应是
     Claude 形态
 
-### S.9 ⏳ Tauri Rust 切到 stdio JSON-RPC
+### S.9 ✅ Tauri Rust 切到 stdio JSON-RPC
 
 **目标**:Tauri 后端进程从"启 server.exe + httpx 调 HTTP"改为"spawn
 chariot-sidecar.exe + bidirectional stdio"。
@@ -855,7 +855,7 @@ chariot-sidecar.exe + bidirectional stdio"。
   - RPC pending 永远 unresolved(reader 没接对 id)
   - app 关 sidecar 不退出(残留 zombie 进程,Task Manager 看到 chariot-sidecar.exe)
 
-### S.10 ⏳ Tauri 前端切到 invoke / event listen
+### S.10 ✅ Tauri 前端切到 invoke / event listen
 
 **目标**:`packages/app/` 数据访问层全部从 `fetch("/admin/...")` + SSE 切到
 Tauri `invoke()` + `event.listen()`,且消费 Claude 形态 ChatEvent。
@@ -903,7 +903,7 @@ Tauri `invoke()` + `event.listen()`,且消费 Claude 形态 ChatEvent。
   - 前端 dispatch 用了 chariot 旧命名(`text` / `tool_use_done` 等),应是
     Claude 形态
 
-### S.11 ⏳ 撤 `chariot/server/` 整目录 + fastapi 依赖
+### S.11 ✅ 撤 `chariot/server/` 整目录 + fastapi 依赖
 
 **目标**:所有 surface 切完后,撤掉 server 老代码 + fastapi / uvicorn 依赖。
 
@@ -939,7 +939,7 @@ Tauri `invoke()` + `event.listen()`,且消费 Claude 形态 ChatEvent。
   - pyright 报漏 import / `pyproject.toml` 还引用 fastapi
   - `uv.lock` 里仍含 fastapi / uvicorn
 
-### S.12 ⏳ docs / README / CLAUDE.md 收尾 + 版本号
+### S.12 ✅ docs / README / CLAUDE.md 收尾 + 版本号
 
 **目标**:文档 / 入口说明 / 协作约定全面对齐 0.6.0。
 

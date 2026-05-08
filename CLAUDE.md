@@ -91,7 +91,7 @@
   - 太长难读:`anthropic_provider_with_streaming_tool_loop.py` / `class ConvoLockManagerForCrossProcessAdvisoryLock`(把上下文已知的修饰塞进名字)
   - 中庸目标:**"足够说清楚 + 上下文已知就省略"**。已经在 `chariot/providers/builtin/` 下,文件叫 `anthropic.py` 即可,不需要 `anthropic_provider.py`;在 `chariot/agent/` 下,文件叫 `run.py` / `loop.py` 即可,不需要 `run_agent.py` / `agent_loop.py`(目录已表达)
   - **关键名字规则**:核心类 = `AIAgent`(不是 `Agent` —— 项目里要明显区分"AI 主体"与一般意义上的"代理 / 客户端");agent 主循环类 = `AgentLoop`;放 `chariot/agent/run.py` + `loop.py`(目录已说 agent,文件名不重复);`ProviderRegistry` / `ToolRegistry` / `ConvoRepo` / `ConvoLockManager` 等领域内已具体,不再加修饰
-- **抽象基类用 `Base*` 前缀**:`BaseProvider` / `BaseTool` / `BaseSkill` / `BaseGateway` / `BaseProviderConfig`。理由:跟 Python 主流惯例对齐(pydantic `BaseModel` / FastAPI `BaseHTTPMiddleware` / Django `BaseSettings`),零学习成本。具体子类不带前缀(`AnthropicProvider` / `ReadFileTool` / `TelegramGateway` 等)。文件名沿用 `base.py` 惯例(`xxx/base.py` 装该层的 base class)。**不用 `Abs*` / `ABC*`**(歧义大,前者像"absolute"后者像 Python `abc` 模块名)
+- **抽象基类用 `Base*` 前缀**:`BaseProvider` / `BaseTool` / `BaseSkill` / `BaseGateway` / `BaseProviderConfig`。理由:跟 Python 主流惯例对齐(pydantic `BaseModel` / SQLAlchemy `DeclarativeBase` / Django `BaseSettings`),零学习成本。具体子类不带前缀(`AnthropicProvider` / `ReadFileTool` / `TelegramGateway` 等)。文件名沿用 `base.py` 惯例(`xxx/base.py` 装该层的 base class)。**不用 `Abs*` / `ABC*`**(歧义大,前者像"absolute"后者像 Python `abc` 模块名)
 - **复数 / 单数规则**:
   - **装多个同类实例的目录用复数**:`tools/` `providers/` `repos/` `gateways/` `commands/`
   - **单一概念 / 一个 surface 用单数**:`agent/` `cli/` `sidecar/` `database/` `acp/` `mcp/`(`acp` `mcp` 是单一协议实现,不复数)
@@ -113,9 +113,8 @@
 ## 技术栈(已决策)
 
 - **语言**:Python 3.12+,单包布局(参见 `docs/DESIGN.md` §11)
-- **内核库**(0.6.0+ 库化):SQLAlchemy 2.x async · aiosqlite · httpx · typer · prompt_toolkit
-- **Surface 通信**:stdio JSON-RPC 框架共享(`chariot/rpc/jsonrpc.py`)给 sidecar / acp / mcp;CLI 内进程直调,无 IPC;Gateways(0.8.0+)走各平台 Bot SDK
-- **撤掉**(0.6.0 S.11 之后):FastAPI / uvicorn(0.5.0 server 退役)
+- **内核库**:SQLAlchemy 2.x async · aiosqlite · httpx · typer · prompt_toolkit
+- **Surface 通信**:stdio JSON-RPC 框架共享(`chariot/rpc/jsonrpc.py`)给 sidecar / 后续 acp / mcp;CLI 内进程直调,无 IPC;Gateways(0.8.0+)走各平台 Bot SDK
 - **前端**:React · TypeScript · Vite · Tailwind · shadcn/ui
 - **桌面**:Tauri 2.x(Rust);Tauri ↔ Python sidecar 走 stdio JSON-RPC
 - **包管理**:uv(Python) · bun(前端 / Tauri workspace)
@@ -128,22 +127,19 @@
 - **开发机**:Windows 11 Pro
 - **Shell**:bash(git bash),**不要用 PowerShell 特有语法**
 - **路径**:脚本里用 Unix 风格(`/`),避免 `\`
-- **可执行 sentinel**:Windows 下调试,直接 `python -m chariot.cli` / `python -m chariot.sidecar`(0.6.0 起)/ `python -m chariot.server`(过渡期 S.10 之前)/ `python -m chariot.gateways`(0.8.0+)不依赖 exe;打包验证到 S.9 再做
+- **可执行 sentinel**:Windows 下调试,直接 `python -m chariot.cli` / `python -m chariot.sidecar` / `python -m chariot.gateways`(0.8.0+)不依赖 exe;Tauri 打包验证走 `scripts/build.py --target sidecar`
 - **commit 前静态检查**:`uv run ruff check .` + `uv run ruff format --check .` + `uv run pyright chariot/` + `uv run pytest -q`(CI `ci.yml` 跑这全套,本地漏一步就红 CI)
 
 ## 已知敏感点
 
-实现时别绕开的关键细节。**按版本分两类**:0.6.0+ 是新基线,过渡期 0.5.0 项
-S.1 ~ S.10 仍生效,S.11 撤 server/ 后失效。
-
-### 0.6.0+(库化后,主基线)
+实现时别绕开的关键细节。
 
 - **Claude 形态 IR(三层 1:1)**:`ChatRequest` / `ChatEvent` / `messages.content`
   跟 Claude Messages API 1:1 对齐(详 DESIGN §3.1 / §3.2 / §7.1)。
   `AnthropicProvider` 几乎透传;`OpenAIProvider`(0.7.0+)/ 其它非 Claude
   Provider 内部翻译。**翻译只在非 Claude Provider 内部发生**,不污染内核 /
   不污染落库 / 不污染 surface
-- **流式输出契约**(0.1.0 沿用,0.6.0 转 ChatEvent 表达,详 DESIGN §6.4.2):
+- **流式输出契约**(详 DESIGN §6.4.2):
   - Provider **200 前**抛 `ProviderError(code, ...)` → AIAgent 捕获后转
     `ChatEvent(kind="error", error_type=..., error_message=...)` yield
   - Provider **200 后**的错 → 直接 yield
@@ -160,23 +156,21 @@ S.1 ~ S.10 仍生效,S.11 撤 server/ 后失效。
     `ConvoRepo`)
   - `AgentLoop` 内部跑工具循环 + 注入 `tool_result` events,不暴露 SSE / JSON-RPC
   - 新 Provider 实现(`OpenAIProvider` / `LocalLlamaProvider`)遵守这三条
+- **`BaseProvider` 不持 httpx client**(0.6.5 修正):每个 Provider 实例只持
+  `_options` + 派生的 `ClientSpec`;httpx client 由 `ClientCache` 进程级 LRU
+  共享(asyncio.Lock 并发安全)。per-call `--base-url` / `--api-key` 走
+  "重建 Provider 实例 + ClientSpec 自动命中或新建 client" 路径
+- **AIAgent 撤单例**(0.6.5 修正):`AgentRegistry` per-session 缓存(LRU 32),
+  多 surface / 多租户场景共享同进程 engine + 连接池。`AIAgent.bootstrap` 装载时
+  一次性把 `provider_overrides[name]` merge 进 `entry.options`(避免运行时改
+  Provider 实例字段)
 - **双层锁(进程内 + 跨进程)**(详 DESIGN §7.2):
   - 进程内 `ConvoLockManager`(asyncio.Lock 字典)— 同进程内同 convo_id 串行
   - 跨进程 SQLite `BEGIN IMMEDIATE` 短事务 — 多进程同 convo_id 串行写
   - `lock_manager.acquire(convo_id, db_session=...)` 同时拿两层
-- **`logs.created_at` 索引 + `PRAGMA user_version` 迁移机制**(0.4.0 沿用)
-
-### 0.5.0 过渡期(S.1 ~ S.10 仍生效;S.11 撤 server/ 后失效)
-
-动 `chariot/server/runtime/` / `chariot/server/agent.py` 等老代码时仍遵守:
-
-- **`endpoint.json` spawn 并发保护**:`spawn.lock` 独占创建 + `.tmp` →
-  `rename` 原子写入(`server/runtime/endpoint.py`)
-- **watcher 优雅关闭**:5 步流程,不硬杀(`server/runtime/watcher.py`)
-- **旧 Agent / Model 分层契约**:Model 无状态、不记 log、不碰 DB(由
-  `BaseProvider` 在 0.6.0 接管)
-- **流式错误传播**:200 已发后靠断 TCP,不伪造事件(0.6.0 升级为 yield
-  `ChatEvent(kind="error")`,精神不变)
+  - 超时统一 `ConvoLockTimeout(layer="local"|"db")`,surface 转
+    `ChatEvent(kind="error", error_type="convo_busy_*")`
+- **`logs.created_at` 索引 + `PRAGMA user_version` 迁移机制**
 
 ---
 
