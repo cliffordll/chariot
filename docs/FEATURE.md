@@ -763,25 +763,25 @@ Tauri 用的 sidecar 进程落地。
     notify `{"method":..., "params":...}`(无 id,server 主推)
   - 错误码常量(-32700 ParseError / -32601 MethodNotFound 等)
   - dispatch 接口:`server.method("name")(handler)` 装饰器风格
-- 新建 `chariot/sidecar/__init__.py`
-- 新建 `chariot/sidecar/__main__.py`:entry,`asyncio.run(main())`,起 stdio
-  JSON-RPC 主循环(import `chariot.rpc.jsonrpc.JsonRpcServer`)
-- 新建 `chariot/sidecar/methods.py`:业务方法 dispatch
-  - `chat(req: ChatRequest)` —— 启 `AIAgent.run(req)`,每个 ChatEvent 通过
-    `notify("chat_event", dataclasses.asdict(event))` 推回;最后
-    `return {stream_id, ended_at}`
-  - `list_conversations()` / `get_conversation(id)` / `rename_conversation(id, title)`
-    / `delete_conversation(id)`
-  - `list_tools()` / `enable_tool(name)` / `disable_tool(name)` /
-    `config_tool(name, options)`
-  - `list_models()` / `add_model(...)` / `edit_model(...)` / `delete_model(...)` /
-    `probe_model(name)`
-  - `list_logs(filters)`
+- 新建 `chariot/sidecar/__init__.py`(包文档导览)
+- 新建 `chariot/sidecar/__main__.py`:entry,`asyncio.run(serve_stdio())`,起 stdio
+  JSON-RPC 主循环(import `chariot.rpc.jsonrpc.JsonRpcServer`)+ `StdioBridge`
+  类(线程读 stdin / sync 写 stdout,绕开 Windows ProactorEventLoop 对 pipe 的
+  IOCP 限制)
+- 新建 `chariot/sidecar/methods/`(子包):
+  - `__init__.py`:`SidecarAgent` Protocol + `MethodBase` 共享基 + `register_methods`
+  - `chat.py`:`ChatMethod`(`AIAgent.run` + 流式 notify)+ `_RequestDecoder`
+    (params dict → ChatRequest)
+  - `convo.py`:`ConvoMethods` —— `list_convos` / `get_convo` / `rename_convo` / `delete_convo`
+  - `tool.py`:`ToolMethods` —— `list_tools` / `enable_tool` / `disable_tool` / `config_tool`
+  - `provider.py`:`ProviderMethods` —— `list_providers` / `add_provider` /
+    `edit_provider` / `delete_provider` / `probe_provider`
+  - `log.py`:`LogMethods` —— `list_logs`
 
 **验收**:
 
-- **单测**(`tests/rpc/test_jsonrpc.py` / `tests/sidecar/test_methods.py` /
-  `tests/sidecar/test_chat_method.py`):
+- **单测**(`tests/rpc/test_jsonrpc.py` / `tests/sidecar/test_chat_method.py` /
+  `tests/sidecar/test_admin_methods.py`):
   - 喂 `b'{"id":1,...}\n{"id":2,...}\n'` → 解出 2 帧
   - 半帧拼接:`b'{"id":1'` 后 `b':1}\n'` → 解出 1 完整帧
   - 错误帧 `b'not json\n'` → server 回 `{"id":null, "error":{"code":-32700, ...}}`
@@ -793,12 +793,15 @@ Tauri 用的 sidecar 进程落地。
     (`kind` 是 `message_start` / `content_block_*` 等)+ 1 个
     `response(id=1, result={stream_id, ended_at})`
 - **静态**:三件套全绿
-- **手测**:
-  - `echo '{"id":1,"method":"list_conversations","params":{}}' | uv run python -m chariot.sidecar`
-    → stdout 第一行 `{"id":1,"result":[...]}`(JSON 单行,以 `\n` 结尾)
-  - `echo '{"id":1,"method":"chat","params":{"model":"mock","messages":[{"role":"user","content":"hi"}]}}' | uv run python -m chariot.sidecar`
-    → stdout 多个 `{"method":"chat_event",...}` 行(payload kind 是 Claude 形态)
-    + 末尾 `{"id":1,"result":{"stream_id":"...","ended_at":...}}`
+- **手测**(注:0.6.0 起 method 名是 `list_convos` 等单数 + `provider_name` 字段;
+  2>$null 把 stderr log 屏蔽掉只看 stdout RPC 帧):
+  - `echo '{"id":1,"method":"list_convos","params":{}}' | uv run python -m chariot.sidecar 2>$null`
+    → stdout 第一行 `{"jsonrpc":"2.0","id":1,"result":{"convos":[...]}}`
+  - `echo '{"id":1,"method":"chat","params":{"provider_name":"mock","messages":[{"role":"user","content":"hi"}]}}' | uv run python -m chariot.sidecar 2>$null`
+    → stdout 多个 `{"method":"chat_event",...}` 行(payload kind 是 Claude 形态:
+    `message_start` / `content_block_start` / `content_block_delta` × N /
+    `content_block_stop` / `message_delta` / `message_stop` / `stream_done`)
+    + 末尾 `{"jsonrpc":"2.0","id":1,"result":{"stream_id":"...","ended_at":...}}`
 - **回归**:server 仍能跑(过渡期);`pytest -q` 全套绿
 - **不通过特征**:
   - stdin EOF 后 sidecar 不退出(应自然 graceful exit)
