@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from chariot.agent.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ProviderEntry
 from chariot.server.model.base import Model
 
 # 每个 builder 是一个 callable:options dict → Model 实例
@@ -67,7 +67,7 @@ class ModelRegistry:
     # ---- 构造 ----
 
     @classmethod
-    def build(cls, entry: ModelEntry) -> Model:
+    def build(cls, entry: ProviderEntry) -> Model:
         """按 `entry.type` 派发到对应 `from_config(entry.options)`。
 
         type 未注册 → `ConfigError`(不是 HTTP 错误,startup 期 raise)。

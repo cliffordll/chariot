@@ -1,16 +1,22 @@
-"""`chariot stats` — 用量汇总(默认 today,UTC 窗口)。"""
+"""`chariot stats` — 用量汇总(默认 today,UTC 窗口)。
+
+0.6.0 库化版:撤旧 ProxyClient + 旧 server controller 业务,直接走 LogRepo
+聚合。
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, get_args
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal, get_args
 
 import typer
 
-from chariot.cli.core.render import Renderer
-from chariot.sdk.client import ProxyClient
-from chariot.server.controller.stats import Period
+from chariot.cli._runtime import installed_runtime
+from chariot.cli.render import Renderer
+from chariot.repos.log_repo import LogRepo
 
+Period = Literal["today", "week", "month"]
 _ALLOWED = get_args(Period)
 
 
@@ -24,21 +30,29 @@ def stats_cmd(
 
 
 async def _run(period: Period) -> None:
-    try:
-        async with ProxyClient.discover_session(spawn_if_missing=False) as client:
-            s = await client.stats(period=period)
-    except RuntimeError as e:
-        Renderer.die(f"server 未就绪: {e}")
-        return
+    since = _window_start(period)
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        total, ok_count, avg_latency = await LogRepo(session).aggregate_stats(since=since)
+    success_rate = (ok_count / total) if total > 0 else 0.0
     Renderer.kv(
         {
-            "period": s.period,
-            "since": s.since.isoformat(timespec="seconds"),
-            "total_requests": s.total_requests,
-            "success_rate": f"{s.success_rate * 100:.1f}%",
-            "avg_latency_ms": f"{s.avg_latency_ms:.0f}",
+            "period": period,
+            "since": since.isoformat(timespec="seconds"),
+            "total_requests": total,
+            "success_rate": f"{success_rate * 100:.1f}%",
+            "avg_latency_ms": f"{avg_latency:.0f}",
         }
     )
+
+
+def _window_start(period: Period) -> datetime:
+    """各 period 的窗口起点(UTC):today=今 0 点 / week=过去 7 天 / month=过去 30 天。"""
+    now = datetime.now(UTC)
+    if period == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "week":
+        return now - timedelta(days=7)
+    return now - timedelta(days=30)
 
 
 def register(app: typer.Typer) -> None:

@@ -88,9 +88,9 @@
 - **识别 vs 自然语言**:批量重命名标识符时,不动中文散文里的自然描述(例:schema 里 `request_logs` → `logs`,但文档里"请求日志"这类描述词不改)
 - **命名规范 —— 清晰明了,不太短不太长**:目录 / 文件名 / 类名 / 函数名都按这条判;两端都规避:
   - 太短无信息:`a.py` / `Foo.py` / `class M:` / `def do(...)`(单字母 / 通用名 / 无领域信息)
-  - 太长难读:`anthropic_provider_with_streaming_tool_loop.py` / `class ConversationLockManagerForCrossProcessAdvisoryLock`(把上下文已知的修饰塞进名字)
+  - 太长难读:`anthropic_provider_with_streaming_tool_loop.py` / `class ConvoLockManagerForCrossProcessAdvisoryLock`(把上下文已知的修饰塞进名字)
   - 中庸目标:**"足够说清楚 + 上下文已知就省略"**。已经在 `chariot/providers/builtin/` 下,文件叫 `anthropic.py` 即可,不需要 `anthropic_provider.py`;在 `chariot/agent/` 下,文件叫 `run.py` / `loop.py` 即可,不需要 `run_agent.py` / `agent_loop.py`(目录已表达)
-  - **关键名字规则**:核心类 = `AIAgent`(不是 `Agent` —— 项目里要明显区分"AI 主体"与一般意义上的"代理 / 客户端");agent 主循环类 = `AgentLoop`;放 `chariot/agent/run.py` + `loop.py`(目录已说 agent,文件名不重复);`ProviderRegistry` / `ToolRegistry` / `ConversationRepo` / `ConversationLockManager` 等领域内已具体,不再加修饰
+  - **关键名字规则**:核心类 = `AIAgent`(不是 `Agent` —— 项目里要明显区分"AI 主体"与一般意义上的"代理 / 客户端");agent 主循环类 = `AgentLoop`;放 `chariot/agent/run.py` + `loop.py`(目录已说 agent,文件名不重复);`ProviderRegistry` / `ToolRegistry` / `ConvoRepo` / `ConvoLockManager` 等领域内已具体,不再加修饰
 - **抽象基类用 `Base*` 前缀**:`BaseProvider` / `BaseTool` / `BaseSkill` / `BaseGateway` / `BaseProviderConfig`。理由:跟 Python 主流惯例对齐(pydantic `BaseModel` / FastAPI `BaseHTTPMiddleware` / Django `BaseSettings`),零学习成本。具体子类不带前缀(`AnthropicProvider` / `ReadFileTool` / `TelegramGateway` 等)。文件名沿用 `base.py` 惯例(`xxx/base.py` 装该层的 base class)。**不用 `Abs*` / `ABC*`**(歧义大,前者像"absolute"后者像 Python `abc` 模块名)
 - **复数 / 单数规则**:
   - **装多个同类实例的目录用复数**:`tools/` `providers/` `repos/` `gateways/` `commands/`
@@ -157,13 +157,13 @@ S.1 ~ S.10 仍生效,S.11 撤 server/ 后失效。
 - **AIAgent / Provider 分层契约**:
   - `BaseProvider` 子类:**无状态、不记 log、不碰 DB**——纯输入输出
   - `AIAgent` 是**唯一日志写入者**(通过 `LogWriter`)和持久化方(通过
-    `ConversationRepo`)
+    `ConvoRepo`)
   - `AgentLoop` 内部跑工具循环 + 注入 `tool_result` events,不暴露 SSE / JSON-RPC
   - 新 Provider 实现(`OpenAIProvider` / `LocalLlamaProvider`)遵守这三条
 - **双层锁(进程内 + 跨进程)**(详 DESIGN §7.2):
-  - 进程内 `ConversationLockManager`(asyncio.Lock 字典)— 同进程内同 conv_id 串行
-  - 跨进程 SQLite `BEGIN IMMEDIATE` 短事务 — 多进程同 conv_id 串行写
-  - `lock_manager.acquire(conv_id, db_session=...)` 同时拿两层
+  - 进程内 `ConvoLockManager`(asyncio.Lock 字典)— 同进程内同 convo_id 串行
+  - 跨进程 SQLite `BEGIN IMMEDIATE` 短事务 — 多进程同 convo_id 串行写
+  - `lock_manager.acquire(convo_id, db_session=...)` 同时拿两层
 - **`logs.created_at` 索引 + `PRAGMA user_version` 迁移机制**(0.4.0 沿用)
 
 ### 0.5.0 过渡期(S.1 ~ S.10 仍生效;S.11 撤 server/ 后失效)

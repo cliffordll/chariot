@@ -1,4 +1,4 @@
-"""CLI 渲染工具:表格 / 状态行 / 错误气泡 / 流式 token。
+"""CLI 渲染工具:表格 / 状态行 / 错误气泡 / 流式 token / ChatEvent dispatch。
 
 `Renderer` 是名空间类(不实例化),所有方法 classmethod。
 
@@ -6,30 +6,31 @@
 ----
 - 成功信息:默认颜色(不染色),简洁一行 · stdout · 受 `QUIET` 影响
 - 错误 / 失败:stderr 输出,红色 · **不受 `QUIET` 影响**(错误必须可见)
-- 表格:rich.Table,边框用默认,标题灰度 · stdout · 受 `QUIET` 影响
+- 表格:rich.Table,边框默认,标题灰度 · stdout · 受 `QUIET` 影响
 - `--quiet` / `-q` 全局 flag 在 `cli/__main__.py` 的根 callback 里切 `Renderer.QUIET`
 
-流式 markdown(0.5.1)
----------------------
-assistant 文本走 `rich.live.Live` + `rich.markdown.Markdown`:每个 text 增量 append
-进 buffer 后用 Markdown(buffer) 重渲染 Live 区。tool_use / tool_result / turn_complete
-/ meta_line 触发时 `_close_live` 把 Live 收尾(把当前 markdown 定格写进 scrollback,
-后续 print 在它下面继续)。
+ChatEvent dispatch(0.6.0)
+--------------------------
+`render_event(ev)` 消费 Claude 形态 `ChatEvent`,分派到各 sink:
 
-收益:
-- code fence(``` 包起的代码段)→ rich 自带语法高亮(theme=ansi_dark)
-- inline `code` → 等宽 dim 框
-- 列表 / 标题 / 表格 → rich Markdown 标准排版
-- 流式体验保留:Live 在 ~24 fps 下重渲染,用户看到文本逐 token 出现
+- `content_block_delta` + `text_delta` → `stream_token(text)`(累进 Live)
+- `content_block_start` + `tool_use` → 记 buffer(name + 空 input_json)
+- `content_block_delta` + `input_json_delta` → buffer 拼 partial_json
+- `content_block_stop`(对应 tool_use)→ 拼装完整 input,打 `tool_use_line`
+- `tool_result` → `tool_result_line`(content 抽文本 + is_error)
+- `message_stop` / `stream_done` / `error` → `_close_live`(把 markdown 定格)
+- 其它(`message_start` / `message_delta` / `ping`)→ 静默
 
-不流式高亮代码(中途已展示的部分,fence 未闭合时)→ rich Markdown 把未闭合 fence
-当成普通文本展示,fence 闭合的瞬间整段切到代码块视图。视觉上有"突然变样",但
-比看裸 ``` 标记好。
+流式 markdown(0.5.1+ 沿用)
+---------------------------
+assistant 文本走 `rich.live.Live` + `rich.markdown.Markdown`:每个 text 增量
+append 进 buffer 后用 Markdown(buffer) 重渲染 Live 区。tool_use_line /
+tool_result_line / meta_line 触发时 `_close_live` 把 Live 收尾(把当前 markdown
+定格写进 scrollback,后续 print 在它下面继续)。
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -40,7 +41,7 @@ from rich.markdown import Markdown
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from chariot.sdk.streams import StreamEvent
+    from chariot.agent.chat_event import ChatEvent
 
 
 class Renderer:
@@ -54,11 +55,15 @@ class Renderer:
     QUIET: ClassVar[bool] = False
 
     # 流式 markdown 状态:assistant text 累积进 _live_buffer,Live 实时重渲染
-    # Markdown(buffer)。tool_use / tool_result / turn_complete / meta_line 前
-    # `_close_live` 把当前 Live 区收尾(rich Live 的 stop() 会把最后一帧定格写进
-    # scrollback,后续 print 干净接续)。
+    # Markdown(buffer)。tool_use_line / tool_result_line / meta_line 前 `_close_live`
+    # 把当前 Live 区收尾(rich Live.stop() 把最后一帧定格写进 scrollback,后续
+    # print 干净接续)。
     _live: ClassVar[Live | None] = None
     _live_buffer: ClassVar[str] = ""
+
+    # tool_use 内容块缓冲:content_block_start(tool_use) 起,input_json_delta 拼,
+    # content_block_stop 时一次性打 tool_use_line。key = block index。
+    _tool_use_buffer: ClassVar[dict[int, dict[str, str]]] = {}
 
     # ---------- stdout(受 QUIET 影响)----------
 
@@ -144,28 +149,80 @@ class Renderer:
         cls._stdout.print(f"[dim]→ {name}({input_repr})[/dim]", highlight=False)
 
     @classmethod
-    def render_event(cls, ev: StreamEvent) -> None:
-        """`ChatStream.events()` 吐的 typed event → 屏幕输出。
+    def render_event(cls, ev: ChatEvent) -> None:
+        """`AIAgent.run` 吐的 ChatEvent → 屏幕输出。
 
-        REPL / once / batch 共用同一份 dispatch 逻辑(实例化各自的 ChatContext
-        都把这个静态方法当 on_event 回调传给 `run_turn`)。
-
-        - text → stream_token(累积进 Live + Markdown 实时重渲染)
-        - tool_use → tool_use_line(name + JSON 化的 input)
-        - tool_result → tool_result_line(content + is_error)
-        - turn_complete:assistant 轮收尾时 `_close_live` 把当前 markdown 定格,
-          下一轮(若有)从空 buffer 起;其它 role 静默
-        - stream_done:`_close_live` 兜底收尾;meta 行另外打
+        REPL / once / batch 共用同一份 dispatch 逻辑(都把这个静态方法当 on_event
+        回调传给 `ChatContext.run_turn`)。dispatch 规则见模块 docstring。
         """
-        if ev.kind == "text":
-            cls.stream_token(ev.text)
-        elif ev.kind == "tool_use":
-            input_repr = json.dumps(ev.tool_input or {}, ensure_ascii=False)
-            cls.tool_use_line(ev.tool_name, input_repr)
-        elif ev.kind == "tool_result":
-            cls.tool_result_line(ev.tool_result_content, is_error=ev.is_error)
-        elif ev.kind == "stream_done" or (ev.kind == "turn_complete" and ev.role == "assistant"):
-            cls._close_live()
+        match ev.kind:
+            case "content_block_start":
+                cls._on_content_block_start(ev)
+            case "content_block_delta":
+                cls._on_content_block_delta(ev)
+            case "content_block_stop":
+                cls._on_content_block_stop(ev)
+            case "tool_result":
+                cls._on_tool_result(ev)
+            case "message_stop" | "stream_done" | "error":
+                cls._close_live()
+            case "message_start" | "message_delta" | "ping":
+                # 内核 / token 元事件,渲染层不展示;tokens 的累积由 ChatContext 做
+                pass
+
+    @classmethod
+    def _on_content_block_start(cls, ev: ChatEvent) -> None:
+        """tool_use 块起头时记 buffer;text 块不需要(stream_token 自己懒启 Live)。"""
+        cb = ev.content_block or {}
+        if cb.get("type") != "tool_use" or ev.index is None:
+            return
+        cls._tool_use_buffer[ev.index] = {
+            "name": str(cb.get("name", "")),
+            "input_json": "",
+        }
+
+    @classmethod
+    def _on_content_block_delta(cls, ev: ChatEvent) -> None:
+        """text_delta 立即流式打;input_json_delta 拼到对应 tool_use buffer。"""
+        delta = ev.delta or {}
+        delta_type = delta.get("type")
+        if delta_type == "text_delta":
+            cls.stream_token(str(delta.get("text", "")))
+            return
+        if delta_type == "input_json_delta" and ev.index is not None:
+            buf = cls._tool_use_buffer.get(ev.index)
+            if buf is not None:
+                buf["input_json"] += str(delta.get("partial_json", ""))
+
+    @classmethod
+    def _on_content_block_stop(cls, ev: ChatEvent) -> None:
+        """tool_use 块结束时把累积 input_json 当 input_repr 打 tool_use_line。"""
+        if ev.index is None or ev.index not in cls._tool_use_buffer:
+            return
+        buf = cls._tool_use_buffer.pop(ev.index)
+        cls.tool_use_line(buf["name"], buf["input_json"] or "{}")
+
+    @classmethod
+    def _on_tool_result(cls, ev: ChatEvent) -> None:
+        """tool_result event → tool_result_line。content 可为 str / list[block]。"""
+        cls.tool_result_line(cls._extract_tool_result_text(ev.content), is_error=ev.is_error)
+
+    @staticmethod
+    def _extract_tool_result_text(content: str | list[dict[str, Any]] | None) -> str:
+        """tool_result 的 content 可能是字符串或 Claude tool_result content blocks 数组。
+
+        blocks 数组下抽出所有 `type=text` 的 text 字段拼接;非 text 块(image
+        等)忽略,反正 CLI 终端只能展文本。
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        parts: list[str] = []
+        for block in content:
+            if block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "\n".join(p for p in parts if p)
 
     @classmethod
     def tool_result_line(cls, text: str, *, is_error: bool = False) -> None:
@@ -193,11 +250,10 @@ class Renderer:
         input_tokens: int,
         output_tokens: int,
         latency_ms: int,
-        path: str,
     ) -> None:
         """打 chat 收尾的 meta 行。
 
-        形如 `[claude-haiku-4-5 · 8→21 tok · 412ms · messages]`。
+        形如 `[claude-haiku-4-5 · 8→21 tok · 412ms]`。
 
         tok 数为 0 时显示 `?` 占位。`--quiet` 时完全抑制 meta 行。
         """
@@ -206,7 +262,7 @@ class Renderer:
         cls._close_live()
         in_s = str(input_tokens) if input_tokens > 0 else "?"
         out_s = str(output_tokens) if output_tokens > 0 else "?"
-        line = f"[{model} · {in_s}→{out_s} tok · {latency_ms}ms · {path}]"
+        line = f"[{model} · {in_s}→{out_s} tok · {latency_ms}ms]"
         cls._stdout.print(f"[dim]{line}[/dim]", highlight=False)
 
     # ---------- stderr(不受 QUIET 影响)----------
@@ -244,6 +300,15 @@ class Renderer:
             finally:
                 cls._live = None
                 cls._live_buffer = ""
+
+    @classmethod
+    def _reset_for_tests(cls) -> None:
+        """测试 fixture 用:清掉 Live 状态 + tool_use buffer,避免跨 case 串味。
+
+        生产路径不会调(`_close_live` 已经是状态收尾的真源)。
+        """
+        cls._close_live()
+        cls._tool_use_buffer.clear()
 
     @staticmethod
     def _fmt_cell(v: Any) -> str:

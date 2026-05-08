@@ -1,11 +1,11 @@
-"""/admin/conversations 端点测试 —— 0.4.0 多轮会话管理。
+"""/admin/convos 端点测试 —— 0.4.0 多轮会话管理。
 
 覆盖:
-- GET /admin/conversations(空 / 有 / 分页)
-- GET /admin/conversations/{id}(详情含 messages / 404 / 非法 ULID 400)
-- POST /admin/conversations(server 生成 ULID / client 给 ULID / 重复 409 / 非法 400)
-- DELETE /admin/conversations/{id}(204 / cascade messages / 404)
-- PATCH /admin/conversations/{id}(改 title / 404)
+- GET /admin/convos(空 / 有 / 分页)
+- GET /admin/convos/{id}(详情含 messages / 404 / 非法 ULID 400)
+- POST /admin/convos(server 生成 ULID / client 给 ULID / 重复 409 / 非法 400)
+- DELETE /admin/convos/{id}(204 / cascade messages / 404)
+- PATCH /admin/convos/{id}(改 title / 404)
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ChariotConfig
 from chariot.database.session import get_session
-from chariot.repos.conversation_repo import ConversationRepo
+from chariot.repos.convo_repo import ConvoRepo
 from chariot.server.agent import Agent
 from chariot.server.controller import admin_router, register_exception_handlers
 
@@ -45,8 +45,8 @@ async def admin_client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
 # ---------- GET list ----------
 
 
-async def test_list_conversations_empty(admin_client: AsyncClient) -> None:
-    r = await admin_client.get("/admin/conversations")
+async def test_list_convos_empty(admin_client: AsyncClient) -> None:
+    r = await admin_client.get("/admin/convos")
     assert r.status_code == 200
     body = r.json()
     assert body["items"] == []
@@ -54,15 +54,13 @@ async def test_list_conversations_empty(admin_client: AsyncClient) -> None:
     assert body["offset"] == 0
 
 
-async def test_list_conversations_with_entries(
-    admin_client: AsyncClient, session: AsyncSession
-) -> None:
-    repo = ConversationRepo(session)
+async def test_list_convos_with_entries(admin_client: AsyncClient, session: AsyncSession) -> None:
+    repo = ConvoRepo(session)
     await repo.create(ULID_A, title="第一次")
     await repo.create(ULID_B, title="第二次")
     await repo.append_message(ULID_A, "user", "x")
 
-    r = await admin_client.get("/admin/conversations")
+    r = await admin_client.get("/admin/convos")
     assert r.status_code == 200
     items = r.json()["items"]
     assert {it["id"] for it in items} == {ULID_A, ULID_B}
@@ -72,13 +70,11 @@ async def test_list_conversations_with_entries(
     assert by_id[ULID_B]["message_count"] == 0
 
 
-async def test_list_conversations_pagination(
-    admin_client: AsyncClient, session: AsyncSession
-) -> None:
-    repo = ConversationRepo(session)
+async def test_list_convos_pagination(admin_client: AsyncClient, session: AsyncSession) -> None:
+    repo = ConvoRepo(session)
     for i in range(5):
         await repo.create(f"01JD000000000000000000000{i}")
-    r = await admin_client.get("/admin/conversations?limit=2&offset=1")
+    r = await admin_client.get("/admin/convos?limit=2&offset=1")
     assert r.status_code == 200
     body = r.json()
     assert len(body["items"]) == 2
@@ -89,44 +85,44 @@ async def test_list_conversations_pagination(
 # ---------- GET detail ----------
 
 
-async def test_get_conversation_detail(admin_client: AsyncClient, session: AsyncSession) -> None:
-    repo = ConversationRepo(session)
+async def test_get_convo_detail(admin_client: AsyncClient, session: AsyncSession) -> None:
+    repo = ConvoRepo(session)
     await repo.create(ULID_A, title="t")
     await repo.append_message(ULID_A, "user", "hi")
-    await repo.append_message(ULID_A, "assistant", "hello", model_name="mock")
+    await repo.append_message(ULID_A, "assistant", "hello", provider_name="mock")
 
-    r = await admin_client.get(f"/admin/conversations/{ULID_A}")
+    r = await admin_client.get(f"/admin/convos/{ULID_A}")
     assert r.status_code == 200
     body = r.json()
-    assert body["conversation"]["id"] == ULID_A
-    assert body["conversation"]["title"] == "t"
+    assert body["convo"]["id"] == ULID_A
+    assert body["convo"]["title"] == "t"
     assert len(body["messages"]) == 2
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["seq"] == 0
     assert body["messages"][0]["content"] == "hi"
     assert body["messages"][1]["role"] == "assistant"
-    assert body["messages"][1]["model_name"] == "mock"
+    assert body["messages"][1]["provider_name"] == "mock"
 
 
-async def test_get_conversation_not_found(admin_client: AsyncClient) -> None:
-    r = await admin_client.get(f"/admin/conversations/{ULID_A}")
+async def test_get_convo_not_found(admin_client: AsyncClient) -> None:
+    r = await admin_client.get(f"/admin/convos/{ULID_A}")
     assert r.status_code == 404
-    assert "conversation_not_found" in r.text
+    assert "convo_not_found" in r.text
 
 
-async def test_get_conversation_invalid_ulid(admin_client: AsyncClient) -> None:
-    r = await admin_client.get("/admin/conversations/short")
+async def test_get_convo_invalid_ulid(admin_client: AsyncClient) -> None:
+    r = await admin_client.get("/admin/convos/short")
     assert r.status_code == 400
-    assert "invalid_conversation_id" in r.text
+    assert "invalid_convo_id" in r.text
 
 
 # ---------- POST create ----------
 
 
-async def test_create_conversation_server_generates_id(
+async def test_create_convo_server_generates_id(
     admin_client: AsyncClient,
 ) -> None:
-    r = await admin_client.post("/admin/conversations", json={"title": "new"})
+    r = await admin_client.post("/admin/convos", json={"title": "new"})
     assert r.status_code == 201
     body = r.json()
     assert body["title"] == "new"
@@ -136,34 +132,34 @@ async def test_create_conversation_server_generates_id(
     assert body["message_count"] == 0
 
 
-async def test_create_conversation_client_provides_id(admin_client: AsyncClient) -> None:
+async def test_create_convo_client_provides_id(admin_client: AsyncClient) -> None:
     r = await admin_client.post(
-        "/admin/conversations",
+        "/admin/convos",
         json={"id": ULID_A, "title": "from-client"},
     )
     assert r.status_code == 201
     assert r.json()["id"] == ULID_A
 
 
-async def test_create_conversation_duplicate_id_returns_409(
+async def test_create_convo_duplicate_id_returns_409(
     admin_client: AsyncClient, session: AsyncSession
 ) -> None:
-    await ConversationRepo(session).create(ULID_A)
-    r = await admin_client.post("/admin/conversations", json={"id": ULID_A})
+    await ConvoRepo(session).create(ULID_A)
+    r = await admin_client.post("/admin/convos", json={"id": ULID_A})
     assert r.status_code == 409
-    assert "conversation_id_exists" in r.text
+    assert "convo_id_exists" in r.text
 
 
-async def test_create_conversation_invalid_ulid_returns_400(
+async def test_create_convo_invalid_ulid_returns_400(
     admin_client: AsyncClient,
 ) -> None:
-    r = await admin_client.post("/admin/conversations", json={"id": "not-a-ulid"})
+    r = await admin_client.post("/admin/convos", json={"id": "not-a-ulid"})
     assert r.status_code == 400
-    assert "invalid_conversation_id" in r.text
+    assert "invalid_convo_id" in r.text
 
 
-async def test_create_conversation_no_title(admin_client: AsyncClient) -> None:
-    r = await admin_client.post("/admin/conversations", json={})
+async def test_create_convo_no_title(admin_client: AsyncClient) -> None:
+    r = await admin_client.post("/admin/convos", json={})
     assert r.status_code == 201
     assert r.json()["title"] is None
 
@@ -171,24 +167,24 @@ async def test_create_conversation_no_title(admin_client: AsyncClient) -> None:
 # ---------- DELETE ----------
 
 
-async def test_delete_conversation(admin_client: AsyncClient, session: AsyncSession) -> None:
-    repo = ConversationRepo(session)
+async def test_delete_convo(admin_client: AsyncClient, session: AsyncSession) -> None:
+    repo = ConvoRepo(session)
     await repo.create(ULID_A)
     await repo.append_message(ULID_A, "user", "x")
-    r = await admin_client.delete(f"/admin/conversations/{ULID_A}")
+    r = await admin_client.delete(f"/admin/convos/{ULID_A}")
     assert r.status_code == 204
     assert await repo.get(ULID_A) is None
     # cascade:messages 也清了
     assert await repo.load_messages_as_anthropic(ULID_A) == []
 
 
-async def test_delete_conversation_not_found(admin_client: AsyncClient) -> None:
-    r = await admin_client.delete(f"/admin/conversations/{ULID_A}")
+async def test_delete_convo_not_found(admin_client: AsyncClient) -> None:
+    r = await admin_client.delete(f"/admin/convos/{ULID_A}")
     assert r.status_code == 404
 
 
-async def test_delete_conversation_invalid_ulid(admin_client: AsyncClient) -> None:
-    r = await admin_client.delete("/admin/conversations/short")
+async def test_delete_convo_invalid_ulid(admin_client: AsyncClient) -> None:
+    r = await admin_client.delete("/admin/convos/short")
     assert r.status_code == 400
 
 
@@ -196,9 +192,9 @@ async def test_delete_conversation_invalid_ulid(admin_client: AsyncClient) -> No
 
 
 async def test_patch_title(admin_client: AsyncClient, session: AsyncSession) -> None:
-    await ConversationRepo(session).create(ULID_A, title="旧")
+    await ConvoRepo(session).create(ULID_A, title="旧")
     r = await admin_client.patch(
-        f"/admin/conversations/{ULID_A}",
+        f"/admin/convos/{ULID_A}",
         json={"title": "新"},
     )
     assert r.status_code == 200
@@ -206,9 +202,9 @@ async def test_patch_title(admin_client: AsyncClient, session: AsyncSession) -> 
 
 
 async def test_patch_title_to_none(admin_client: AsyncClient, session: AsyncSession) -> None:
-    await ConversationRepo(session).create(ULID_A, title="旧")
+    await ConvoRepo(session).create(ULID_A, title="旧")
     r = await admin_client.patch(
-        f"/admin/conversations/{ULID_A}",
+        f"/admin/convos/{ULID_A}",
         json={"title": None},
     )
     assert r.status_code == 200
@@ -217,7 +213,7 @@ async def test_patch_title_to_none(admin_client: AsyncClient, session: AsyncSess
 
 async def test_patch_title_not_found(admin_client: AsyncClient) -> None:
     r = await admin_client.patch(
-        f"/admin/conversations/{ULID_A}",
+        f"/admin/convos/{ULID_A}",
         json={"title": "x"},
     )
     assert r.status_code == 404

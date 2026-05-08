@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from chariot import __version__
 from chariot.agent.config import ChariotConfig, ToolConfig
 from chariot.database.session import dispose_db, init_db
-from chariot.repos.model_repo import ModelRepo
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.tool_repo import ToolRepo
 from chariot.server.agent import Agent
 from chariot.server.controller import (
@@ -45,7 +45,7 @@ async def _startup() -> Agent:
     """
     sm = await init_db()
     async with sm() as session:
-        await ModelRepo(session).seed_if_empty()
+        await ProviderRepo(session).seed_if_empty()
         await ToolRepo(session).seed_if_empty()
         model_config = await ChariotConfig.from_db(session)
         tool_config = await ToolConfig.from_db(session)

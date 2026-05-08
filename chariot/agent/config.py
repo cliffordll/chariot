@@ -1,11 +1,12 @@
 """Chariot 配置数据形态 + 来源装载。
 
-0.3.0 起源数据来源从 TOML 文件迁到 DB(`models` 表),由 `ModelRepo` 持久化。
+0.3.0 起源数据来源从 TOML 文件迁到 DB(`providers` 表;v6 之前叫 `models`),
+由 `ProviderRepo` 持久化。
 0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
 0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
-`ModelEntry` / `ChariotConfig` 同结构。本模块汇总:
+`ProviderEntry` / `ChariotConfig` 同结构。本模块汇总:
 
-- `ModelEntry` / `ChariotConfig`:model 配置(0.3.x)
+- `ProviderEntry` / `ChariotConfig`:Provider 配置(0.3.x;0.6.0 起 ModelEntry → ProviderEntry)
 - `ToolEntry` / `ToolConfig`:tool 配置(0.4.0);`from_db(session)` 从 ToolRepo 装载
 
 异常类型(`ConfigError` 及子类)0.6.0 起统一在 `chariot/agent/exceptions.py`;
@@ -27,10 +28,10 @@ from typing import TYPE_CHECKING, Any
 # 异常类型 0.6.0 起 re-export 自 exceptions.py,本模块不重复定义
 from chariot.agent.exceptions import (
     ConfigError,
-    ConversationNotFound,
-    DuplicateConversationId,
-    DuplicateModelName,
-    ModelNotFound,
+    ConvoNotFound,
+    DuplicateConvoId,
+    DuplicateProviderName,
+    ProviderNotFound,
     ToolNotFound,
 )
 
@@ -41,11 +42,11 @@ if TYPE_CHECKING:
 __all__ = [
     "ChariotConfig",
     "ConfigError",
-    "ConversationNotFound",
-    "DuplicateConversationId",
-    "DuplicateModelName",
-    "ModelEntry",
-    "ModelNotFound",
+    "ConvoNotFound",
+    "DuplicateConvoId",
+    "DuplicateProviderName",
+    "ProviderEntry",
+    "ProviderNotFound",
     "ToolConfig",
     "ToolEntry",
     "ToolNotFound",
@@ -58,16 +59,18 @@ def _empty_params() -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
-class ModelEntry:
-    """单条 model 配置条目(数据形态)。
+class ProviderEntry:
+    """单条 Provider 配置条目(0.6.0 起;0.3.x ~ 0.5.x 时叫 ModelEntry)。
 
-    - `options`:build Model 实例所需(model / api_key / base_url ...)
+    - `options`:build Provider 实例所需(model / api_key / base_url ...);
+      `options.model` 字段(LLM model id)是 Anthropic SDK 透传字段,不在 v6
+      rename 范围
     - `params`:0.3.1 加。runtime sampling 默认值(temperature / top_p / max_tokens),
       给前端发请求时填默认 body 字段用。**server 不主动注入 body**,只通过 API
       暴露给 client。
     """
 
-    name: str  # 用户面名称(`chariot model list` 列出来 / client 在 body.model 写)
+    name: str  # 用户面名称(`chariot provider list` 列出来 / client 在 body.model 写)
     type: str  # builder 类型 key(mock / anthropic / llama_local 等)
     options: dict[str, Any]
     params: dict[str, Any] = field(default_factory=_empty_params)
@@ -75,13 +78,14 @@ class ModelEntry:
 
 @dataclass(frozen=True)
 class ChariotConfig:
-    """顶层配置:models 列表。
+    """顶层配置:providers 列表。
 
     0.3.1 删除 `active` 字段(client 用 body.model 路由,server 不持有 active 状态)。
+    0.6.0 字段 `models` rename → `providers`(跟 v6 表名一致)。
     `from_db(session)` 是唯一外部装载入口。
     """
 
-    models: tuple[ModelEntry, ...] = ()
+    providers: tuple[ProviderEntry, ...] = ()
 
     # ---- 构造工厂 ----
 
@@ -91,20 +95,20 @@ class ChariotConfig:
 
     @classmethod
     async def from_db(cls, session: AsyncSession) -> ChariotConfig:
-        """从 DB(`models` 表)装载完整配置。表空 → `empty()`。"""
-        from chariot.repos.model_repo import ModelRepo  # 避免循环 import
+        """从 DB(`providers` 表)装载完整配置。表空 → `empty()`。"""
+        from chariot.repos.provider_repo import ProviderRepo  # 避免循环 import
 
-        repo = ModelRepo(session)
+        repo = ProviderRepo(session)
         entries = tuple(await repo.list_entries())
-        return cls(models=entries)
+        return cls(providers=entries)
 
     # ---- 查询 ----
 
     def is_empty(self) -> bool:
-        return not self.models
+        return not self.providers
 
-    def find_entry(self, name: str) -> ModelEntry | None:
-        for entry in self.models:
+    def find_entry(self, name: str) -> ProviderEntry | None:
+        for entry in self.providers:
             if entry.name == name:
                 return entry
         return None

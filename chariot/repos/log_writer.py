@@ -32,7 +32,7 @@ class LogWriter:
     async def record(
         self,
         *,
-        model: str | None,
+        provider: str | None,
         status: LogStatus,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
@@ -47,7 +47,7 @@ class LogWriter:
         try:
             async with session_maker() as session:
                 await LogRepo(session).create(
-                    model=model,
+                    provider=provider,
                     status=status,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,

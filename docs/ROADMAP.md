@@ -30,7 +30,7 @@
 ## v2:AIAgent 进化(chariot 的核心方向)
 
 - ✅ **多轮对话记忆**(0.4.0)—— `conversations` + `messages` 表;
-  `X-Chariot-Conversation` header 触发 stateful;Agent.handle 接 ConversationRepo
+  `X-Chariot-Convo` header 触发 stateful;Agent.handle 接 ConvoRepo
 - ✅ **工具调用 / function calling**(0.4.0)—— BaseTool + ToolRegistry + 4 内置
   工具(read_file / list_dir / shell_exec / http_get);Agent slow path 工具循环
 - ✅ **协议级流式工具循环**(0.5.0)—— Agent 全程 streaming;`tool_use` /
@@ -42,6 +42,14 @@
   Tauri 通过 stdio
   JSON-RPC sidecar 对接(`chariot/sidecar/`);RPC 框架共享(`chariot/rpc/`);
   顶层目录全面重组(详见 DESIGN.md)
+  - **中断机制(cancel)**——延到 sidecar 阶段(S.7~S.9)统一搞:
+    `AIAgent` 暴露 `cancel(run_id)` / 内部 `asyncio.Event`;`AgentLoop`
+    在每轮起头 / event 间 / tool 执行前三处 check;被 cancel → yield
+    `ChatEvent(kind=error, error_type=cancelled)` + return;stateful 模式
+    把已流出来的 assistant text 落库 + 标 `stop_reason=cancelled`(避免
+    下轮 load history 拿到半截)。Surface 接入:CLI 加 SIGINT handler;
+    sidecar 加 `chat.cancel` JSON-RPC 方法;tool 子类(尤其 shell_exec)
+    在 `try/finally` 里 kill subprocess。0.6.0 内核阶段不做(S.6 已收尾)
 - **OpenAIProvider + Memory + Skills**(0.7.0)—— 自演化的两大数据底座 + 多 Provider:
   - `chariot/providers/builtin/openai.py`:覆盖 OpenAI 兼容协议生态(直接
     OpenAI / Azure / OpenRouter / Kimi / DeepSeek / z.ai / 通义 / Xiaomi /

@@ -13,7 +13,7 @@ events + 检测 tool_use + 跑工具 + 注入 tool_result events + 续轮。
    content_block_delta+ / content_block_stop 累积重组)
 3. `message_delta` 收 stop_reason
 4. `message_stop` 之后:
-   - 持久化 assistant content(若有 repo + conv_id)
+   - 持久化 assistant content(若有 repo + convo_id)
    - stop_reason == "tool_use" → 跑工具 → yield tool_result events
      (chariot 注入)→ 拼下轮 req → 续轮
    - 其它(end_turn / max_tokens / stop_sequence)→ yield stream_done → break
@@ -41,7 +41,7 @@ from chariot.agent.chat_request import ChatRequest, Message
 
 if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
     from chariot.tools.base import BaseTool
 
 
@@ -52,7 +52,7 @@ class AgentLoop:
     """chat 主循环 —— 单轮 Provider stream + 多轮工具调用 + 持久化。
 
     由 `AIAgent.run` 实例化并 invoke;调用方通常不直接构造。所有状态在实例
-    字段里(provider / tools / repo / conv_id / max_iter),`run` 是唯一对外
+    字段里(provider / tools / repo / convo_id / max_iter),`run` 是唯一对外
     方法。
     """
 
@@ -61,14 +61,14 @@ class AgentLoop:
         *,
         provider: BaseProvider,
         tools: dict[str, BaseTool],
-        repo: ConversationRepo | None,
-        conversation_id: str | None,
+        repo: ConvoRepo | None,
+        convo_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
     ) -> None:
         self._provider = provider
         self._tools = tools
         self._repo = repo
-        self._conversation_id = conversation_id
+        self._convo_id = convo_id
         self._max_iter = max_iter
 
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -184,29 +184,29 @@ class AgentLoop:
         """整轮 assistant 落库(message_stop 之后)。
 
         重组成纯 content blocks 数组(去 _index 元数据)写入 messages 表;
-        `model_name` 字段记本轮用的 entry name(provider.config.name)。
+        `provider_name` 字段记本轮用的 entry name(provider.config.name)。
         """
-        if self._repo is None or self._conversation_id is None:
+        if self._repo is None or self._convo_id is None:
             return
         if not assistant_blocks:
             return
         content = [entry["block"] for entry in assistant_blocks]
         await self._repo.append_message(
-            self._conversation_id,
+            self._convo_id,
             role="assistant",
             content=content,
-            model_name=self._provider.config.name,
+            provider_name=self._provider.config.name,
         )
 
     async def _persist_tool_results(self, tool_results: list[ChatEvent]) -> None:
         """tool_result events 整体作为 user message 落库(对应 Claude 协议)。"""
-        if self._repo is None or self._conversation_id is None:
+        if self._repo is None or self._convo_id is None:
             return
         if not tool_results:
             return
         content = [self._tool_result_event_to_block(ev) for ev in tool_results]
         await self._repo.append_message(
-            self._conversation_id,
+            self._convo_id,
             role="user",
             content=content,
         )

@@ -19,7 +19,7 @@ import pytest
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
-from chariot.agent.config import ModelEntry
+from chariot.agent.config import ProviderEntry
 from chariot.agent.exceptions import ProviderError
 from chariot.providers.base import BaseProvider, BaseProviderConfig
 from chariot.providers.prober import ProviderProber
@@ -150,8 +150,8 @@ class _MissingApiKeyProvider(BaseProvider):
 # ---------------------------------------------------------------------------
 
 
-def _entry(type_name: str) -> ModelEntry:
-    return ModelEntry(name=f"{type_name}-entry", type=type_name, options={})
+def _entry(type_name: str) -> ProviderEntry:
+    return ProviderEntry(name=f"{type_name}-entry", type=type_name, options={})
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ from typing import Any, Self
 import pytest
 from fastapi.responses import Response
 
-from chariot.agent.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ProviderEntry
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 
@@ -39,7 +39,7 @@ class _StubModel(Model):
 
 def test_register_and_build_returns_model_instance() -> None:
     ModelRegistry.register("stub", _StubModel)
-    entry = ModelEntry(name="x", type="stub", options={"foo": "bar"})
+    entry = ProviderEntry(name="x", type="stub", options={"foo": "bar"})
     inst = ModelRegistry.build(entry)
     assert isinstance(inst, _StubModel)
     assert inst.options == {"foo": "bar"}
@@ -76,7 +76,7 @@ def test_subclass_missing_abstractmethod_cant_instantiate() -> None:
 
 
 def test_build_unknown_type_raises_config_error() -> None:
-    entry = ModelEntry(name="x", type="ghost", options={})
+    entry = ProviderEntry(name="x", type="ghost", options={})
     with pytest.raises(ConfigError, match="ghost"):
         ModelRegistry.build(entry)
 
@@ -84,7 +84,7 @@ def test_build_unknown_type_raises_config_error() -> None:
 def test_build_unknown_type_message_lists_known_types() -> None:
     """错误消息把已注册的 type 列出来,方便排错。"""
     ModelRegistry.register("alpha", _StubModel)
-    entry = ModelEntry(name="x", type="ghost", options={})
+    entry = ProviderEntry(name="x", type="ghost", options={})
     with pytest.raises(ConfigError, match="alpha"):
         ModelRegistry.build(entry)
 
@@ -98,6 +98,6 @@ def test_mock_model_registered_via_package_init() -> None:
     from chariot.server.model.mock import MockModel
 
     assert "mock" in ModelRegistry.known_types()
-    entry = ModelEntry(name="default", type="mock", options={})
+    entry = ProviderEntry(name="default", type="mock", options={})
     inst = ModelRegistry.build(entry)
     assert isinstance(inst, MockModel)

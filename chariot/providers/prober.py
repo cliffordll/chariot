@@ -2,7 +2,7 @@
 
 替代 0.5.0 `chariot/server/service/model_prober.py` 的 `ModelProber`。差异:
 
-- 输入:`ModelEntry`(沿用 0.5.0 数据形态)
+- 输入:`ProviderEntry`(沿用 0.5.0 数据形态)
 - 接口:`BaseProvider.generate` 流式,**不再用 0.5.0 的 `Model.respond(body, stream=False)`**
   非流式接口
 - 错误体系:0.6.0 用 `ProviderError`(非 fastapi),0.5.0 是 `ServiceError`
@@ -34,7 +34,7 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from chariot.agent.chat_request import ChatRequest, Message
-from chariot.agent.config import ModelEntry
+from chariot.agent.config import ProviderEntry
 from chariot.agent.exceptions import ConfigError, ProviderError
 from chariot.providers.base import BaseProvider
 from chariot.providers.registry import ProviderRegistry
@@ -63,13 +63,13 @@ class ProbeResult(BaseModel):
 
 
 class ProviderProber:
-    """探针工具类 —— 给一条 ModelEntry,临时 build + 发最小请求 + 报结果。"""
+    """探针工具类 —— 给一条 ProviderEntry,临时 build + 发最小请求 + 报结果。"""
 
     _PROBE_PROMPT: ClassVar[str] = "ping"
     _PROBE_MAX_TOKENS: ClassVar[int] = 1
 
     @classmethod
-    async def probe(cls, entry: ModelEntry) -> ProbeResult:
+    async def probe(cls, entry: ProviderEntry) -> ProbeResult:
         """对 entry 执行一次探针。永不 raise —— 任何失败都包成 ProbeResult。"""
         t0 = time.monotonic()
         try:

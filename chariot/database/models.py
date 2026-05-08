@@ -6,14 +6,20 @@
 - v2(0.3.0):`models` 表 + `settings`(KV)—— 模型配置 DB 化
 - v3(0.3.1):`models` 加 `params` 列;drop `settings` 表(active 概念删除,
   client 在 body.model 写 entry name 直接路由)
-- v4(0.4.0):加 `conversations / messages / tools` 三表 —— Conversation 层 +
+- v4(0.4.0):加 `conversations / messages / tools` 三表 —— 多轮会话层 +
   Tool 层。messages.role 仅 `user / assistant`(Anthropic 协议原生两种),
   tool_use / tool_result 嵌入 content blocks 数组;tools 4 条 seeded fixture
+- v5(0.6.0):`conversations` rename → `convos`,`messages.conversation_id`
+  rename → `convo_id`(跨层缩写统一,详见 docs/DESIGN.md §7.1)
+- v6(0.6.0):`models` rename → `providers`,`messages.model_name` rename →
+  `provider_name`,`logs.model` rename → `provider`(0.6.0 抽象层已是
+  BaseProvider,DB 层跟上;`ChatRequest.model` / options.model 仍叫 model
+  对齐 Claude API)
 
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
-- `ModelRow.id` / `MessageRow.id` / `ToolRow.id` 是自增 int(name / id 才是用户面 ID)
-- `ConversationRow.id` 是 26 字符 ULID 字符串(client 或 server 生成,校验在 controller 层)
+- `ProviderRow.id` / `MessageRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
+- `ConvoRow.id` 是 26 字符 ULID 字符串(client 或 server 生成,校验在 controller 层)
 """
 
 from __future__ import annotations
@@ -45,7 +51,7 @@ class LogEntry(Base):
     __tablename__ = "logs"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_id)
-    model: Mapped[str | None] = mapped_column(default=None)
+    provider: Mapped[str | None] = mapped_column(default=None)
     input_tokens: Mapped[int | None] = mapped_column(default=None)
     output_tokens: Mapped[int | None] = mapped_column(default=None)
     latency_ms: Mapped[int | None] = mapped_column(default=None)
@@ -56,15 +62,17 @@ class LogEntry(Base):
     __table_args__ = (Index("idx_logs_created_at", "created_at"),)
 
 
-class ModelRow(Base):
-    """`models` 表:0.3.0 起承载 [[models]] entries。
+class ProviderRow(Base):
+    """`providers` 表(v6 起;v2 ~ v5 时叫 `models`):承载 BaseProvider 配置 entries。
 
-    - `options`:JSON,build Model 实例所需参数(model / api_key / base_url 等)
+    - `options`:JSON,build Provider 实例所需参数(LLM model id / api_key /
+      base_url 等);`options.model` 字段(对应 Claude API 的 `body.model`)是
+      Anthropic SDK 透传字段,不在重命名范围
     - `params`:JSON,runtime sampling 默认值(temperature / top_p / max_tokens 等),
       0.3.1 加;客户端发请求时若 body 缺字段,前端从此处填(server 不主动注入)
     """
 
-    __tablename__ = "models"
+    __tablename__ = "providers"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(unique=True, index=True)
@@ -75,17 +83,18 @@ class ModelRow(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 
-class ConversationRow(Base):
-    """`conversations` 表:0.4.0 多轮对话单元。
+class ConvoRow(Base):
+    """`convos` 表(v5 起;v4 时叫 `conversations`):多轮对话单元。
 
     - `id`:26 字符 ULID(client 或 server 生成,正则校验在 controller 层做);
       ULID 单调时间戳前缀让 `ORDER BY id` 即时间序
     - `title`:可选;空则 GUI 从首条 user msg 截取展示
-    - `last_model`:派生字段,每写一轮 assistant msg 同步;仅供 GUI 侧栏展示
-      "最近用的什么 model",不影响协议(每轮 body.model 仍然必传)
+    - `last_model`:派生字段,每写一轮 assistant msg 同步;记 provider entry name,
+      仅供 GUI 侧栏展示"最近用的哪个 entry"。字段名沿用 `last_model`(用户视角是
+      "我用了哪个 model"),不跟 v6 rename
     """
 
-    __tablename__ = "conversations"
+    __tablename__ = "convos"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
@@ -95,26 +104,27 @@ class ConversationRow(Base):
 
 
 class MessageRow(Base):
-    """`messages` 表:0.4.0 按 Anthropic 协议 message 切行,对齐 Claude Code transcript。
+    """`messages` 表:按 Anthropic 协议 message 切行,对齐 Claude Code transcript。
 
     - `role`:`'user' | 'assistant'`(协议原生两种);tool_use 嵌在 assistant.content
       blocks,tool_result 嵌在 user.content blocks
     - `content`:JSON,原样存 anthropic content(字符串或 blocks 数组);
       `SELECT * ORDER BY seq` 直接构成 Anthropic messages 数组,零翻译成本
-    - `seq`:会话内单调 0 起;`(conversation_id, seq)` UNIQUE
-    - `model_name`:仅 role='assistant' 行非空,记本轮用的 entry name
-    - 不设 FK:cascade delete 由 `ConversationRepo.delete()` 手动 DELETE FROM messages
-      WHERE conversation_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
+    - `seq`:会话内单调 0 起;`(convo_id, seq)` UNIQUE
+    - `provider_name`:仅 role='assistant' 行非空,记本轮用的 provider entry name
+      (v6 起;v4~v5 时叫 `model_name`)
+    - 不设 FK:cascade delete 由 `ConvoRepo.delete()` 手动 DELETE FROM messages
+      WHERE convo_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
     """
 
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    conversation_id: Mapped[str] = mapped_column(index=True)
+    convo_id: Mapped[str] = mapped_column(index=True)
     seq: Mapped[int]
     role: Mapped[str]  # 'user' | 'assistant'
     content: Mapped[str]  # JSON-serialized;str 或 list[dict]
-    model_name: Mapped[str | None] = mapped_column(default=None)
+    provider_name: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 

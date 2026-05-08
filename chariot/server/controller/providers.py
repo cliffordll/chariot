@@ -1,24 +1,24 @@
 """admin /models 端点 —— GET 列表 / 探针 / entries CRUD。
 
-0.3.0 起 model 配置住 DB(`models` 表),所有写操作走 ModelRepo 持久化 + 同步
+0.3.0 起 model 配置住 DB(`models` 表),所有写操作走 ProviderRepo 持久化 + 同步
 Agent 状态。0.3.1 起 active 概念删除(client 在 body.model 写 entry name 路由),
-对应的 POST /admin/models 切 active 端点也已删除。
+对应的 POST /admin/providers 切 active 端点也已删除。
 
 端点
 ----
-GET    /admin/models                          → entries 列表 + types
-POST   /admin/models/{name}/probe             → 探针(临时 build,不副作用)
+GET    /admin/providers                          → entries 列表 + types
+POST   /admin/providers/{name}/probe             → 探针(临时 build,不副作用)
 
-POST   /admin/models/entries                  → 创建 entry
-PUT    /admin/models/entries/{name}           → 更新 type / options / params(立即 rebuild Model)
-DELETE /admin/models/entries/{name}           → 删除
-POST   /admin/models/entries/{name}/duplicate → 复制(碰撞自动 _copy_N)
+POST   /admin/providers/entries                  → 创建 entry
+PUT    /admin/providers/entries/{name}           → 更新 type / options / params(立即 rebuild Model)
+DELETE /admin/providers/entries/{name}           → 删除
+POST   /admin/providers/entries/{name}/copy → 复制(碰撞自动 _copy_N)
 
 错误码
 ------
 - 400 `unknown_type`        —— type 不在 ModelRegistry.known_types()
 - 400 `bad_request`         —— 其它 ConfigError 兜底
-- 404 `model_not_found`     —— update / delete / duplicate / probe 找不到 name
+- 404 `provider_not_found`     —— update / delete / duplicate / probe 找不到 name
 - 409 `name_exists`         —— create / duplicate 目标 name 冲突
 - 502 `rebuild_failed`      —— update entry 后新参数 build Model 失败
 
@@ -36,12 +36,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from chariot.agent.config import (
     ChariotConfig,
     ConfigError,
-    DuplicateModelName,
-    ModelEntry,
-    ModelNotFound,
+    DuplicateProviderName,
+    ProviderEntry,
+    ProviderNotFound,
 )
 from chariot.database.session import SessionDep
-from chariot.repos.model_repo import ModelRepo
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.server.agent import Agent
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
@@ -49,12 +49,12 @@ from chariot.server.service.model_prober import ModelProber, ProbeError, ProbeRe
 
 # 给 SDK 复用的 schema(SDK 沿用"从 controller 导 schema"约定)
 __all__ = [
+    "CopyEntryRequest",
     "CreateEntryRequest",
-    "DuplicateEntryRequest",
     "EntryResponse",
-    "ModelsListResponse",
     "ProbeError",
     "ProbeResult",
+    "ProvidersListResponse",
     "UpdateEntryRequest",
     "router",
 ]
@@ -74,8 +74,8 @@ class EntryResponse(BaseModel):
     params: dict[str, Any]
 
     @classmethod
-    def from_entry(cls, entry: ModelEntry) -> EntryResponse:
-        """从 `ModelEntry` 数据类构造响应,免逐字段重复。"""
+    def from_entry(cls, entry: ProviderEntry) -> EntryResponse:
+        """从 `ProviderEntry` 数据类构造响应,免逐字段重复。"""
         return cls(
             name=entry.name,
             type=entry.type,
@@ -84,8 +84,8 @@ class EntryResponse(BaseModel):
         )
 
 
-class ModelsListResponse(BaseModel):
-    """`GET /admin/models` 响应。
+class ProvidersListResponse(BaseModel):
+    """`GET /admin/providers` 响应。
 
     `available` 是 entry name 列表(0.2.x 兼容);`entries` 是全量数组,
     `types` 是 ModelRegistry 已注册的 type key 列表。
@@ -110,7 +110,7 @@ class UpdateEntryRequest(BaseModel):
     params: dict[str, Any] | None = None
 
 
-class DuplicateEntryRequest(BaseModel):
+class CopyEntryRequest(BaseModel):
     """body 字段名是 `as`(SQL/CLI 习惯),Pydantic 用 alias 兼容 Python 关键字。"""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -124,14 +124,14 @@ class DuplicateEntryRequest(BaseModel):
 def _to_service_error(exc: ConfigError) -> ServiceError:
     """把 repo 抛的 `ConfigError` 子类映射成对应 HTTP `ServiceError`。
 
-    - `DuplicateModelName` → 409 `name_exists`
-    - `ModelNotFound`      → 404 `model_not_found`
+    - `DuplicateProviderName` → 409 `name_exists`
+    - `ProviderNotFound`      → 404 `provider_not_found`
     - 其它 `ConfigError`   → 400 `bad_request`(兜底)
     """
-    if isinstance(exc, DuplicateModelName):
+    if isinstance(exc, DuplicateProviderName):
         return ServiceError(status=409, code="name_exists", message=str(exc))
-    if isinstance(exc, ModelNotFound):
-        return ServiceError(status=404, code="model_not_found", message=str(exc))
+    if isinstance(exc, ProviderNotFound):
+        return ServiceError(status=404, code="provider_not_found", message=str(exc))
     return ServiceError(status=400, code="bad_request", message=str(exc))
 
 
@@ -142,7 +142,7 @@ def _check_known_type(type_name: str) -> None:
         raise ServiceError(
             status=400,
             code="unknown_type",
-            message=f"未注册的 model type {type_name!r};已注册:{known}",
+            message=f"未注册的 provider type {type_name!r};已注册:{known}",
         )
 
 
@@ -165,21 +165,21 @@ async def _refresh_agent(session: SessionDep) -> None:
 # ---------- 端点 ----------
 
 
-@router.get("/models", response_model=ModelsListResponse)
-async def list_models(session: SessionDep) -> ModelsListResponse:
+@router.get("/providers", response_model=ProvidersListResponse)
+async def list_providers(session: SessionDep) -> ProvidersListResponse:
     config = await ChariotConfig.from_db(session)
-    return ModelsListResponse(
-        available=[e.name for e in config.models],
+    return ProvidersListResponse(
+        available=[e.name for e in config.providers],
         types=ModelRegistry.known_types(),
-        entries=[EntryResponse.from_entry(e) for e in config.models],
+        entries=[EntryResponse.from_entry(e) for e in config.providers],
     )
 
 
-@router.post("/models/{name}/probe", response_model=ProbeResult)
-async def probe_model(name: str, session: SessionDep) -> ProbeResult:
+@router.post("/providers/{name}/probe", response_model=ProbeResult)
+async def probe_provider(name: str, session: SessionDep) -> ProbeResult:
     """探针:临时 build entry,发 1 条最小 messages 请求,报通不通 + 耗时。
 
-    name 不存在 → 404(`model_not_found`)。其它任何失败(build 失败 / 上游 4xx /
+    name 不存在 → 404(`provider_not_found`)。其它任何失败(build 失败 / 上游 4xx /
     网络错)都不 raise,由 `ModelProber.probe` 包成 `ProbeResult(ok=False, error=...)`
     返回。
     """
@@ -188,16 +188,16 @@ async def probe_model(name: str, session: SessionDep) -> ProbeResult:
     if entry is None:
         raise ServiceError(
             status=404,
-            code="model_not_found",
-            message=f"未知 model name: {name!r}",
+            code="provider_not_found",
+            message=f"未知 provider name: {name!r}",
         )
     return await ModelProber.probe(entry)
 
 
-@router.post("/models/entries", response_model=EntryResponse, status_code=201)
+@router.post("/providers/entries", response_model=EntryResponse, status_code=201)
 async def create_entry(req: CreateEntryRequest, session: SessionDep) -> EntryResponse:
     _check_known_type(req.type)
-    repo = ModelRepo(session)
+    repo = ProviderRepo(session)
     try:
         entry = await repo.create(
             name=req.name,
@@ -211,7 +211,7 @@ async def create_entry(req: CreateEntryRequest, session: SessionDep) -> EntryRes
     return EntryResponse.from_entry(entry)
 
 
-@router.put("/models/entries/{name}", response_model=EntryResponse)
+@router.put("/providers/entries/{name}", response_model=EntryResponse)
 async def update_entry(
     name: str,
     req: UpdateEntryRequest,
@@ -219,7 +219,7 @@ async def update_entry(
 ) -> EntryResponse:
     if req.type is not None:
         _check_known_type(req.type)
-    repo = ModelRepo(session)
+    repo = ProviderRepo(session)
     try:
         entry = await repo.update(
             name,
@@ -233,9 +233,9 @@ async def update_entry(
     return EntryResponse.from_entry(entry)
 
 
-@router.delete("/models/entries/{name}", status_code=204)
+@router.delete("/providers/entries/{name}", status_code=204)
 async def delete_entry(name: str, session: SessionDep) -> None:
-    repo = ModelRepo(session)
+    repo = ProviderRepo(session)
     try:
         await repo.delete(name)
     except ConfigError as e:
@@ -244,18 +244,18 @@ async def delete_entry(name: str, session: SessionDep) -> None:
 
 
 @router.post(
-    "/models/entries/{name}/duplicate",
+    "/providers/entries/{name}/copy",
     response_model=EntryResponse,
     status_code=201,
 )
-async def duplicate_entry(
+async def copy_entry(
     name: str,
-    req: DuplicateEntryRequest,
+    req: CopyEntryRequest,
     session: SessionDep,
 ) -> EntryResponse:
-    repo = ModelRepo(session)
+    repo = ProviderRepo(session)
     try:
-        entry = await repo.duplicate(name, as_name=req.as_name)
+        entry = await repo.copy(name, as_name=req.as_name)
     except ConfigError as e:
         raise _to_service_error(e) from e
     await _refresh_agent(session)

@@ -34,8 +34,8 @@
 >    status` 改语义保留(显示 DB 路径 / provider 数 / tool 数 / 版本);`chariot
 >    stats` 保留
 >
-> **不变的事**:BaseTool / ToolRegistry / 4 内置工具、ConversationRepo /
-> ConversationLockManager 单进程内的 per-conv 串行(库化后转为"per-conv +
+> **不变的事**:BaseTool / ToolRegistry / 4 内置工具、ConvoRepo /
+> ConvoLockManager 单进程内的 per-conv 串行(库化后转为"per-conv +
 > per-process",跨进程并发由 SQLite 串行写保护)、表 schema(`conversations` /
 > `messages` / `tools` / `models` / `logs`)。
 
@@ -86,8 +86,8 @@ MCP 等多种 surface 各自启动独立进程,内部直接构造 AIAgent 实例
 **关键约定**:
 - **AIAgent 实例属于进程**:每个 surface 进程构造,生命周期跟进程同步
 - **状态共享靠 DB**:跨进程同步通过 SQLite 串行写 + advisory lock(详见 §7)
-- **同进程内 per-conv 串行**:`ConversationLockManager`(asyncio.Lock 字典)保
-  单进程内同一 conversation_id 的 agent loop 不会被并发请求穿插
+- **同进程内 per-conv 串行**:`ConvoLockManager`(asyncio.Lock 字典)保
+  单进程内同一 convo_id 的 agent loop 不会被并发请求穿插
 - **跨进程并发**:用 SQLite WAL + `BEGIN IMMEDIATE` 短事务保护"load history +
   append message"原子段。0.5.0 的 in-memory asyncio.Lock 升级为"in-memory + DB"
   双层(详见 §7.2)
@@ -134,7 +134,7 @@ class ChatRequest:
     metadata: dict | None = None                  # {"user_id": "..."}
     thinking: dict | None = None                  # extended thinking 配置(Claude 4+)
     # ─── chariot 扩展字段(顶层放,跟 Claude 字段不冲突) ───
-    conversation_id: str | None = None            # None = stateless;ULID = stateful
+    convo_id: str | None = None            # None = stateless;ULID = stateful
     agent_id: str | None = None                   # 0.9.0+ 多 AIAgent 实例;0.6.0 默认 None
 ```
 
@@ -177,8 +177,8 @@ tool_use / tool_result / thinking / document 等),由 `type` 字段区分。
   内部处理,不进 ChatRequest
 
 **chariot 扩展的两个字段**(放最后,跟 Claude 字段不冲突):
-- `conversation_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
-  `X-Chariot-Conversation` header 升级到顶层字段)
+- `convo_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
+  `X-Chariot-Convo` header 升级到顶层字段)
 - `agent_id`:0.9.0+ 多 AIAgent 实例路由;0.6.0 默认 `None`,字段先占位
 
 **OpenAIProvider 怎么对接 ChatRequest**(0.7.0,作为非 Claude Provider 的范例):
@@ -304,7 +304,7 @@ class AIAgent:
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,产 ChatEvent 流。
 
-        - stateful(req.conversation_id 非空):内部 load history + persist
+        - stateful(req.convo_id 非空):内部 load history + persist
         - 工具调用:AIAgent 内部跑工具 + inject tool_result event,客户端只消费 events
         - 收敛:产 stream_done event 后退出
         """
@@ -327,7 +327,7 @@ class AIAgent:
               │  ─ loop.py(AgentLoop)             │
               │  ─ chat_request.py / chat_event.py      │
               │  ─ exceptions.py / config.py            │
-              │  ─ conversation_lock.py                 │
+              │  ─ convo_lock.py                 │
               └────────────────┬───────────────────────┘
                                │ 调用功能模块
                 ┌──────────────┼──────────────┐
@@ -428,8 +428,8 @@ class AIAgent:
         *,
         providers: dict[str, BaseProvider],   # entry_name → BaseProvider 子类
         tools: dict[str, BaseTool],           # tool_name → BaseTool 子类
-        repo: ConversationRepo,           # 持久化层(注入,测试可 mock)
-        lock_manager: ConversationLockManager,
+        repo: ConvoRepo,           # 持久化层(注入,测试可 mock)
+        lock_manager: ConvoLockManager,
     ) -> None: ...
 
     @classmethod
@@ -447,14 +447,14 @@ class AIAgent:
 
 ```text
 AIAgent.run(req):
-    if req.conversation_id:
-        async with lock_manager.acquire(req.conversation_id):
+    if req.convo_id:
+        async with lock_manager.acquire(req.convo_id):
             yield from _run_with_conv(req)
     else:
         yield from _run_stateless(req)
 
 _run_with_conv / _run_stateless 都委托给 AgentLoop:
-    loop = AgentLoop(provider, tools, repo, conversation_id)
+    loop = AgentLoop(provider, tools, repo, convo_id)
     async for event in loop.run(req):
         yield event
 ```
@@ -475,8 +475,8 @@ class AgentLoop:
         self,
         provider: BaseProvider,
         tools: dict[str, BaseTool],
-        repo: ConversationRepo | None,
-        conversation_id: str | None,
+        repo: ConvoRepo | None,
+        convo_id: str | None,
         max_iter: int = _DEFAULT_MAX_TOOL_ITER,
     ) -> None: ...
 
@@ -593,7 +593,7 @@ async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
             if event.kind == "error":
                 return                                       # ③ 错误终结
         # message_stop 之后
-        await self._persist_assistant(current_req.conversation_id, assistant_blocks)
+        await self._persist_assistant(current_req.convo_id, assistant_blocks)
         if stop_reason == "tool_use":
             tool_results = await self._execute_tools(assistant_blocks)
             for tr in tool_results:
@@ -646,7 +646,7 @@ async def handle_chat(params: dict):
     req = ChatRequest(**params)
     async for event in agent.run(req):
         await server.notify("chat_event", dataclasses.asdict(event))
-    return {"stream_id": req.conversation_id, "ended_at": time.time()}
+    return {"stream_id": req.convo_id, "ended_at": time.time()}
 ```
 
 Gateway(0.8.0)范例 —— 缓冲 + 节流应对 IM 平台限频:
@@ -676,7 +676,7 @@ async def handle_user_message(self, chat_id, text):
 | **错误等级** | `error_type` 是 fatal 类(`upstream_*` / `agent_iter_exceeded` / `agent_timeout`)→ 流终结;非 fatal 错误已在 `tool_result.is_error=True` 表达,不产 error event |
 | **input_json_delta 拼装** | 流式给的是 JSON 切片(`'{"path":'` + `'"/tmp"'` + `'}'`)。AgentLoop 累积所有 `input_json_delta` 字符串,在 `content_block_stop` 时 `json.loads` 拿到完整 input;解析失败 → 注入 `tool_result(is_error=True, content="invalid_json: ...")` |
 | **持久化时机** | `message_stop` 后整轮一次性持久化(assistant content + tool_result);**不在 token 级写库**(既保留实时流体验,又避免每个 token 都写库) |
-| **多 surface 并发同 conv_id** | §7.2 双层锁保证串行;第二个并发请求等锁,asyncio 自然 backpressure |
+| **多 surface 并发同 convo_id** | §7.2 双层锁保证串行;第二个并发请求等锁,asyncio 自然 backpressure |
 | **buffer 内存上限** | 长 thinking / 大 JSON tool input 在 AgentLoop 内 buffer 时设上限(默认 10MB / block);超过 → 截断 + yield `error_type="block_too_large"` 终结流(防 OOM) |
 
 #### 6.4.6 测试断言要点
@@ -748,20 +748,20 @@ tool_result / image / thinking),跟 §3.1 `ChatRequest.messages` / §3.2
 
 | 层 | 实现 | 范围 |
 |---|---|---|
-| **进程内** | `ConversationLockManager`(asyncio.Lock 字典) | 同进程内同 conv_id 串行 |
-| **跨进程** | SQLite `BEGIN IMMEDIATE` 短事务包"load history + append" | 多进程同 conv_id 串行写 |
+| **进程内** | `ConvoLockManager`(asyncio.Lock 字典) | 同进程内同 convo_id 串行 |
+| **跨进程** | SQLite `BEGIN IMMEDIATE` 短事务包"load history + append" | 多进程同 convo_id 串行写 |
 
 进程内锁解决"CLI 进程并发跑两次工具循环";跨进程锁解决"CLI + Gateway 并发写
-同一 conv_id"。两层都需要。
+同一 convo_id"。两层都需要。
 
 > **vs 0.5.0**:0.5.0 只有进程内 asyncio.Lock(因为只有一个 server 进程)。
 > 库化后多进程并发出现,必须加 SQLite 层。
 
 ### 7.3 失败处理
 
-- 进程内锁超时(30s) → `ChatEvent(kind="error", error_type="conversation_busy_local")`
+- 进程内锁超时(30s) → `ChatEvent(kind="error", error_type="convo_busy_local")`
 - DB 锁等待超时(SQLite `busy_timeout`,默认 5s) → 自动重试 3 次;再失败 →
-  `ChatEvent(kind="error", error_type="conversation_busy_db")`
+  `ChatEvent(kind="error", error_type="convo_busy_db")`
 
 ## 8. Surface 层
 
@@ -774,7 +774,7 @@ cli/
 ├── __main__.py
 ├── commands/                ── 命令注册层
 │   ├── chat.py              ── delegate 到 cli/repl.py / batch.py / once.py
-│   ├── conversation.py      ── 调 ConversationRepo
+│   ├── conversation.py      ── 调 ConvoRepo
 │   ├── logs.py              ── 调 LogRepo
 │   ├── model.py             ── 调 ModelRepo + ProviderProber
 │   ├── tool.py              ── 调 ToolRepo
@@ -935,7 +935,7 @@ rpc/
 |---|---|---|
 | `server/agent.py`(`Agent` 类) | `agent/run.py`(`AIAgent` 类) | 重写 + 改名(类 + 文件) |
 | `server/agent.py` 的 `_stream_tool_loop_*` 等 | `agent/loop.py`(`AgentLoop` 类) | 拆出 + 重写 |
-| `server/conversation_lock.py` | `agent/conversation_lock.py` | 不动 |
+| `server/convo_lock.py` | `agent/convo_lock.py` | 不动 |
 | `server/config.py` | `agent/config.py` | 删 server 专属字段(host/port 等) |
 | `server/database/` | `database/`(顶层) | 不动 |
 | `server/repository/log.py` | `repos/log_repo.py` | 改名(跟兄弟统一) |
@@ -995,7 +995,7 @@ tests/
 │   ├── test_chat_request.py
 │   ├── test_chat_event.py
 │   ├── test_exceptions.py
-│   └── test_conversation_lock.py
+│   └── test_convo_lock.py
 ├── repos/                       ── 各 *_repo.py + log_writer.py 测试
 ├── tools/
 │   ├── test_base.py / test_registry.py

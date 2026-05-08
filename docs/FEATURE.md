@@ -53,7 +53,7 @@
     - Claude 字段:`model` / `messages` / `max_tokens` / `system` / `tools` /
       `tool_choice` / `temperature` / `top_p` / `top_k` / `stop_sequences` /
       `metadata` / `thinking`
-    - chariot 扩展:`conversation_id` / `agent_id`
+    - chariot 扩展:`convo_id` / `agent_id`
     - **不引入** `stream` / `service_tier` / `anthropic_version`(理由见 DESIGN)
 - 新建 `chariot/agent/chat_event.py`:
   - `ChatEvent`(`@dataclass(frozen=True)`,`kind: Literal[...]` 10 种 +
@@ -72,7 +72,7 @@
   - `ProviderError(code: str, message: str, status: int = 502)` —— 替代旧
     `ServiceError` 的 Provider 范畴(去掉 fastapi 依赖)
   - `ConfigError`(沿用 0.5.0 语义,从 `server/config.py` 抽出)
-  - `ToolExecutionError`、`ConversationLockTimeout`
+  - `ToolExecutionError`、`ConvoLockTimeout`
 
 **验收**:
 
@@ -165,7 +165,7 @@
 - 新建 `chariot/providers/builtin/anthropic.py`:`AnthropicProvider`
   - httpx client / timeout / api_key 解析逻辑沿用旧 `AnthropicModel`
   - `generate(req)`:body 从 `ChatRequest` 用 `dataclasses.asdict()` 拼装,
-    去掉 chariot 扩展字段(`conversation_id` / `agent_id`),其余 1:1 透传
+    去掉 chariot 扩展字段(`convo_id` / `agent_id`),其余 1:1 透传
   - SSE 解析复用 `chariot/providers/_sse.py` 的 `SseParser.iter_frames`
   - **SSE 帧 → ChatEvent 几乎 1:1**:Anthropic event type 直接当 ChatEvent kind,
     payload 字段(`message` / `index` / `content_block` / `delta` / `usage`)
@@ -228,7 +228,7 @@
   - 内部:`git mv chariot/repos/log.py chariot/repos/log_repo.py`
 - `git mv chariot/server/service/log_writer.py chariot/repos/log_writer.py`
   (跟 LogRepo 同居,职责呼应)
-- `git mv chariot/server/conversation_lock.py chariot/agent/conversation_lock.py`
+- `git mv chariot/server/convo_lock.py chariot/agent/convo_lock.py`
 - `git mv chariot/server/config.py chariot/agent/config.py`
   - 删 server-specific 字段(host / port / 等);config 现在只描述 ChariotConfig
     (`models` entries / `tools` entries)
@@ -269,37 +269,37 @@
 
 ### S.5 ⏳ 双层锁(进程内 + 跨进程 SQLite advisory)
 
-**目标**:为库化模式下"多进程并发同 conv_id"加 SQLite 层保护。
+**目标**:为库化模式下"多进程并发同 convo_id"加 SQLite 层保护。
 
-- `chariot/agent/conversation_lock.py`:
-  - 进程内 `ConversationLockManager`(asyncio.Lock 字典)沿用,不变
-  - 加 `acquire(conv_id, *, db_session)` —— 同时拿进程内锁 + DB 锁
-- `chariot/repos/conversation_repo.py`:加方法
-  `with_advisory_lock(conv_id, timeout_s)` —— async context manager,内部用
+- `chariot/agent/convo_lock.py`:
+  - 进程内 `ConvoLockManager`(asyncio.Lock 字典)沿用,不变
+  - 加 `acquire(convo_id, *, db_session)` —— 同时拿进程内锁 + DB 锁
+- `chariot/repos/convo_repo.py`:加方法
+  `with_advisory_lock(convo_id, timeout_s)` —— async context manager,内部用
   SQLite `BEGIN IMMEDIATE`(短事务)包住"load history + append message"原子段;
-  超时(默认 5s)自动重试 3 次;再失败抛 `ConversationLockTimeout`
+  超时(默认 5s)自动重试 3 次;再失败抛 `ConvoLockTimeout`
 - `chariot/server/agent.py`(过渡期仍存):`_stream_tool_loop` 把
-  `ConversationLockManager.acquire` 替换成新的
-  `lock_manager.acquire(conv_id, db_session=...)`
+  `ConvoLockManager.acquire` 替换成新的
+  `lock_manager.acquire(convo_id, db_session=...)`
 
 **验收**:
 
-- **单测**(`tests/agent/test_conversation_lock.py`):
-  - **进程内并发**:`asyncio.gather` 起 10 个并发 `acquire(conv_id)`,critical
+- **单测**(`tests/agent/test_convo_lock.py`):
+  - **进程内并发**:`asyncio.gather` 起 10 个并发 `acquire(convo_id)`,critical
     section 内 list.append 后 `await asyncio.sleep(0.05)`,断结果列表是单调
     递增的 entry 顺序(实际串行,不交叉)
   - **跨进程并发**:`multiprocessing.Process` 起 2 个 worker,各自打开 SQLite
-    session 同 conv_id,worker_2 SELECT 拿到 worker_1 的 INSERT 数据
+    session 同 convo_id,worker_2 SELECT 拿到 worker_1 的 INSERT 数据
   - **DB 锁超时**:monkeypatch `BEGIN IMMEDIATE` `busy_timeout` 为 0.1s,
     worker_a 持锁 1s,worker_b `acquire` → 重试 3 次后抛
-    `ConversationLockTimeout`
+    `ConvoLockTimeout`
   - **错误事件**:进程内锁超时 / DB 锁超时分别产
-    `ChatEvent(kind="error", error_type="conversation_busy_local")` /
-    `error_type="conversation_busy_db"`(对接 §7.3)
+    `ChatEvent(kind="error", error_type="convo_busy_local")` /
+    `error_type="convo_busy_db"`(对接 §7.3)
 - **静态**:三件套全绿
-- **手测**(可选):起两个 `python -m chariot.server` 实例同 DB,并发打同 conv_id
+- **手测**(可选):起两个 `python -m chariot.server` 实例同 DB,并发打同 convo_id
   10 次,看 logs 表无脏数据(全部 ULID 单调 + content 正确)
-- **回归**:0.5.0 既有 `ConversationLockManager` 单测条数不变,全绿
+- **回归**:0.5.0 既有 `ConvoLockManager` 单测条数不变,全绿
 - **不通过特征**:
   - 测试卡死(死锁)→ pytest hang
   - 子进程没正确 cleanup(pytest 退出码非 0,但测试本身报 pass)
@@ -312,7 +312,7 @@
 **先共存,不撤旧 `server/agent.py`** —— 让 server 仍能 import 旧 Agent 跑(过渡)。
 
 - 新建 `chariot/agent/loop.py`:`AgentLoop` 类(详见 DESIGN §6.2 / §6.4)
-  - `__init__(provider, tools, repo, conversation_id, max_iter)`
+  - `__init__(provider, tools, repo, convo_id, max_iter)`
   - `async def run(req: ChatRequest) -> AsyncIterator[ChatEvent]`:
     - 每轮 `provider.generate(req)` → 实时透传 + 内部累积 assistant content blocks
     - 收 `message_delta` 里的 `stop_reason`
@@ -333,7 +333,7 @@
       `error(error_type="unknown_model")`)
     - server-side default tools 注入(`req.tools is None` → 挂所有 enabled
       tools 的 schema)
-    - stateful(`req.conversation_id`)→ `lock_manager.acquire(...)` 包住 AgentLoop
+    - stateful(`req.convo_id`)→ `lock_manager.acquire(...)` 包住 AgentLoop
     - stateless → 直接跑 AgentLoop
 - 新增 `chariot/providers/prober.py`:`ProviderProber`(原 `service/model_prober.py`
   迁 + 改名,适配新 `BaseProvider` 接口)
@@ -353,8 +353,8 @@
     `'{"path":'` `'"/tmp"'` `'}'` → AgentLoop 在 `content_block_stop` 拿到
     `{"path": "/tmp"}` 完整 dict;若拼装失败 → `tool_result(is_error=True,
     content="invalid_json: ...")`
-  - **AIAgent stateless**:无 conv_id → mock lock_manager.acquire 调用次数 = 0
-  - **AIAgent stateful**:有 conv_id → mock lock_manager.acquire 被调一次
+  - **AIAgent stateless**:无 convo_id → mock lock_manager.acquire 调用次数 = 0
+  - **AIAgent stateful**:有 convo_id → mock lock_manager.acquire 被调一次
   - **AIAgent 路由**:`req.model="not_exists"` → 单 event
     `error(error_type="unknown_model")`
   - **AIAgent default tools 注入**:`req.tools is None` → AgentLoop 拿到 tools

@@ -18,7 +18,7 @@ class LogRepo:
     async def create(
         self,
         *,
-        model: str | None,
+        provider: str | None,
         status: str,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
@@ -27,7 +27,7 @@ class LogRepo:
     ) -> LogEntry:
         """插入一条 log;调用方保证字段语义(status ∈ {ok, error, timeout})。"""
         entry = LogEntry(
-            model=model,
+            provider=provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,

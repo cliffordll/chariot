@@ -10,10 +10,8 @@ from dataclasses import dataclass
 
 import typer
 
-from chariot.cli.core.context import ChatContext, ChatError
-from chariot.cli.core.render import Renderer
-
-_PROTOCOL_LABEL = "messages"
+from chariot.cli.context import ChatContext, ChatError
+from chariot.cli.render import Renderer
 
 
 @dataclass
@@ -28,7 +26,7 @@ class ChatOnce:
             result = await self.ctx.run_turn(Renderer.render_event)
         except ChatError as e:
             Renderer.stream_newline()
-            Renderer.error_bubble(f"HTTP {e.status}: {e.short_body()}")
+            Renderer.error_bubble(f"{e.error_type}: {e.short_message()}")
             raise typer.Exit(code=1) from None
 
         Renderer.stream_newline()
@@ -37,5 +35,4 @@ class ChatOnce:
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,
-            path=_PROTOCOL_LABEL,
         )

@@ -8,7 +8,7 @@ message 的 SSE 帧。
 覆盖:
 - slow path:server 注入 body.tools(client 没传时)
 - 单轮工具循环 / 多轮 / 未知工具 / max_iter 超限
-- conversation_id auto-create + history load + persist user/assistant/tool_result
+- convo_id auto-create + history load + persist user/assistant/tool_result
 - stream client:返 StreamingResponse,流里含多 message_start 块
 - 非 stream client:server 内部 streaming + drain 后重建 Anthropic 非流 JSON
 - env CHARIOT_MAX_TOOL_ITER 生效
@@ -25,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ToolEntry
-from chariot.repos.conversation_repo import ConversationRepo
+from chariot.repos.convo_repo import ConvoRepo
 from chariot.server.agent import Agent
 from chariot.server.model.base import Model
 from chariot.server.service.exceptions import ServiceError
@@ -267,7 +267,7 @@ async def test_tool_injection_when_client_omits(
 ) -> None:
     """client 没传 body.tools → server 注入所有 enabled tool 的 schema 进 body.
 
-    带 conv_id 走 slow path(否则 fast path 不进流式逻辑)。
+    带 convo_id 走 slow path(否则 fast path 不进流式逻辑)。
     """
     tool = CountingTool("read_file", ["file content"])
     model = SequentialMockModel([[{"type": "text", "text": "ok done"}]])  # 一轮收敛
@@ -276,7 +276,7 @@ async def test_tool_injection_when_client_omits(
     body = json.dumps({"model": "m", "messages": [{"role": "user", "content": "hi"}]}).encode(
         "utf-8"
     )
-    await agent.handle(body, session=session, conversation_id=ULID_A)
+    await agent.handle(body, session=session, convo_id=ULID_A)
 
     assert len(model.calls) == 1
     sent_body = json.loads(model.calls[0][0])
@@ -474,7 +474,7 @@ async def test_env_max_iter_invalid_falls_back(
 
 
 # ============================================================
-# Conversation 持久化(slow path with conversation_id + session)
+# Conversation 持久化(slow path with convo_id + session)
 # ============================================================
 
 
@@ -482,7 +482,7 @@ async def test_handle_with_conversation_persists_messages(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """带 conversation_id → user / assistant / tool_result 都被 persist。"""
+    """带 convo_id → user / assistant / tool_result 都被 persist。"""
     tool = CountingTool("t", ["tool result text"])
     model = SequentialMockModel(
         [
@@ -495,9 +495,9 @@ async def test_handle_with_conversation_persists_messages(
     body = json.dumps(
         {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
     ).encode("utf-8")
-    await agent.handle(body, session=session, conversation_id=ULID_A)
+    await agent.handle(body, session=session, convo_id=ULID_A)
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     msgs = await repo.load_messages_as_anthropic(ULID_A)
     # 4 条 messages:
     # 0: user "hi"
@@ -516,10 +516,10 @@ async def test_handle_with_conversation_loads_history(
     make_test_agent: MakeTestAgent,
 ) -> None:
     """已有 conversation 历史 → 第一轮 model 收到的 body.messages 含历史 + 新消息。"""
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     await repo.create(ULID_A)
     await repo.append_message(ULID_A, "user", "上轮的问题")
-    await repo.append_message(ULID_A, "assistant", "上轮的答", model_name="m")
+    await repo.append_message(ULID_A, "assistant", "上轮的答", provider_name="m")
 
     model = SequentialMockModel([[{"type": "text", "text": "现在的答案"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
@@ -527,7 +527,7 @@ async def test_handle_with_conversation_loads_history(
     body = json.dumps(
         {"model": "m", "tools": [], "messages": [{"role": "user", "content": "新问题"}]},
     ).encode("utf-8")
-    await agent.handle(body, session=session, conversation_id=ULID_A)
+    await agent.handle(body, session=session, convo_id=ULID_A)
 
     sent_body = json.loads(model.calls[0][0])
     sent_msgs = sent_body["messages"]
@@ -541,14 +541,14 @@ async def test_handle_with_conversation_auto_creates(
     session: AsyncSession,
     make_test_agent: MakeTestAgent,
 ) -> None:
-    """conversation_id 不存在 → ensure_exists 自动创建。"""
+    """convo_id 不存在 → ensure_exists 自动创建。"""
     model = SequentialMockModel([[{"type": "text", "text": "ok"}]])
     agent = _setup_agent_with_tools(make_test_agent, model=model, tools={})
 
     body = json.dumps({"model": "m", "tools": [], "messages": []}).encode("utf-8")
-    await agent.handle(body, session=session, conversation_id=ULID_A)
+    await agent.handle(body, session=session, convo_id=ULID_A)
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     conv = await repo.get(ULID_A)
     assert conv is not None
     assert conv.id == ULID_A
@@ -565,9 +565,9 @@ async def test_handle_with_conversation_updates_last_model(
     body = json.dumps(
         {"model": "claude", "tools": [], "messages": [{"role": "user", "content": "hi"}]},
     ).encode("utf-8")
-    await agent.handle(body, session=session, conversation_id=ULID_A)
+    await agent.handle(body, session=session, convo_id=ULID_A)
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     conv = await repo.get(ULID_A)
     assert conv is not None
     assert conv.last_model == "claude"

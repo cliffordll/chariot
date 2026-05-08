@@ -2,7 +2,7 @@
 
 0.4.0 起(M.3):
 1. init_db(跑 migrations,含 v4 加 conversations / messages / tools 三表)
-2. ModelRepo.seed_if_empty()(空表 → seed mock entry)
+2. ProviderRepo.seed_if_empty()(空表 → seed mock entry)
 3. ToolRepo.seed_if_empty()(空表 → seed 4 条 disabled fixture)
 4. ChariotConfig.from_db + ToolConfig.from_db
 5. Agent.install_from_config(model_config, tool_config) 构建 name → Model + name → Tool
@@ -18,10 +18,10 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from chariot.database.models import ModelRow, ToolRow
+from chariot.database.models import ProviderRow, ToolRow
 from chariot.database.session import DBState
 from chariot.database.session import init_db as _real_init_db
-from chariot.repos.model_repo import ModelRepo
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.tool_repo import ToolRepo
 from chariot.server import app as app_module
 from chariot.server.agent import Agent
@@ -55,7 +55,7 @@ async def test_lifespan_first_run_seeds_mock(isolated_db: Path) -> None:
         sm = DBState.session_maker
         assert sm is not None
         async with sm() as s:
-            rows = (await s.execute(select(ModelRow))).scalars().all()
+            rows = (await s.execute(select(ProviderRow))).scalars().all()
             assert len(rows) == 1
             assert rows[0].name == "mock"
             assert rows[0].type == "mock"
@@ -108,7 +108,7 @@ async def test_lifespan_second_run_skips_seed(isolated_db: Path) -> None:
     sm = DBState.session_maker
     assert sm is not None
     async with sm() as s:
-        await ModelRepo(s).create(name="my-claude", type="mock", options={})
+        await ProviderRepo(s).create(name="my-claude", type="mock", options={})
     # dispose 让 lifespan 自己重新 init_db
     await app_module.dispose_db()
 
@@ -123,6 +123,6 @@ async def test_lifespan_second_run_skips_seed(isolated_db: Path) -> None:
         sm2 = DBState.session_maker
         assert sm2 is not None
         async with sm2() as s:
-            rows = (await s.execute(select(ModelRow))).scalars().all()
+            rows = (await s.execute(select(ProviderRow))).scalars().all()
             assert len(rows) == 1
             assert rows[0].name == "my-claude"

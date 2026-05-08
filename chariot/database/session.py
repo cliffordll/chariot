@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 7
 
 
 def _db_url(db_path: Path) -> str:

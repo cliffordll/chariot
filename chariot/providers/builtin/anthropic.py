@@ -56,7 +56,7 @@ class AnthropicProvider(BaseProvider):
     _POOL_TIMEOUT_SEC: ClassVar[float] = 10.0
 
     # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发)
-    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"conversation_id", "agent_id"})
+    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"convo_id", "agent_id"})
 
     def __init__(
         self,
@@ -184,7 +184,7 @@ class AnthropicProvider(BaseProvider):
 
         步骤:
         1. `dataclasses.asdict(req)` 拿全字段
-        2. 剔除 chariot 扩展字段(`conversation_id` / `agent_id`)
+        2. 剔除 chariot 扩展字段(`convo_id` / `agent_id`)
         3. 剔除 `None` 值字段(Anthropic API 不接受 null,且 max_tokens 等
           有默认 4096 不能漏)
         4. 强制 `stream=True`(chariot 内核固定流式)

@@ -5,9 +5,9 @@
 - Agent 按 name 路由到对应 Model 实例
 - 缺失 / 未知 → 400 unknown_model_name
 
-0.4.0 加可选 `X-Chariot-Conversation` header(模式 A/B/C 详见 DESIGN §3.1):
+0.4.0 加可选 `X-Chariot-Convo` header(模式 A/B/C 详见 DESIGN §3.1):
 - 缺失 → 等价 0.3.1 stateless
-- 非法 ULID → 400 invalid_conversation_id
+- 非法 ULID → 400 invalid_convo_id
 - ULID 不存在 → Agent.handle 内 ensure_exists 自动创建
 - ULID 存在 → load history + prepend
 """
@@ -24,7 +24,7 @@ from fastapi.responses import Response, StreamingResponse
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.agent.config import ChariotConfig, ModelEntry
+from chariot.agent.config import ChariotConfig, ProviderEntry
 from chariot.database.session import get_session
 from chariot.server.agent import Agent
 from chariot.server.controller import dataplane_router, register_exception_handlers
@@ -227,7 +227,7 @@ async def test_non_stream_when_flag_missing(
 # ---------- 用 MockModel entry 的端到端 ----------
 
 
-# ---------- 0.4.0:X-Chariot-Conversation header ----------
+# ---------- 0.4.0:X-Chariot-Convo header ----------
 
 ULID_A = "01JD7K8YQXM2N8R5VF3PCWE4ZB"
 
@@ -237,7 +237,7 @@ async def test_no_header_behaves_stateless(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """不带 header → 等价 0.3.1 stateless,messages 表不写。"""
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
 
     client, _ = client_and_model
     resp = await client.post(
@@ -246,7 +246,7 @@ async def test_no_header_behaves_stateless(
     )
     assert resp.status_code == 200
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     convs = await repo.list_entries()
     assert convs == []  # 没创建任何会话
 
@@ -256,17 +256,17 @@ async def test_header_with_unknown_id_auto_creates(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """带 header + ULID 不存在 → Agent.handle 内 ensure_exists 自动创建并落库。"""
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
 
     client, _ = client_and_model
     resp = await client.post(
         "/v1/messages",
-        headers={"X-Chariot-Conversation": ULID_A},
+        headers={"X-Chariot-Convo": ULID_A},
         json={"model": "spy", "messages": [{"role": "user", "content": "hi"}]},
     )
     assert resp.status_code == 200
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     conv = await repo.get(ULID_A)
     assert conv is not None
     assert conv.id == ULID_A
@@ -282,17 +282,17 @@ async def test_header_with_existing_id_loads_history(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """带 header + ULID 存在 → 历史 prepend 到 body.messages 给 model。"""
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
 
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     await repo.create(ULID_A)
     await repo.append_message(ULID_A, "user", "上一轮提问")
-    await repo.append_message(ULID_A, "assistant", "上一轮回答", model_name="spy")
+    await repo.append_message(ULID_A, "assistant", "上一轮回答", provider_name="spy")
 
     client, model = client_and_model
     await client.post(
         "/v1/messages",
-        headers={"X-Chariot-Conversation": ULID_A},
+        headers={"X-Chariot-Convo": ULID_A},
         json={"model": "spy", "messages": [{"role": "user", "content": "新提问"}]},
     )
 
@@ -309,16 +309,16 @@ async def test_header_with_existing_id_loads_history(
 async def test_header_invalid_ulid_returns_400(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
-    """非法 ULID(短了 / 含小写 / 含特殊字符)→ 400 invalid_conversation_id。"""
+    """非法 ULID(短了 / 含小写 / 含特殊字符)→ 400 invalid_convo_id。"""
     client, _ = client_and_model
     for bad_id in ("short", "01JD7K8YQXM2N8R5VF3PCWE4z", "01JD7K8YQXM2N8R5VF3PCWE4Z!"):
         resp = await client.post(
             "/v1/messages",
-            headers={"X-Chariot-Conversation": bad_id},
+            headers={"X-Chariot-Convo": bad_id},
             json={"model": "spy", "messages": []},
         )
         assert resp.status_code == 400
-        assert "invalid_conversation_id" in resp.text
+        assert "invalid_convo_id" in resp.text
 
 
 async def test_header_empty_string_treated_as_absent(
@@ -326,23 +326,23 @@ async def test_header_empty_string_treated_as_absent(
     client_and_model: tuple[AsyncClient, _CapturingModel],
 ) -> None:
     """空字符串 header 等价没传(stateless)。"""
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
 
     client, _ = client_and_model
     resp = await client.post(
         "/v1/messages",
-        headers={"X-Chariot-Conversation": ""},
+        headers={"X-Chariot-Convo": ""},
         json={"model": "spy", "messages": []},
     )
     assert resp.status_code == 200
-    repo = ConversationRepo(session)
+    repo = ConvoRepo(session)
     assert await repo.list_entries() == []
 
 
 async def test_mock_entry_end_to_end(session: AsyncSession) -> None:
     """seed 一条 mock entry,验证 echo 文本一路打到 HTTP 响应。"""
     Agent.install_from_config(
-        ChariotConfig(models=(ModelEntry(name="mock", type="mock", options={}),))
+        ChariotConfig(providers=(ProviderEntry(name="mock", type="mock", options={}),))
     )
 
     app = FastAPI()

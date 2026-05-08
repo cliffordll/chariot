@@ -5,7 +5,7 @@
 1. 持有 `name → Model` 实例字典(从 DB entries 构造)+ `name → Tool` 实例字典
 2. **fast path**(无 tools + 无 conversation):0.3.1 行为,按 body.model 路由,
    单次 `model.respond(body)` 透传
-3. **slow path**(有 tools 或 有 conversation_id):**全程 streaming**
+3. **slow path**(有 tools 或 有 convo_id):**全程 streaming**
    - 可选 load 历史 messages,prepend 到 body.messages
    - 每轮 `model.respond(body, stream=True)` → 边转发上游 SSE 边 buffer assistant
      content blocks(文本 + tool_use)
@@ -40,8 +40,8 @@ from fastapi.responses import Response, StreamingResponse
 from ulid import ULID
 
 from chariot.agent.config import ChariotConfig, ToolConfig
-from chariot.agent.conversation_lock import ConversationLockManager
-from chariot.repos.conversation_repo import ConversationRepo
+from chariot.agent.convo_lock import ConvoLockManager
+from chariot.repos.convo_repo import ConvoRepo
 from chariot.repos.log_writer import log_writer
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
@@ -110,7 +110,7 @@ class Agent:
         - lifespan startup / admin CRUD 后调即可,幂等
         """
         agent = cls()
-        for entry in model_config.models:
+        for entry in model_config.providers:
             agent.models[entry.name] = ModelRegistry.build(entry)
         if tool_config is not None:
             for tool_entry in tool_config.tools:
@@ -142,11 +142,11 @@ class Agent:
         body: bytes,
         *,
         session: AsyncSession | None = None,
-        conversation_id: str | None = None,
+        convo_id: str | None = None,
     ) -> Response:
         """处理一次聊天请求。
 
-        - `session` / `conversation_id` 仅 slow path 用;fast path 完全不碰
+        - `session` / `convo_id` 仅 slow path 用;fast path 完全不碰
         - body.model 缺失 / 未知 → 400 unknown_model_name(沿用 0.3.1)
         - 工具循环超限 → stream client 发 SSE error 帧 + 关流;非 stream client
           400 tool_iter_exceeded
@@ -181,7 +181,7 @@ class Agent:
             body_dict["tools"] = [t.schema() for t in self.tools.values()]
 
         has_tools = bool(body_dict.get("tools"))
-        has_conv = conversation_id is not None and session is not None
+        has_conv = convo_id is not None and session is not None
 
         # Fast path(沿用 0.3.1):无 tools + 无 conversation,直接透传 body bytes
         if not has_tools and not has_conv:
@@ -205,7 +205,7 @@ class Agent:
             model=model,
             model_name=model_name,
             session=session if has_conv else None,
-            conversation_id=conversation_id if has_conv else None,
+            convo_id=convo_id if has_conv else None,
             final=final,
             t0=t0,
         )
@@ -265,37 +265,29 @@ class Agent:
         model: Model,
         model_name: str,
         session: AsyncSession | None,
-        conversation_id: str | None,
+        convo_id: str | None,
         final: dict[str, Any],
         t0: float,
     ) -> AsyncIterator[bytes]:
         """流式工具循环。yield SSE 字节给 client;`final` dict 在最后一轮 message_stop
         后被填充(给非 stream client 用),或 max_iter 超时填 `error` ServiceError。
 
-        stateful(conversation_id != None)模式下整个循环包在
-        `ConversationLockManager.acquire(conv_id)` 里 —— 同 conv 的并发请求被串行,
+        stateful(convo_id != None)模式下整个循环包在
+        `ConvoLockManager.acquire(convo_id)` 里 —— 同 conv 的并发请求被串行,
         避免两个客户端各自 load history 看到对方写之前的快照(issue 3)。锁超时
-        (default 30s,env `CHARIOT_CONV_LOCK_TIMEOUT_S`)→ 503 conversation_busy。
+        (default 30s,env `CHARIOT_CONVO_LOCK_TIMEOUT_S`)→ 503 convo_busy。
         """
-        conv_repo = (
-            ConversationRepo(session)
-            if (session is not None and conversation_id is not None)
-            else None
-        )
+        convo_repo = ConvoRepo(session) if (session is not None and convo_id is not None) else None
 
         # Advisory lock:仅 stateful 时持锁;stateless 走 nullcontext no-op
-        lock_ctx = (
-            ConversationLockManager.acquire(conversation_id)
-            if conversation_id is not None
-            else nullcontext()
-        )
+        lock_ctx = ConvoLockManager.acquire(convo_id) if convo_id is not None else nullcontext()
         async with lock_ctx:
             async for chunk in self._stream_tool_loop_body(
                 body_dict=body_dict,
                 model=model,
                 model_name=model_name,
-                conv_repo=conv_repo,
-                conversation_id=conversation_id,
+                convo_repo=convo_repo,
+                convo_id=convo_id,
                 final=final,
                 t0=t0,
             ):
@@ -307,8 +299,8 @@ class Agent:
         body_dict: dict[str, Any],
         model: Model,
         model_name: str,
-        conv_repo: ConversationRepo | None,
-        conversation_id: str | None,
+        convo_repo: ConvoRepo | None,
+        convo_id: str | None,
         final: dict[str, Any],
         t0: float,
     ) -> AsyncIterator[bytes]:
@@ -316,16 +308,16 @@ class Agent:
         整个流程跟 0.4.x 的 `_run_tool_loop` 工具循环逻辑同构,只是从非流式
         + 收尾重发改成全程 streaming(详见 DESIGN §9.1 流程对比图)。"""
         # Stateful 起步:确保 conversation 存在 + load history + persist client 这次发的新 messages
-        if conv_repo is not None and conversation_id is not None:
-            await conv_repo.ensure_exists(conversation_id)
-            history = await conv_repo.load_messages_as_anthropic(conversation_id)
+        if convo_repo is not None and convo_id is not None:
+            await convo_repo.ensure_exists(convo_id)
+            history = await convo_repo.load_messages_as_anthropic(convo_id)
             new_msgs = self._extract_messages(body_dict)
             for msg in new_msgs:
                 role = msg.get("role")
                 content = msg.get("content")
                 if not isinstance(role, str) or content is None:
                     continue
-                await conv_repo.append_message(conversation_id, role, content)
+                await convo_repo.append_message(convo_id, role, content)
             body_dict["messages"] = list(history) + list(new_msgs)
 
         # 强制 stream=True 给上游 Model;client 的 stream 偏好已被 handle() 用
@@ -369,12 +361,12 @@ class Agent:
                 return
 
             # turn 结束:持久化 assistant content
-            if conv_repo is not None and conversation_id is not None and state.content:
-                await conv_repo.append_message(
-                    conversation_id,
+            if convo_repo is not None and convo_id is not None and state.content:
+                await convo_repo.append_message(
+                    convo_id,
                     "assistant",
                     state.content,
-                    model_name=model_name,
+                    provider_name=model_name,
                 )
 
             # detect tool_use
@@ -395,9 +387,9 @@ class Agent:
             tool_result_blocks = await self._execute_tool_uses(tool_uses)
 
             # 持久化 tool_result(role=user)
-            if conv_repo is not None and conversation_id is not None:
-                await conv_repo.append_message(
-                    conversation_id,
+            if convo_repo is not None and convo_id is not None:
+                await convo_repo.append_message(
+                    convo_id,
                     "user",
                     tool_result_blocks,
                 )
@@ -706,7 +698,7 @@ class Agent:
     ) -> None:
         latency_ms = int((time.monotonic() - t0) * 1000)
         await log_writer.record(
-            model=model,
+            provider=model,
             status=status,  # type: ignore[arg-type]
             latency_ms=latency_ms,
             error=error,

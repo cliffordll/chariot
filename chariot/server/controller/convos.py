@@ -1,21 +1,21 @@
-"""admin /conversations 端点 —— 0.4.0 多轮会话管理。
+"""admin /convos 端点 —— 0.4.0 多轮会话管理。
 
 端点
 ----
-GET    /admin/conversations       → list({id, title, last_model, message_count, ts...})
+GET    /admin/convos       → list({id, title, last_model, message_count, ts...})
                                     支持 limit / offset 分页
-GET    /admin/conversations/{id}  → detail + 全部 messages
-POST   /admin/conversations       → 显式创建(server 生成 ULID),返完整 entry
+GET    /admin/convos/{id}  → detail + 全部 messages
+POST   /admin/convos       → 显式创建(server 生成 ULID),返完整 entry
                                     非必需 —— `/v1/messages` 带未存在的 header 也 auto-create
                                     (模式 A vs 模式 B,见 DESIGN §3.1)
-DELETE /admin/conversations/{id}  → cascade 删 messages
-PATCH  /admin/conversations/{id}  → 改 title
+DELETE /admin/convos/{id}  → cascade 删 messages
+PATCH  /admin/convos/{id}  → 改 title
 
 错误码
 ------
-- 400 `invalid_conversation_id` —— 显式 create 给的 id 非法 ULID(自动生成不会触发)
-- 404 `conversation_not_found`  —— get / delete / patch 找不到 id
-- 409 `conversation_id_exists`  —— 显式 create 给的 id 已用
+- 400 `invalid_convo_id` —— 显式 create 给的 id 非法 ULID(自动生成不会触发)
+- 404 `convo_not_found`  —— get / delete / patch 找不到 id
+- 409 `convo_id_exists`  —— 显式 create 给的 id 已用
 
 ULID 生成:server 用 `python-ulid` 库,26 字符 base32 大写,单调时间戳前缀。
 """
@@ -32,22 +32,22 @@ from ulid import ULID
 
 from chariot.agent.config import (
     ConfigError,
-    ConversationNotFound,
-    DuplicateConversationId,
+    ConvoNotFound,
+    DuplicateConvoId,
 )
 from chariot.database.session import SessionDep
-from chariot.repos.conversation_repo import (
-    Conversation,
-    ConversationRepo,
+from chariot.repos.convo_repo import (
+    Convo,
+    ConvoRepo,
 )
 from chariot.server.service.exceptions import ServiceError
 
 # 给 SDK 复用的 schema(沿用 controller/models.py 的"从 controller 导 schema"约定)
 __all__ = [
-    "ConversationDetailResponse",
-    "ConversationOut",
-    "ConversationsListResponse",
-    "CreateConversationRequest",
+    "ConvoDetailResponse",
+    "ConvoOut",
+    "ConvosListResponse",
+    "CreateConvoRequest",
     "MessageOut",
     "UpdateTitleRequest",
     "router",
@@ -62,7 +62,7 @@ _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 # ---------- Pydantic schema ----------
 
 
-class ConversationOut(BaseModel):
+class ConvoOut(BaseModel):
     """单条 conversation 的对外形态(列表行 + 详情头都用)。"""
 
     id: str
@@ -73,7 +73,7 @@ class ConversationOut(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_dataclass(cls, conv: Conversation) -> ConversationOut:
+    def from_dataclass(cls, conv: Convo) -> ConvoOut:
         return cls(
             id=conv.id,
             title=conv.title,
@@ -85,27 +85,27 @@ class ConversationOut(BaseModel):
 
 
 class MessageOut(BaseModel):
-    """单条 message 的对外形态(详情端点用,含 seq / model_name / 时间戳元数据)。"""
+    """单条 message 的对外形态(详情端点用,含 seq / provider_name / 时间戳元数据)。"""
 
     seq: int
     role: str  # 'user' | 'assistant'
     content: Any  # str 或 anthropic content blocks 数组
-    model_name: str | None
+    provider_name: str | None
     created_at: datetime
 
 
-class ConversationsListResponse(BaseModel):
-    items: list[ConversationOut]
+class ConvosListResponse(BaseModel):
+    items: list[ConvoOut]
     limit: int
     offset: int
 
 
-class ConversationDetailResponse(BaseModel):
-    conversation: ConversationOut
+class ConvoDetailResponse(BaseModel):
+    convo: ConvoOut
     messages: list[MessageOut]
 
 
-class CreateConversationRequest(BaseModel):
+class CreateConvoRequest(BaseModel):
     """显式创建。`title` 可选;`id` 也可选 —— 不传 server 生成 ULID,
     传了则按 client 给的 id(必须合法 ULID)。"""
 
@@ -121,20 +121,20 @@ class UpdateTitleRequest(BaseModel):
 
 
 def _to_service_error(exc: ConfigError) -> ServiceError:
-    if isinstance(exc, DuplicateConversationId):
-        return ServiceError(status=409, code="conversation_id_exists", message=str(exc))
-    if isinstance(exc, ConversationNotFound):
-        return ServiceError(status=404, code="conversation_not_found", message=str(exc))
+    if isinstance(exc, DuplicateConvoId):
+        return ServiceError(status=409, code="convo_id_exists", message=str(exc))
+    if isinstance(exc, ConvoNotFound):
+        return ServiceError(status=404, code="convo_not_found", message=str(exc))
     return ServiceError(status=400, code="bad_request", message=str(exc))
 
 
-def _validate_ulid(conv_id: str) -> None:
-    """非法 ULID → 400 invalid_conversation_id。"""
-    if not _ULID_RE.fullmatch(conv_id):
+def _validate_ulid(convo_id: str) -> None:
+    """非法 ULID → 400 invalid_convo_id。"""
+    if not _ULID_RE.fullmatch(convo_id):
         raise ServiceError(
             status=400,
-            code="invalid_conversation_id",
-            message=f"conversation id 必须是 26 字符 ULID,得到 {conv_id!r}",
+            code="invalid_convo_id",
+            message=f"conversation id 必须是 26 字符 ULID,得到 {convo_id!r}",
         )
 
 
@@ -151,7 +151,7 @@ def _message_to_out(row: Any) -> MessageOut:
         seq=row.seq,
         role=row.role,
         content=content,
-        model_name=row.model_name,
+        provider_name=row.provider_name,
         created_at=row.created_at,
     )
 
@@ -159,82 +159,82 @@ def _message_to_out(row: Any) -> MessageOut:
 # ---------- 端点 ----------
 
 
-@router.get("/conversations", response_model=ConversationsListResponse)
-async def list_conversations(
+@router.get("/convos", response_model=ConvosListResponse)
+async def list_convos(
     session: SessionDep,
     limit: int = 50,
     offset: int = 0,
-) -> ConversationsListResponse:
-    repo = ConversationRepo(session)
+) -> ConvosListResponse:
+    repo = ConvoRepo(session)
     convs = await repo.list_entries(limit=limit, offset=offset)
-    return ConversationsListResponse(
-        items=[ConversationOut.from_dataclass(c) for c in convs],
+    return ConvosListResponse(
+        items=[ConvoOut.from_dataclass(c) for c in convs],
         limit=limit,
         offset=offset,
     )
 
 
-@router.get("/conversations/{conv_id}", response_model=ConversationDetailResponse)
-async def get_conversation(conv_id: str, session: SessionDep) -> ConversationDetailResponse:
-    _validate_ulid(conv_id)
-    repo = ConversationRepo(session)
-    conv = await repo.get(conv_id)
+@router.get("/convos/{convo_id}", response_model=ConvoDetailResponse)
+async def get_convo(convo_id: str, session: SessionDep) -> ConvoDetailResponse:
+    _validate_ulid(convo_id)
+    repo = ConvoRepo(session)
+    conv = await repo.get(convo_id)
     if conv is None:
         raise ServiceError(
             status=404,
-            code="conversation_not_found",
-            message=f"未知 conversation id: {conv_id!r}",
+            code="convo_not_found",
+            message=f"未知 conversation id: {convo_id!r}",
         )
-    rows = await repo.list_messages(conv_id)
-    return ConversationDetailResponse(
-        conversation=ConversationOut.from_dataclass(conv),
+    rows = await repo.list_messages(convo_id)
+    return ConvoDetailResponse(
+        convo=ConvoOut.from_dataclass(conv),
         messages=[_message_to_out(r) for r in rows],
     )
 
 
 @router.post(
-    "/conversations",
-    response_model=ConversationOut,
+    "/convos",
+    response_model=ConvoOut,
     status_code=201,
 )
-async def create_conversation(
-    req: CreateConversationRequest,
+async def create_convo(
+    req: CreateConvoRequest,
     session: SessionDep,
-) -> ConversationOut:
+) -> ConvoOut:
     """显式创建。`req.id` 不传 → server 生成 ULID;传了则严格校验形态。"""
     if req.id is None:
-        conv_id = str(ULID())
+        convo_id = str(ULID())
     else:
         _validate_ulid(req.id)
-        conv_id = req.id
-    repo = ConversationRepo(session)
+        convo_id = req.id
+    repo = ConvoRepo(session)
     try:
-        conv = await repo.create(conv_id, title=req.title)
+        conv = await repo.create(convo_id, title=req.title)
     except ConfigError as e:
         raise _to_service_error(e) from e
-    return ConversationOut.from_dataclass(conv)
+    return ConvoOut.from_dataclass(conv)
 
 
-@router.delete("/conversations/{conv_id}", status_code=204)
-async def delete_conversation(conv_id: str, session: SessionDep) -> None:
-    _validate_ulid(conv_id)
-    repo = ConversationRepo(session)
+@router.delete("/convos/{convo_id}", status_code=204)
+async def delete_convo(convo_id: str, session: SessionDep) -> None:
+    _validate_ulid(convo_id)
+    repo = ConvoRepo(session)
     try:
-        await repo.delete(conv_id)
+        await repo.delete(convo_id)
     except ConfigError as e:
         raise _to_service_error(e) from e
 
 
-@router.patch("/conversations/{conv_id}", response_model=ConversationOut)
-async def patch_conversation(
-    conv_id: str,
+@router.patch("/convos/{convo_id}", response_model=ConvoOut)
+async def patch_convo(
+    convo_id: str,
     req: UpdateTitleRequest,
     session: SessionDep,
-) -> ConversationOut:
-    _validate_ulid(conv_id)
-    repo = ConversationRepo(session)
+) -> ConvoOut:
+    _validate_ulid(convo_id)
+    repo = ConvoRepo(session)
     try:
-        conv = await repo.update_title(conv_id, req.title)
+        conv = await repo.update_title(convo_id, req.title)
     except ConfigError as e:
         raise _to_service_error(e) from e
-    return ConversationOut.from_dataclass(conv)
+    return ConvoOut.from_dataclass(conv)

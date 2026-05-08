@@ -75,7 +75,7 @@ async def test_logs_since_strictly_greater(client: AsyncClient, session: AsyncSe
         session.add(
             LogEntry(
                 id=f"{i:0>32}",
-                model=f"m-{i}",
+                provider=f"m-{i}",
                 status="ok",
                 latency_ms=i,
                 created_at=base + timedelta(seconds=delta),
@@ -89,4 +89,4 @@ async def test_logs_since_strictly_greater(client: AsyncClient, session: AsyncSe
     assert r.status_code == 200
     items = r.json()
     assert len(items) == 1
-    assert items[0]["model"] == "m-2"
+    assert items[0]["provider"] == "m-2"

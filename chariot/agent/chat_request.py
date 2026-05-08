@@ -7,7 +7,7 @@
 - Claude API 用户能直接 `ChatRequest(**claude_body)` 把现有调用代码搬过来
 
 关于 chariot 扩展字段:
-- `conversation_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
+- `convo_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
   `X-Chariot-Conversation` header 升级到顶层字段)
 - `agent_id`:0.9.0+ 多 AIAgent 实例路由;0.6.0 默认 `None`,字段先占位
 
@@ -81,7 +81,7 @@ class ChatRequest:
 
     `model` 字段语义在 chariot 层做了一层抽象:Claude API 里 `model` 是 LLM
     模型 ID(如 `claude-sonnet-4-6`);chariot 这里 `model` 是 entry name
-    (用户在 `models` 表里的命名,如 `claude` / `mock` / `gpt-4`),由 AIAgent
+    (用户在 `providers` 表里的命名,如 `claude` / `mock` / `gpt-4`),由 AIAgent
     路由到对应 Provider 实例,Provider 内部把真实的 model ID 传给上游。
 
     `messages` 是必填(Claude API 要求);其它字段都有合理默认。
@@ -102,14 +102,14 @@ class ChatRequest:
     thinking: dict[str, Any] | None = None  # extended thinking 配置(Claude 4+)
 
     # ─── chariot 扩展字段(顶层放,跟 Claude 字段不冲突) ───
-    conversation_id: str | None = None  # None = stateless;ULID = stateful
+    convo_id: str | None = None  # None = stateless;ULID = stateful
     agent_id: str | None = None  # 0.9.0+ 多 AIAgent 实例;0.6.0 默认 None
 
     # ---- 查询便利方法(逻辑收进类,不散成模块级 helper) ----
 
     def is_stateful(self) -> bool:
-        """是否带 conversation_id(stateful 多轮)。"""
-        return self.conversation_id is not None
+        """是否带 convo_id(stateful 多轮)。"""
+        return self.convo_id is not None
 
     def last_user_text(self) -> str | None:
         """末轮 user message 的纯文本(若 content 是字符串或全 text block);

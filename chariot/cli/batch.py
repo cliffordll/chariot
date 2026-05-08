@@ -4,14 +4,14 @@
 到 terminal,结果以 `list[TurnResult]` 返回给调用方。
 
 与 `ChatRepl` / `ChatOnce` 对称,三者都是"`ChatContext` 上的一种执行模式":
-- `ChatRepl`:terminal 交互循环(依赖 `Renderer` + `input()`)
+- `ChatRepl`:terminal 交互循环(依赖 `Renderer` + prompt_toolkit)
 - `ChatOnce`:terminal 一次性请求(依赖 `Renderer`)
 - `ChatBatch`:脚本 / GUI 批量跑(**不依赖 UI**,纯数据入/出)
 
-典型 caller:未来的 GUI(Tauri webview 通过 invoke 喂一批输入)/ 集成测试 /
-脚本化批量问答。
+典型 caller:GUI(Tauri webview 通过 invoke 喂一批输入)/ 集成测试 / 脚本化批量
+问答。
 
-v0.1 语义
+v0.6 语义
 ---------
 - 单 `ctx` 累积多轮历史(跟 REPL 一致,只是不交互)
 - 每轮失败撤回该 user 消息,跳过继续下一条(不中断整批)
@@ -25,7 +25,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from chariot.cli.core.context import ChatContext, ChatError, TurnResult
+from chariot.agent.chat_event import ChatEvent
+from chariot.cli.context import ChatContext, ChatError, TurnResult
 
 
 @dataclass
@@ -33,7 +34,7 @@ class ChatBatch:
     """批量执行器:从迭代器取 user text,逐条发,收集 `TurnResult`。"""
 
     ctx: ChatContext
-    # 每轮失败收集到的错误(status + short body),调用方可选择读
+    # 每轮失败收集到的错误,调用方可选择读
     errors: list[ChatError] = field(default_factory=lambda: [])
 
     async def run(self, texts: Iterable[str]) -> list[TurnResult]:
@@ -53,5 +54,5 @@ class ChatBatch:
         return results
 
 
-def _noop(_: object) -> None:
-    """on_event 占位;batch 不消费 typed events(只在收尾拿完整 TurnResult)。"""
+def _noop(_: ChatEvent) -> None:
+    """on_event 占位;batch 不消费 ChatEvent(只在收尾拿完整 TurnResult)。"""

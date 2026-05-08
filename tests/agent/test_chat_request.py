@@ -79,7 +79,7 @@ class TestChatRequestDefaults:
         assert req.stop_sequences is None
         assert req.metadata is None
         assert req.thinking is None
-        assert req.conversation_id is None
+        assert req.convo_id is None
         assert req.agent_id is None
 
     def test_frozen(self) -> None:
@@ -134,11 +134,11 @@ class TestClaudeApiInterop:
         req = ChatRequest(
             model="claude",
             messages=[Message(role="user", content="hi")],
-            conversation_id="01H...",
+            convo_id="01H...",
             agent_id="agent_main",
         )
         d = dataclasses.asdict(req)
-        assert d["conversation_id"] == "01H..."
+        assert d["convo_id"] == "01H..."
         assert d["agent_id"] == "agent_main"
 
 
@@ -147,7 +147,7 @@ class TestChatRequestQueries:
         req = ChatRequest(
             model="claude",
             messages=[Message(role="user", content="hi")],
-            conversation_id="01H...",
+            convo_id="01H...",
         )
         assert req.is_stateful() is True
 

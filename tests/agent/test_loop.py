@@ -144,7 +144,7 @@ def _make_loop(
         provider=_ScriptedProvider(turns),
         tools=tools or {},
         repo=None,
-        conversation_id=None,
+        convo_id=None,
         max_iter=max_iter,
     )
 

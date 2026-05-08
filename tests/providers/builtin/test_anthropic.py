@@ -419,11 +419,11 @@ class TestBuildBody:
         req = ChatRequest(
             model="anthropic",
             messages=[Message(role="user", content="hi")],
-            conversation_id="01H...",
+            convo_id="01H...",
             agent_id="agent_main",
         )
         body = AnthropicProvider._build_body(req)
-        assert "conversation_id" not in body
+        assert "convo_id" not in body
         assert "agent_id" not in body
 
     def test_excludes_none_fields(self) -> None:

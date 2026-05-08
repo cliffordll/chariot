@@ -3,7 +3,7 @@
 覆盖:
 - ProviderError 三元组(code / message / status)+ 默认 status=502
 - ConfigError 子类层级
-- ConversationLockTimeout 的 layer 字段
+- ConvoLockTimeout 的 layer 字段
 - ToolExecutionError 的 tool_name 字段
 - 模块**不依赖 fastapi**(import 时不引入)
 """
@@ -16,12 +16,12 @@ import pytest
 
 from chariot.agent.exceptions import (
     ConfigError,
-    ConversationLockTimeout,
-    ConversationNotFound,
-    DuplicateConversationId,
-    DuplicateModelName,
-    ModelNotFound,
+    ConvoLockTimeout,
+    ConvoNotFound,
+    DuplicateConvoId,
+    DuplicateProviderName,
     ProviderError,
+    ProviderNotFound,
     ToolExecutionError,
     ToolNotFound,
 )
@@ -50,24 +50,24 @@ class TestConfigError:
         exc = ConfigError("invalid section")
         assert isinstance(exc, Exception)
 
-    def test_model_not_found_subclass(self) -> None:
-        exc = ModelNotFound("model x not in db")
+    def test_provider_not_found_subclass(self) -> None:
+        exc = ProviderNotFound("model x not in db")
         assert isinstance(exc, ConfigError)
 
     def test_duplicate_model_name_subclass(self) -> None:
-        exc = DuplicateModelName("name claude already exists")
+        exc = DuplicateProviderName("name claude already exists")
         assert isinstance(exc, ConfigError)
 
     def test_tool_not_found_subclass(self) -> None:
         exc = ToolNotFound("tool x not in db")
         assert isinstance(exc, ConfigError)
 
-    def test_conversation_not_found_subclass(self) -> None:
-        exc = ConversationNotFound("conv 01H... not in db")
+    def test_convo_not_found_subclass(self) -> None:
+        exc = ConvoNotFound("conv 01H... not in db")
         assert isinstance(exc, ConfigError)
 
-    def test_duplicate_conversation_id_subclass(self) -> None:
-        exc = DuplicateConversationId("conv id already used")
+    def test_duplicate_convo_id_subclass(self) -> None:
+        exc = DuplicateConvoId("conv id already used")
         assert isinstance(exc, ConfigError)
 
 
@@ -87,14 +87,14 @@ class TestToolExecutionError:
         assert exc.extra == {"path": "/etc/passwd"}
 
 
-class TestConversationLockTimeout:
+class TestConvoLockTimeout:
     def test_local_layer(self) -> None:
-        exc = ConversationLockTimeout("waited 30s", layer="local")
+        exc = ConvoLockTimeout("waited 30s", layer="local")
         assert exc.layer == "local"
         assert exc.message == "waited 30s"
 
     def test_db_layer(self) -> None:
-        exc = ConversationLockTimeout("retried 3 times", layer="db")
+        exc = ConvoLockTimeout("retried 3 times", layer="db")
         assert exc.layer == "db"
 
 

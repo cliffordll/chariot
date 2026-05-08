@@ -29,15 +29,15 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
-from chariot.agent.conversation_lock import ConversationLockManager
-from chariot.agent.exceptions import ConversationLockTimeout
+from chariot.agent.convo_lock import ConvoLockManager
+from chariot.agent.exceptions import ConvoLockTimeout
 from chariot.agent.loop import AgentLoop
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.providers.base import BaseProvider
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.repos.convo_repo import ConvoRepo
     from chariot.tools.base import BaseTool
 
 
@@ -77,23 +77,32 @@ class AIAgent:
 
     @classmethod
     async def from_db(cls, db_path: Path) -> Self:
-        """从 ~/.chariot/chariot.db 装载 ModelEntry / ToolEntry,构造所有
+        """从 ~/.chariot/chariot.db 装载 ProviderEntry / ToolEntry,构造所有
         Provider / Tool 实例,返就绪 AIAgent 并设为 `_current` 单例。
+
+        首次启动表为空 → 自动 seed:`providers` 插一条 mock entry,`tools` 插
+        4 条 disabled fixture(read_file / list_dir / shell_exec / http_get)。
+        seeded 工具默认 disabled,所以新装的 AIAgent 无 tool;mock provider
+        已可用。
 
         每个 surface 进程启动时调一次。
         """
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
+        from chariot.repos.provider_repo import ProviderRepo
+        from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
 
         sm = await init_db(db_path)
         async with sm() as session:
+            await ProviderRepo(session).seed_if_empty()
+            await ToolRepo(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
 
         providers: dict[str, BaseProvider] = {
-            entry.name: ProviderRegistry.build(entry.type, entry.options) for entry in cfg.models
+            entry.name: ProviderRegistry.build(entry.type, entry.options) for entry in cfg.providers
         }
         tools: dict[str, BaseTool] = {
             entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
@@ -115,6 +124,32 @@ class AIAgent:
         """清空单例(测试 / shutdown 用)。"""
         cls._current = None
 
+    # ---- 资源访问(供 surface 直调 repo) ----
+
+    @property
+    def session_maker(self) -> async_sessionmaker[AsyncSession]:
+        """暴露 sessionmaker 给 surface(CLI / sidecar)直调 repo;未装载抛 RuntimeError。
+
+        典型用法::
+
+            async with agent.session_maker() as session:
+                repo = ConvoRepo(session)
+                entries = await repo.list_entries()
+        """
+        if self._sessionmaker is None:
+            raise RuntimeError("AIAgent 未装载 sessionmaker;先调 AIAgent.from_db(db_path)")
+        return self._sessionmaker
+
+    @property
+    def providers(self) -> dict[str, BaseProvider]:
+        """已装载的 provider 字典(只读视图;surface 仅用于 status / 列表展示)。"""
+        return dict(self._providers)
+
+    @property
+    def tools(self) -> dict[str, BaseTool]:
+        """已装载的 tool 字典(只读视图;surface 仅用于 status / 列表展示)。"""
+        return dict(self._tools)
+
     # ---- 主入口 ----
 
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -122,7 +157,7 @@ class AIAgent:
 
         路由:按 `req.model` 找 provider;缺失 → yield error event 退出。
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
-        stateful(`req.conversation_id` 非空)→ 在 conv lock 内开 session 跑;
+        stateful(`req.convo_id` 非空)→ 在 convo lock 内开 session 跑;
         stateless → 直接跑 AgentLoop 不开 session。
         """
         provider = self._providers.get(req.model)
@@ -147,12 +182,12 @@ class AIAgent:
     async def _run_stateless(
         self, req: ChatRequest, provider: BaseProvider
     ) -> AsyncIterator[ChatEvent]:
-        """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
+        """无 convo_id:直接跑 AgentLoop,不锁不持久化。"""
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
             repo=None,
-            conversation_id=None,
+            convo_id=None,
         )
         async for event in loop.run(req):
             yield event
@@ -160,7 +195,7 @@ class AIAgent:
     async def _run_stateful(
         self, req: ChatRequest, provider: BaseProvider
     ) -> AsyncIterator[ChatEvent]:
-        """有 conversation_id:开 session + 进 conv lock + load history + AgentLoop。
+        """有 convo_id:开 session + 进 convo lock + load history + AgentLoop。
 
         约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
         server 端 load 历史 prepend。stateful 调用方不发完整对话历史。
@@ -172,52 +207,50 @@ class AIAgent:
             )
             return
 
-        conv_id = req.conversation_id
-        assert conv_id is not None  # is_stateful() 保证
+        convo_id = req.convo_id
+        assert convo_id is not None  # is_stateful() 保证
 
         async with self._sessionmaker() as session:
             try:
-                async with ConversationLockManager.acquire(conv_id, db_session=session):
+                async with ConvoLockManager.acquire(convo_id, db_session=session):
                     async for event in self._stateful_critical_section(
-                        req, conv_id, provider, session
+                        req, convo_id, provider, session
                     ):
                         yield event
-            except ConversationLockTimeout as e:
+            except ConvoLockTimeout as e:
                 yield ChatEvent.error_event(
-                    error_type=f"conversation_busy_{e.layer}",
+                    error_type=f"convo_busy_{e.layer}",
                     error_message=str(e),
                 )
 
     async def _stateful_critical_section(
         self,
         req: ChatRequest,
-        conv_id: str,
+        convo_id: str,
         provider: BaseProvider,
         session: AsyncSession,
     ) -> AsyncIterator[ChatEvent]:
-        """conv lock 内的实际工作:ensure conv / persist new user / load history /
+        """convo lock 内的实际工作:ensure convo / persist new user / load history /
         跑 AgentLoop。"""
-        from chariot.repos.conversation_repo import ConversationRepo
+        from chariot.repos.convo_repo import ConvoRepo
 
-        repo = ConversationRepo(session)
-        await repo.ensure_exists(conv_id)
-        await self._persist_new_user_messages(repo, conv_id, req)
-        history = await self._load_history_as_messages(repo, conv_id)
+        repo = ConvoRepo(session)
+        await repo.ensure_exists(convo_id)
+        await self._persist_new_user_messages(repo, convo_id, req)
+        history = await self._load_history_as_messages(repo, convo_id)
         full_req = dataclasses.replace(req, messages=history)
 
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
             repo=repo,
-            conversation_id=conv_id,
+            convo_id=convo_id,
         )
         async for event in loop.run(full_req):
             yield event
 
     @staticmethod
-    async def _persist_new_user_messages(
-        repo: ConversationRepo, conv_id: str, req: ChatRequest
-    ) -> None:
+    async def _persist_new_user_messages(repo: ConvoRepo, convo_id: str, req: ChatRequest) -> None:
         """req.messages 里新增的 user 消息(末尾若干条 role='user')落库。
 
         简化策略:把 req.messages 整体当"新增"持久化(假设 client 在 stateful
@@ -232,12 +265,12 @@ class AIAgent:
                 if isinstance(msg.content, list)
                 else [{"type": "text", "text": msg.content}]
             )
-            await repo.append_message(conv_id, role="user", content=content)
+            await repo.append_message(convo_id, role="user", content=content)
 
     @staticmethod
-    async def _load_history_as_messages(repo: ConversationRepo, conv_id: str) -> list[Message]:
+    async def _load_history_as_messages(repo: ConvoRepo, convo_id: str) -> list[Message]:
         """SELECT messages → list[Message](Claude 形态,直接喂 Provider)。"""
-        rows = await repo.load_messages_as_anthropic(conv_id)
+        rows = await repo.load_messages_as_anthropic(convo_id)
         return [Message(role=row["role"], content=row["content"]) for row in rows]
 
     # ---- default tools 注入 ----
