@@ -408,6 +408,35 @@ class TestFromOptions:
         # base_url 在 _build_body 不暴露,只能间接验:_base_url 字段
         assert provider._base_url == "https://custom.api"
 
+    def test_base_url_falls_back_to_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """S.7.3 起:options 无 inline base_url → 读 ANTHROPIC_BASE_URL env(Anthropic SDK 约定)。"""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
+        provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+        assert provider._base_url == "https://env.api"
+
+    def test_inline_base_url_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """inline > env(CLI flag 通过 inline 注入,所以 CLI > env;DB 显式 inline 也 > env)。"""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
+        provider = AnthropicProvider.from_options(
+            {"model": "claude-3-5-sonnet-20241022", "base_url": "https://inline.api"}
+        )
+        assert provider._base_url == "https://inline.api"
+
+    def test_base_url_default_when_no_inline_no_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """都没设 → 默认 https://api.anthropic.com。"""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+        provider = AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022"})
+        assert provider._base_url == "https://api.anthropic.com"
+
+    def test_empty_inline_base_url_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """inline base_url 是空串 → 校验失败(让用户改成"整条删掉")。"""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+        with pytest.raises(ConfigError, match="base_url"):
+            AnthropicProvider.from_options({"model": "claude-3-5-sonnet-20241022", "base_url": ""})
+
 
 # ---------------------------------------------------------------------------
 # _build_body:Claude API 请求拼装

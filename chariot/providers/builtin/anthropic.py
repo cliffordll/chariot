@@ -47,6 +47,7 @@ class AnthropicProvider(BaseProvider):
 
     _DEFAULT_BASE_URL: ClassVar[str] = "https://api.anthropic.com"
     _DEFAULT_API_KEY_ENV: ClassVar[str] = "ANTHROPIC_API_KEY"
+    _BASE_URL_ENV: ClassVar[str] = "ANTHROPIC_BASE_URL"  # Anthropic SDK 标准 env
     _ANTHROPIC_VERSION: ClassVar[str] = "2023-06-01"
 
     # 类级超时常量,测试可 monkeypatch
@@ -101,23 +102,21 @@ class AnthropicProvider(BaseProvider):
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> Self:
-        """从 `ModelEntry.options` 构造;关键字段缺 / 非法 → `ConfigError`。
+        """从 `ProviderEntry.options` 构造;关键字段缺 / 非法 → `ConfigError`。
 
-        options 字段:
-        - `model`(必填):上游真实 model ID(如 `claude-sonnet-4-6`)
-        - `api_key`(可选):内联密钥;不填则从 env 读
-        - `api_key_env`(可选,默认 `ANTHROPIC_API_KEY`):环境变量名
-        - `base_url`(可选,默认 `https://api.anthropic.com`)
+        options 字段(优先级 = inline → env → 默认;CLI flag 通过 inline 注入):
+        - `model`(必填):上游真实 model ID(如 `claude-sonnet-4-6`);仅 inline,无 env
+        - `api_key`(可选 inline):内联密钥
+        - `api_key_env`(可选,默认 `ANTHROPIC_API_KEY`):环境变量名;inline 缺时读
+        - `base_url`(可选 inline):内联;缺时读 `ANTHROPIC_BASE_URL` env;
+          再缺用默认 `https://api.anthropic.com`(Anthropic SDK 标准约定)
         """
         model = options.get("model")
         if not isinstance(model, str) or not model:
             raise ConfigError("anthropic provider 配置缺少 'model' 或类型不对")
 
         api_key = cls._resolve_api_key(options)
-
-        base_url = options.get("base_url", cls._DEFAULT_BASE_URL)
-        if not isinstance(base_url, str) or not base_url:
-            raise ConfigError("'base_url' 必须是非空字符串")
+        base_url = cls._resolve_base_url(options)
 
         config = BaseProviderConfig(name="anthropic", model=model)
         return cls(config=config, api_key=api_key, base_url=base_url)
@@ -138,6 +137,25 @@ class AnthropicProvider(BaseProvider):
         if not env_value:
             raise ConfigError(f"未拿到 api_key:配置里没填 'api_key',且环境变量 {env_name} 也未设置")
         return env_value
+
+    @classmethod
+    def _resolve_base_url(cls, options: dict[str, Any]) -> str:
+        """按优先级 (inline base_url) → (`ANTHROPIC_BASE_URL` env) → 默认 解析。
+
+        env 名固定 `ANTHROPIC_BASE_URL`(对齐 Anthropic Python SDK 约定),不
+        提供 `base_url_env` 配置字段(否则跟 SDK 约定割裂,迁移摩擦增大)。
+        """
+        inline = options.get("base_url")
+        if inline is not None:
+            if not isinstance(inline, str) or not inline:
+                raise ConfigError("'base_url' 必须是非空字符串(留空请整条删掉)")
+            return inline
+
+        env_value = os.environ.get(cls._BASE_URL_ENV)
+        if env_value:
+            return env_value
+
+        return cls._DEFAULT_BASE_URL
 
     # ---- BaseProvider 接口 ----
 

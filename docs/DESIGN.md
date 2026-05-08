@@ -406,6 +406,15 @@ class BaseProvider(ABC):
   `provider_name`(chariot 路由 key,如 `"ollama-qwen"`),wire body 字段名仍叫
   `model`(Anthropic API 要求),值由 Provider 内部从 `self.config.model` 写。
   S.7.1 修复 0.6.0 重写时漏掉这步导致的上游 `not_found_error`
+- **优先级解析**(详 §8.1 CLI override 流程):
+  - `api_key`:inline `entry.options.api_key` → `entry.options.api_key_env`
+    指向的 env(默认 `ANTHROPIC_API_KEY`);S.7.3 起 CLI `--api-key` 注入到
+    inline 实现 CLI flag > inline > env
+  - `base_url`:inline `entry.options.base_url` → `ANTHROPIC_BASE_URL` env →
+    默认 `https://api.anthropic.com`(对齐 Anthropic Python SDK 约定);S.7.3
+    起 CLI `--base-url` 注入到 inline 实现 CLI flag > inline > env
+  - `model`:仅 inline `entry.options.model`(无 env;Anthropic 无标准 env 名);
+    S.7.3 起 CLI `--model` 注入到 inline
 - 流式:消费上游 SSE 字节,解析成 `ChatEvent` yield。**chariot 不再做"字节级透传"**,
   解析后再发(代价:多一次反序列化;收益:协议解耦)
 - SSE 解析复用 `chariot/providers/_sse.py`(共享 utility,后续 OpenAIProvider 也用)
@@ -430,7 +439,119 @@ class BaseProvider(ABC):
 ### 5.4 `ProviderProber`(`chariot/providers/prober.py`)
 
 - 共享 utility:对任意 Provider 实例做 ping(发个最小 chat 请求验通)
-- 给 `chariot model probe <name>` CLI 用
+- 给 `chariot provider probe <name>` CLI 用
+
+### 5.5 参数传递与覆盖
+
+`provider entry` 的三个核心字段 —— `model` / `base_url` / `api_key` —— 在 chariot
+里走的不是同一条路径,看不清这点很容易以为 AIAgent 要"传递"它们。实际**AIAgent
+不知道 `base_url` / `api_key` 的存在**,它只持有 `dict[entry_name → BaseProvider 实例]`,
+每个 Provider 实例自己内部抓着 httpx client。
+
+#### 装载时:DB → Provider 实例
+
+```
+DB row: providers.options (JSON 列)
+   {"model": "qwen2.5:1.5b",
+    "base_url": "http://...:64388",
+    "api_key": "EMPTY",
+    "api_key_env": "ANTHROPIC_API_KEY"}
+        │ ProviderRepo._row_to_entry
+        ▼
+   ProviderEntry(name, type, options, params)
+        │ ProviderRegistry.build(entry.type, entry.options)
+        │   → AnthropicProvider.from_options(options)
+        │     → AnthropicProvider.__init__(config, api_key, base_url)
+        ▼
+   AnthropicProvider 实例(挂在 AIAgent._providers)
+     self.config.model = "qwen2.5:1.5b"
+     self._client      = httpx.AsyncClient(
+       base_url="http://...:64388",
+       headers={"x-api-key": "EMPTY", ...})
+```
+
+#### 三字段的不同归宿
+
+| 字段 | 落到哪 | 何时使用 | 谁知道它 |
+|---|---|---|---|
+| `model` | `BaseProviderConfig.model`(`self.config`) | **每次** `_build_body` 时写到 `body["model"]`(wire 字段) | 仅 Provider 内部 |
+| `api_key` | `httpx.AsyncClient.headers["x-api-key"]` | client 级,焊在 client 里;每个请求自带 | 仅 Provider 内部(client 持有) |
+| `base_url` | `httpx.AsyncClient.base_url` | client 级,`build_request` 拼出最终 URL | 仅 Provider 内部(client 持有) |
+
+**关键性质**:
+- `base_url` / `api_key` **不流经 `ChatRequest`**,也不出现在 `BaseProvider.generate(req)`
+  的签名后面。它们在 `from_options` 阶段就"焊"进了 `httpx.AsyncClient` 实例,
+  以后任何 `self._client.send(...)` 都自带这两项
+- `model` 略不同:虽然实例化时落到 `self.config.model`,但每次 `generate` 调
+  `_build_body` 时**必须** `body["model"] = self.config.model`(覆盖 `req.provider_name`,
+  因为 wire 字段名是 model 而不是 provider_name)。漏掉这步上游 404 not_found_error
+  (S.7.1 修复)
+- `req.provider_name` 跟 wire `body.model` 是**两个不同 concept**:前者是 chariot
+  路由 key,后者是上游识别的真实 LLM id。Provider 内部做最后一跳翻译
+
+#### CLI per-call 覆盖(S.7.3):options dict merge + 重建实例
+
+`chariot chat --model X --base-url Y --api-key Z` 这套 flag 的实现机制 = **CLI
+flag 在 Provider 实例化前最后一刻 merge 进 `entry.options` 那个 dict**。整条链:
+
+```
+CLI flag         (--model X / --base-url Y / --api-key Z)
+   │
+   ▼
+patch dict       {"model": "X", "base_url": "Y", "api_key": "Z"}  (空 flag 不进)
+   │
+   ▼
+浅 merge        merged_options = {**entry.options, **patch}    ← patch 覆盖同名字段
+   │
+   ▼
+ProviderRegistry.build(entry.type, merged_options)
+   │
+   ▼
+新 Provider 实例(httpx client 用 merged 字段重建)
+   │
+   ▼
+agent._providers[name] = new_instance      ← 原地替换,旧实例 GC
+```
+
+实现入口:`AIAgent.patch_provider_options(name, *, options_overrides=...)`。
+
+**为什么这套设计 work**:Provider 实例化入口是 `from_options(options: dict)` 单一
+dict 参数 —— dict 是 merge 友好的结构,patch 进去 Provider 自己 parse / 校验,
+不需要改 Provider 接口,也不需要新 layer。
+
+**链路其它环节不知道 override 这件事**:`ChatRequest` 不变 / `AIAgent.run` 路由
+逻辑不变 / `AgentLoop` 不变 / `Provider.generate` 看的是 `self.config.model` /
+`self._client`(已重建)。
+
+#### 副作用 / 适用边界
+
+1. **Provider 必须无状态**(不缓存 options 之外的东西)→ 重建无副作用。所有
+   `BaseProvider` 子类要遵守这条
+2. **httpx client 不复用**:override 一次重建一个 client(连接池跟着重建)。
+   CLI 进程一次只跑一次 chat,无关紧要;但**长跑场景**(sidecar / gateway)
+   如果引入"per-request override"会连接池爆炸 —— 届时得改架构(可能引入
+   `ChatRequest.model` 字段 + Provider 内部 request-scoped client)
+3. **不进 DB,不进 ChatContext**:override 仅活在 `agent._providers` 里,进程
+   退出就消失。对应 CLI "本次调用" 的语义
+4. **type-aware 由 Provider 自己处理**:CLI 不校验 `--api-key` 对 mock provider
+   是不是无意义 —— 给它,mock 自己忽略;OpenAIProvider(0.7.0)接入时也走同
+   套路,自己消化 options 字段
+
+#### AIAgent 的角色(零参与)
+
+AIAgent **不参与** `model` / `base_url` / `api_key` 的传递。它只做两件事:
+
+1. **路由**:按 `req.provider_name` 从 `self._providers` 挑出对应实例
+2. **委托**:调 `provider.generate(req)`,流式 yield `ChatEvent`
+
+`agent/run.py` 全文搜不到 `base_url` / `api_key`(除了 `patch_provider_options`
+内部把 patch 转给 ProviderRegistry,但它自己不解释这俩字段的语义)—— 那是
+Provider 内部细节。AIAgent 只看 entry name 和 ChatEvent。
+
+这套设计的好处:加新 Provider 类型(`OpenAIProvider` / `LocalLlamaProvider`
+/ ...)不用动 AIAgent 一行代码。新写 `BaseProvider` 子类 + 注册到
+`ProviderRegistry`,自己处理各家的 base_url / api_key / auth 形态 / SSE 解析
+就行。
 
 ## 6. AIAgent 内核(`chariot/agent/run.py` + `loop.py`)
 
@@ -830,6 +951,23 @@ cli/
   的 `--model` flag(语义跟 LLM model id 撞名 → 改名 `--provider`)
 - REPL `/provider <name>` 仍是本地切换;新增 `/provider use <name>` 持久化
 - **优先级**:CLI flag `--provider` > DB 默认(`is_default=1`)> die 提示
+
+**S.7.3 加的 per-call options override**(`--model` / `--base-url` / `--api-key`):
+
+- `chariot chat` 和 `chariot provider probe` 都接这三个 flag,临时覆盖 entry 的
+  对应 options 字段。**不动 DB**;只在本次进程生效
+- 实现走 `AIAgent.patch_provider_options(name, options_overrides=...)`:
+  浅 merge `entry.options` 后用 `ProviderRegistry.build` 重建实例,替换
+  `agent._providers[name]`。空 patch / 未知 name 静默 no-op
+- 对 `provider probe`:走 `dataclasses.replace(entry, options=merged)` 后跑
+  `ProviderProber.probe(temp_entry)`,不走 AIAgent 单例,不污染状态
+- **优先级链**(详 §5.1):
+  - `--model`:CLI flag → inline(无 env)
+  - `--base-url`:CLI flag → inline → `ANTHROPIC_BASE_URL` env → 默认
+  - `--api-key`:CLI flag → inline → `api_key_env` 指向的 env(默认 `ANTHROPIC_API_KEY`)
+- 命名约定:**CLI flag 沿用 wire 字段名**(`--model` / `--base-url` / `--api-key`),
+  跟 Anthropic SDK / 其它 LLM 工具的 CLI 习惯对齐;chariot IR 内部仍用
+  `provider_name` 错开
 
 ### 8.2 Sidecar surface(`chariot/sidecar/`)
 

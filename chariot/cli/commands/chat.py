@@ -6,6 +6,12 @@
 flags:
 - `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认
   (`chariot provider use <name>` 设置)。两者都没 → die 提示设默认或加 --provider
+- `--model <id>`(S.7.3 起,可选):本次会话覆盖 entry.options.model(LLM 真实 id);
+  仅 inline 优先级,无 env 兜底
+- `--base-url <url>`(S.7.3 起,可选):本次会话覆盖 entry.options.base_url;
+  优先级 CLI flag → DB inline → `ANTHROPIC_BASE_URL` env → 默认
+- `--api-key <key>`(S.7.3 起,可选):本次会话覆盖 entry.options.api_key;
+  优先级 CLI flag → DB inline → `ANTHROPIC_API_KEY` env(或 entry.options.api_key_env)
 - `--max-tokens N`(messages 协议的 max_tokens)
 - `--convo <id|new>`(0.4.0 + 0.6.0 rename):走 stateful path;`new` → CLI 生成 ULID 并打印;
   ULID 字面量 → 接续该会话;不传 → stateless(单轮 / 不持久化)
@@ -20,6 +26,7 @@ from typing import Annotated
 import typer
 from ulid import ULID
 
+from chariot.agent.exceptions import ConfigError
 from chariot.agent.run import AIAgent
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.context import ChatContext
@@ -42,6 +49,29 @@ def chat_cmd(
             help="本次会话用的 provider entry name;不传走 DB 默认",
         ),
     ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            help="本次覆盖 entry.options.model(LLM 真实 id,如 claude-sonnet-4-6)",
+        ),
+    ] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option(
+            "--base-url",
+            help=(
+                "本次覆盖 entry.options.base_url;不传按 inline → ANTHROPIC_BASE_URL env → 默认 解析"
+            ),
+        ),
+    ] = None,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help="本次覆盖 entry.options.api_key;不传按 inline → api_key_env 指向的 env 解析",
+        ),
+    ] = None,
     max_tokens: Annotated[
         int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")
     ] = 1024,
@@ -62,6 +92,9 @@ def chat_cmd(
         _run(
             text=text,
             provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
             max_tokens=max_tokens,
             convo_id=convo_id,
         )
@@ -88,15 +121,43 @@ def _resolve_convo_id(raw: str | None) -> str | None:
     return None  # pragma: no cover · die 已退出
 
 
+def _collect_options_overrides(
+    *,
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
+) -> dict[str, str]:
+    """把 CLI flag 收集成 options patch dict;空 flag 不进 dict(避免覆盖成空串)。"""
+    out: dict[str, str] = {}
+    if model is not None:
+        out["model"] = model
+    if base_url is not None:
+        out["base_url"] = base_url
+    if api_key is not None:
+        out["api_key"] = api_key
+    return out
+
+
 async def _run(
     *,
     text: str | None,
     provider: str | None,
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
     max_tokens: int,
     convo_id: str | None,
 ) -> None:
     async with installed_runtime() as agent:
         provider_name = await _resolve_provider(agent, provider)
+        overrides = _collect_options_overrides(model=model, base_url=base_url, api_key=api_key)
+        if overrides:
+            try:
+                await agent.patch_provider_options(provider_name, options_overrides=overrides)
+            except ConfigError as e:
+                Renderer.die(f"override 失败: {e}")
+                return
+
         ctx = ChatContext(
             agent=agent,
             provider_name=provider_name,

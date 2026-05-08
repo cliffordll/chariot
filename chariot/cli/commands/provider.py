@@ -162,20 +162,50 @@ async def _use(name: str) -> None:
 # ---------- probe ----------
 
 
-@provider_app.command("probe", help="探一下指定 model 通不通(消耗 ~1 token 费用)")
+@provider_app.command("probe", help="探一下指定 entry 通不通(消耗 ~1 token 费用)")
 def probe_cmd(
     name: Annotated[str, typer.Argument(help="entry name")],
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="本次覆盖 entry.options.model(LLM 真实 id)"),
+    ] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option("--base-url", help="本次覆盖 entry.options.base_url"),
+    ] = None,
+    api_key: Annotated[
+        str | None,
+        typer.Option("--api-key", help="本次覆盖 entry.options.api_key"),
+    ] = None,
 ) -> None:
-    asyncio.run(_probe(name))
+    asyncio.run(_probe(name, model=model, base_url=base_url, api_key=api_key))
 
 
-async def _probe(name: str) -> None:
+async def _probe(
+    name: str,
+    *,
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
+) -> None:
+    import dataclasses
+
+    overrides: dict[str, str] = {}
+    if model is not None:
+        overrides["model"] = model
+    if base_url is not None:
+        overrides["base_url"] = base_url
+    if api_key is not None:
+        overrides["api_key"] = api_key
+
     async with installed_runtime() as agent:
         async with agent.session_maker() as session:
             entry = await ProviderRepo(session).get_entry(name)
         if entry is None:
             Renderer.die(f"未知 entry: {name!r}(`chariot provider list` 看现有 id)")
             return
+        if overrides:
+            entry = dataclasses.replace(entry, options={**entry.options, **overrides})
         result = await ProviderProber.probe(entry)
 
     if result.ok:

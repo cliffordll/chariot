@@ -106,10 +106,22 @@ def test_chat_has_provider_option() -> None:
     assert "--provider" in out
 
 
-def test_chat_model_option_removed() -> None:
-    """`chariot chat --model` 在 v7 起下线;改 `--provider`(避免与 LLM model id 撞名)。"""
-    result = runner.invoke(app, ["chat", "--model", "anything", "hi"])
-    assert result.exit_code != 0
+def test_chat_has_override_options() -> None:
+    """S.7.3 起:`chariot chat` 加 --model / --base-url / --api-key 三个 per-call 覆盖。"""
+    result = runner.invoke(app, ["chat", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for flag in ("--model", "--base-url", "--api-key"):
+        assert flag in out, f"`chariot chat --help` 缺少 {flag}"
+
+
+def test_provider_probe_has_override_options() -> None:
+    """S.7.3 起:`chariot provider probe` 也接 --model / --base-url / --api-key。"""
+    result = runner.invoke(app, ["provider", "probe", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for flag in ("--model", "--base-url", "--api-key"):
+        assert flag in out, f"`chariot provider probe --help` 缺少 {flag}"
 
 
 def test_chat_convo_invalid_value_dies_locally() -> None:

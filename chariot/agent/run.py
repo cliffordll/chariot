@@ -150,6 +150,46 @@ class AIAgent:
         """已装载的 tool 字典(只读视图;surface 仅用于 status / 列表展示)。"""
         return dict(self._tools)
 
+    # ---- per-call provider 覆盖(CLI flag 用) ----
+
+    async def patch_provider_options(
+        self,
+        provider_name: str,
+        *,
+        options_overrides: dict[str, str],
+    ) -> None:
+        """对指定 provider entry 临时合并 options 重建实例(本进程生效)。
+
+        典型场景:CLI `chariot chat --model X --api-key Y` 把 X / Y 注入到
+        DB entry 的 options 后重建 Provider。`options_overrides` 浅 merge 到
+        `entry.options`,覆盖同名字段;空 dict 直接 no-op。
+
+        失败处理:
+        - `provider_name` 不在已装载 providers → 静默 no-op(让后续 AIAgent.run
+          路由阶段统一发 unknown_provider error,文案一致)
+        - DB 里 entry 不存在(理论上不应发生,因为它能装载就说明在过)→ no-op
+        - `Provider.from_options(merged)` 抛 ConfigError(覆盖值非法)→ 透传
+          给 caller,CLI 侧 die 提示
+        """
+        if not options_overrides:
+            return
+        if provider_name not in self._providers:
+            return
+
+        # 惰性 import 避循环依赖;CLI 侧调用频率低,单次 import 开销可忽略
+        from chariot.providers.registry import ProviderRegistry
+        from chariot.repos.provider_repo import ProviderRepo
+
+        async with self.session_maker() as session:
+            entry = await ProviderRepo(session).get_entry(provider_name)
+        if entry is None:
+            return
+
+        merged_options = {**entry.options, **options_overrides}
+        # ConfigError 由 caller 处理(CLI 应翻译成 die 提示)
+        new_provider = ProviderRegistry.build(entry.type, merged_options)
+        self._providers[provider_name] = new_provider
+
     # ---- 主入口 ----
 
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:

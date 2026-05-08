@@ -568,6 +568,75 @@ S.7 砍了 `--model "claude-haiku-4-5"` hardcoded 默认,但没提供替代,导�
   - `ChatRequest(model=` 还在(应该全部 `ChatRequest(provider_name=`)
   - error_type 仍叫 `unknown_model`
 
+### S.7.3 ⏳ CLI per-call override:`--model` / `--base-url` / `--api-key`
+
+**目标**:`chariot chat` 和 `chariot provider probe` 加三个 per-call CLI flag,
+让用户不动 DB entry 就能临时换 LLM model id / 上游 URL / API key。常见场景:
+快速切换 Claude 变体(`--model claude-opus-4-5`)、调试代理(`--base-url ...`)、
+临时 key(`--api-key $TEMP`)。
+
+**优先级链**(每字段独立):
+
+| 字段 | 优先级 |
+|---|---|
+| `--model` | CLI flag → `entry.options.model`(无 env 兜底,Anthropic 没标准 env 名) |
+| `--base-url` | CLI flag → `entry.options.base_url`(inline) → `ANTHROPIC_BASE_URL` env → 默认 `https://api.anthropic.com` |
+| `--api-key` | CLI flag → `entry.options.api_key`(inline) → `entry.options.api_key_env` 指向的 env(默认 `ANTHROPIC_API_KEY`) |
+
+按 Anthropic SDK 主流约定(inline > env);CLI flag 通过"注入到 options.model /
+base_url / api_key inline"实现最高优先级。
+
+**改动**:
+
+- `chariot/providers/builtin/anthropic.py`:
+  - 加 `_BASE_URL_ENV = "ANTHROPIC_BASE_URL"` 常量(对齐 Anthropic Python SDK)
+  - 抽 `_resolve_base_url(options)` static 方法,优先级 inline → env → 默认;
+    空串 inline → ConfigError(同 `_resolve_api_key` 校验)
+  - `from_options` 改用 `_resolve_base_url`(替代 `options.get("base_url",
+    DEFAULT)`)
+- `chariot/agent/run.py`:`AIAgent` 加 `patch_provider_options(name, *,
+  options_overrides)` 方法 —— 浅 merge `entry.options` + 重建 Provider 实例,
+  替换 `_providers[name]`。空 patch / 未知 name 静默 no-op;`from_options` 抛
+  ConfigError 透传给 caller
+- `chariot/cli/commands/chat.py`:加 `--model` / `--base-url` / `--api-key` 三个
+  typer flag;`_run` 收集为 patch dict,resolve provider 后调
+  `agent.patch_provider_options`。ConfigError → `Renderer.die`
+- `chariot/cli/commands/provider.py`:`probe_cmd` 加同样三个 flag;
+  `dataclasses.replace(entry, options={**entry.options, **patch})` 后跑探针
+  (探针走临时 entry,不改 DB / 不改 agent._providers)
+
+**验收**:
+
+- **单测**(`tests/providers/builtin/test_anthropic.py`,4 个新 case):
+  - `_resolve_base_url`:options 无 inline → 读 `ANTHROPIC_BASE_URL` env
+  - inline > env(优先级)
+  - inline + env 都无 → `https://api.anthropic.com` 默认
+  - 空串 inline → ConfigError(校验文案含 `base_url`)
+- **单测**(`tests/agent/test_run.py`,5 个新 case):
+  - `patch_provider_options(name, options_overrides={})` no-op(同实例)
+  - `patch_provider_options("ghost", ...)` 静默不抛(让 AIAgent.run 路由层报)
+  - 注入 `model` → 重建后 `provider.config.model` 反映新值
+  - 注入 `base_url` → 重建后 `provider._base_url` 反映新值
+  - 非法 override(空串 base_url)→ `ConfigError` 透传
+- **CLI 测试**(`tests/cli/test_commands.py`,2 个 help-flag case):
+  - `chariot chat --help` 含 `--model` / `--base-url` / `--api-key`
+  - `chariot provider probe --help` 含同样三个 flag
+- **静态**:三件套全绿
+- **手测**:
+  - `chariot chat --model claude-opus-4-5 "hi"`(已设默认 provider)→ 跑通,
+    上游收到 body.model = `claude-opus-4-5`
+  - `chariot chat --provider claude --base-url https://proxy.test/ "hi"`
+    → 走代理 URL
+  - `ANTHROPIC_BASE_URL=https://env.test/ chariot chat "hi"`(entry 无 inline
+    base_url)→ 走 env URL
+  - `chariot provider probe claude --api-key $TEMP_KEY` → 用临时 key 探针,
+    DB 不改
+- **不通过特征**:
+  - CLI flag 没注入(`agent.patch_provider_options` 没调)
+  - `_resolve_base_url` 优先级反了(env > inline)
+  - 空 patch dict 也重建 Provider(浪费 + 干扰单例 hashing)
+  - probe 的 override 落到 DB(应只改临时 entry,不动 ProviderRepo)
+
 ### S.8 ⏳ rpc/jsonrpc.py + sidecar 新建(stdio JSON-RPC)
 
 **目标**:JSON-RPC 框架放 `chariot/rpc/`(给后续 sidecar / acp / mcp 共享);
