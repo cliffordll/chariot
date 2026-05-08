@@ -1,7 +1,13 @@
-# Chariot 架构设计(0.6.0)
+# Chariot 架构设计(0.6.5)
 
-> **当前版本**:`0.6.0`(开发中)
+> **当前版本**:`0.6.5`(开发中,基于 0.6.0 架构修正)
 > **上一版归档**:[`docs/history/0.5.0/DESIGN.md`](history/0.5.0/DESIGN.md)
+>
+> **0.6.5 主题(增量)**:对照 hermes-agent 修正 0.6.0 的"长跑场景架构盲区"。
+> 核心变化:**Provider 不再持 httpx client**(升 `ClientCache` 进程级共享)+
+> **AIAgent 撤单例**(改 `AgentRegistry` per-session)+ **`ChatRequest.model`
+> per-call 字段加回**。详 §5(整章重写)+ §3.1。Surface / 工具 / DB schema
+> 全部不变。
 >
 > **0.6.0 主题**:**架构定位扭转 —— AIAgent 库化 + 协议无关内核 + 目录全面重组**。
 > chariot 从"本机 server(对外暴露 Anthropic Messages 协议)"扭转为
@@ -124,6 +130,8 @@ class ChatRequest:
     provider_name: str                            # entry name(chariot 内部当 Provider 路由 key)
     # ─── Claude Messages API 字段(顺序按官方 spec) ───
     messages: list[Message]
+    model: str | None = None                      # 0.6.5+ per-call LLM id 覆盖;
+                                                  # None = 用 entry.options.model
     max_tokens: int = 4096
     system: str | list[SystemBlock] | None = None
     tools: list[ToolSchema] | None = None         # None = 沿用 enabled tools 注入;
@@ -164,18 +172,24 @@ class ToolSchema:
 `ContentBlock` 是 union,涵盖 Claude 协议的全部 block 类型(text / image /
 tool_use / tool_result / thinking / document 等),由 `type` 字段区分。
 
-**关于 `provider_name` vs wire `model`**:Claude API wire 字段叫 `model`,装的是
+**关于 `provider_name` vs `model`**:Claude API wire 字段叫 `model`,装的是
 LLM 真实 id(如 `claude-sonnet-4-6`);chariot 在 IR 这层把路由 key 单独命名为
 `provider_name`,装 entry name(用户在 `providers` 表里的命名,如 `claude` /
 `mock` / `ollama-qwen`)。AIAgent 用 `req.provider_name` 路由到对应 Provider
-实例,Provider 内部把 `entry.options.model`(LLM 真实 id)写到 wire body 的
-`model` 字段。**`req.provider_name` 跟 wire `body.model` 是两个 concept,不是
-同一个字段的两种叫法**;0.7.0+ 加 per-call LLM id 覆盖时会重新引入
-`ChatRequest.model: str | None = None` 字段(默认 None = 用 entry.options.model)。
+实例,Provider 内部按 `req.model or self.config.model` 决定写到 wire body 的
+`model` 字段。**`req.provider_name`(路由 key)≠ `req.model`(per-call LLM id)
+≠ wire `body.model`(最终发出去的)**。
 
-**命名约定**:CLI flag 用短名 `--provider`(贴近用户);IR / 内部参数传递用
-`provider_name`(避免跟 wire `model` 字段、`BaseProvider` 实例对象同名歧义)。
-ChatContext / ChatRequest 等内部数据结构都用 `provider_name`。
+**`model` 字段(0.6.5+,可选)**:per-call LLM id 覆盖,默认 `None`。CLI
+`--model` flag 走这条 —— `ChatContext.model_override` → `ChatRequest.model` →
+Provider `body["model"] = req.model or self.config.model`。设计动机:`--model`
+切 LLM id 不影响 (base_url, api_key) → ClientSpec 不变 → 不重建 httpx client
+(零客户端开销);0.6.5 之前用的 `provider_overrides` 路径会重建 Provider 实例,
+对纯切 LLM id 是过度操作。
+
+**命名约定**:CLI flag 用短名 `--provider` / `--model`(贴近用户);IR / 内部
+参数传递用 `provider_name` / `model`。ChatContext / ChatRequest 内部数据结构
+都遵循。
 
 **不引入的 Claude 字段**:
 - `stream`:chariot 内核固定流式(`Provider.generate` 总是 `AsyncIterator`),
@@ -359,9 +373,72 @@ class AIAgent:
 
 跨 surface 共享的 wire format 框架在 `chariot/rpc/`(JSON-RPC for sidecar / acp / mcp)。
 
-## 5. Provider 接口契约
+## 5. Provider 接口契约 + 四层生命周期(0.6.5 重写)
 
-`chariot/providers/base.py`:
+> **0.6.5 主题**:对照 hermes-agent 重新审视 Provider / client / Agent 的生命周期
+> 边界。**核心:Provider 不再持 httpx client**,client 升到进程级 `ClientCache`
+> 共享(LRU + 并发安全);AIAgent 撤单例,改 per-session `AgentRegistry`。
+> per-call `--model` 切 LLM id 不动 client / 不动 Provider,零客户端开销;
+> per-call `--base-url` / `--api-key` 改连接维度,走 ClientSpec 命中复用。
+
+### 5.0 四层生命周期
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 4 — Surface(per-call / per-session,业务方决定)       │
+│   CLI 进程 / sidecar 长跑 / Gateway listener / ACP / MCP     │
+│   构造 `session_key`(CLI 用 "process";Gateway 用 chat_id;   │
+│   Telegram 用 user_id 等),向下要 AIAgent                    │
+└─────────────────────────────────────────────────────────────┘
+                              │ acquire(session_key, ...)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3 — `AgentRegistry`(per-session,LRU 32)             │
+│   ClassVar OrderedDict[session_key → AIAgent] + asyncio.Lock│
+│   首次 acquire(session_key) → 装载 AIAgent + cache;后续命中  │
+│   provider_overrides 仅首次 acquire 时 merge 进 entry.options │
+└─────────────────────────────────────────────────────────────┘
+                              │ AIAgent.from_db(db_path,
+                              │                provider_overrides=...)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2 — `BaseProvider` 实例(per-session,挂 AIAgent 上)   │
+│   self.config / self._options / self._spec(ClientSpec)     │
+│   **不持 httpx client**;generate(req) 内部按需从 ClientCache  │
+│   .get(self._spec) 拿 client                                 │
+└─────────────────────────────────────────────────────────────┘
+                              │ ClientCache.get(spec)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1 — `ClientCache`(进程级,LRU 16)                     │
+│   ClassVar OrderedDict[ClientSpec → httpx.AsyncClient]      │
+│   + asyncio.Lock。spec 命中 → 复用 client(连接 keepalive);  │
+│   未命中 → 构造 + 缓存。**evict 不 aclose**(避免中断 in-flight)│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                          上游 LLM API
+```
+
+**生命周期粒度**:
+
+| 层级 | 谁建 | 何时建 | 何时销 |
+|---|---|---|---|
+| Layer 1 client | `ClientCache.get` 首次未命中 | 进程内首次需要某个 ClientSpec | 进程退出 / `aclose_all` 显式调 |
+| Layer 2 Provider 实例 | `ProviderRegistry.build` | 每个 AIAgent 装载时 | AIAgent GC 时(随 session 退出) |
+| Layer 3 AIAgent | `AgentRegistry.acquire` | 每个 session_key 首次 acquire | LRU evict / `release` / `aclose_all` |
+| Layer 4 surface | 业务方 | 业务事件触发(CLI 启动 / 用户消息到达) | 业务方决定 |
+
+**关键性质**:
+- **Provider 重建≠client 重建**:`--base-url` 改 → Provider 实例重建 →
+  ClientSpec 重算 → `ClientCache.get` 命中既有 client(同 spec 用过)或新建。
+  连接池随 spec 复用,不会因为 Provider 实例 churn 而断
+- **session 间互不影响**:Gateway 同时跑 100 个 chat session,各自独立
+  AIAgent + 各自 entry.options;但底下的 httpx client 共享(同 spec 池化)
+- **零静默状态**:模块级零自由函数 + 零可变变量(CLAUDE.md ⭐),所有状态挂在
+  类的 ClassVar 上,生命周期由 classmethod 管(`acquire` / `aclose_all`)
+
+### 5.1 `BaseProvider`(`chariot/providers/base.py`)
 
 ```python
 @dataclass(frozen=True)
@@ -371,20 +448,25 @@ class BaseProviderConfig:
     model: str          # 上游真实 model(给 LLM API)
 
 class BaseProvider(ABC):
-    """Provider 抽象基类。具体实现见 providers/builtin/。"""
+    """Provider 抽象基类。具体实现见 providers/builtin/。
+
+    并发约束:实例所有字段构造后 immutable;`generate(req)` 不在 self 上挂
+    per-request mutable state。同实例可被多个 coroutine 并发调 generate
+    (如 Gateway 高并发场景)。
+    """
     config: BaseProviderConfig
 
     @classmethod
     @abstractmethod
     def from_options(cls, options: dict[str, Any]) -> Self:
-        """从 ModelEntry.options 构造;options 不合法 raise ConfigError。"""
+        """从 ProviderEntry.options 构造;options 不合法 raise ConfigError。"""
 
     @abstractmethod
     async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 LLM 请求,产 ChatEvent 流(message_start / content_block_* /
-        message_delta / message_stop / error / ping)—— 即 Claude SSE 形态。
+        message_delta / message_stop / error / ping)—— Claude SSE 形态。
 
-        子类不知道工具循环、不知道 Conversation、不写 DB —— 纯输入输出。
+        Provider 子类不知道工具循环、不知道 Conversation、不写 DB —— 纯输入输出。
         OpenAIProvider / LocalLlamaProvider 等也产同一份形态,内部翻译。
         """
 ```
@@ -393,165 +475,229 @@ class BaseProvider(ABC):
 / `BaseSkill`),具体子类不带前缀(`AnthropicProvider` / `ReadFileTool` 等)。
 文件名沿用 `base.py` 惯例,文件里装该层的 base class。
 
-**vs 0.5.0 `Model.respond(body: bytes, *, stream: bool) -> Response`**:
-- 输入从原始 JSON 字节 → 解构后的 `ChatRequest`(类型安全)
-- 输出从 fastapi `Response`(可能 stream / 可能 unary)→ 统一 `AsyncIterator[ChatEvent]`(协议无关)
-- 错误处理:子类内部 raise `ProviderError`(`upstream_auth_failed` / `upstream_unreachable` / `upstream_server_error` / `rate_limited`),AIAgent 包成 `ChatEvent(kind="error")` 给 surface
+**vs 0.6.0**:Provider 不再 `__init__(*, config, api_key, base_url, client)` —
+改 `__init__(*, config, options)`,client 由 `ClientCache.get(self._spec)`
+按需取。0.6.0 的 `aclose()` ABC 撤(Provider 不再持有可关闭资源)。
 
-### 5.1 `AnthropicProvider`(`chariot/providers/builtin/anthropic.py`)
+### 5.2 `ClientCache` + `ClientSpec`(`chariot/providers/clients.py`)
+
+```python
+@dataclass(frozen=True)
+class ClientSpec:
+    """httpx 客户端的 cache key。frozen + hashable;同 spec 共享 client。"""
+    provider_type: str                              # "anthropic" / "openai" / ...
+    base_url: str
+    api_key: str                                    # auth header value
+    headers: tuple[tuple[str, str], ...]            # 完整 headers(含 api_key)
+    max_connections: int = 20
+    max_keepalive: int = 10
+    connect_timeout_sec: float = 10.0
+    read_timeout_sec: float = 300.0
+    write_timeout_sec: float = 30.0
+    pool_timeout_sec: float = 10.0
+
+    def build(self) -> httpx.AsyncClient: ...
+
+class ClientCache:
+    """进程级 httpx 客户端缓存(LRU 16,asyncio.Lock 并发安全)。
+
+    设计:Provider 实例可被 per-call override 重建,但底下 httpx client
+    要尽量复用(连接 keepalive 是 LLM API 请求的主要延迟优化点)。
+    `(base_url, api_key)` 维度变 → 新 spec → 新 client;同维度变 → 命中既有 client。
+    """
+    _MAX_VARIANTS: ClassVar[int] = 16
+    _cache: ClassVar[OrderedDict[ClientSpec, httpx.AsyncClient]] = OrderedDict()
+    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    @classmethod
+    async def get(cls, spec: ClientSpec) -> httpx.AsyncClient: ...
+
+    @classmethod
+    async def aclose_all(cls) -> None: ...
+```
+
+**evict 不 aclose 的理由**:超 16 个 variant 时 LRU 弹最老,但**不**调
+`client.aclose()`。如果有 in-flight 请求拿着这个 client,中途关连接会污染流式
+契约。被 evict 的 client 由 GC 回收(等所有引用释放);进程退出靠 `aclose_all`
+显式 close 全部。
+
+### 5.3 `AnthropicProvider`(`chariot/providers/builtin/anthropic.py`)
 
 - 用 httpx 调上游 `/v1/messages`,**body 构造而非透传**(从 `ChatRequest` 拼请求)
-- **`body["model"] = self.config.model`** 显式写入(LLM 真实 id,从
-  `entry.options.model` 来):`ChatRequest` 没有 `model` 字段,只有
-  `provider_name`(chariot 路由 key,如 `"ollama-qwen"`),wire body 字段名仍叫
-  `model`(Anthropic API 要求),值由 Provider 内部从 `self.config.model` 写。
-  S.7.1 修复 0.6.0 重写时漏掉这步导致的上游 `not_found_error`
-- **优先级解析**(详 §8.1 CLI override 流程):
+- **`body["model"] = req.model or self.config.model`**(0.6.5+):per-call
+  `req.model`(CLI `--model` 注入)优先;回退 `self.config.model`(实例化时
+  从 `entry.options.model` 落)。`provider_name`(路由 key)不进 wire body
+- **优先级解析**(详 §5.6 三种 override 路径):
   - `api_key`:inline `entry.options.api_key` → `entry.options.api_key_env`
-    指向的 env(默认 `ANTHROPIC_API_KEY`);S.7.3 起 CLI `--api-key` 注入到
-    inline 实现 CLI flag > inline > env
+    指向的 env(默认 `ANTHROPIC_API_KEY`)
   - `base_url`:inline `entry.options.base_url` → `ANTHROPIC_BASE_URL` env →
-    默认 `https://api.anthropic.com`(对齐 Anthropic Python SDK 约定);S.7.3
-    起 CLI `--base-url` 注入到 inline 实现 CLI flag > inline > env
-  - `model`:仅 inline `entry.options.model`(无 env;Anthropic 无标准 env 名);
-    S.7.3 起 CLI `--model` 注入到 inline
-- 流式:消费上游 SSE 字节,解析成 `ChatEvent` yield。**chariot 不再做"字节级透传"**,
-  解析后再发(代价:多一次反序列化;收益:协议解耦)
-- SSE 解析复用 `chariot/providers/_sse.py`(共享 utility,后续 OpenAIProvider 也用)
-- 错误码映射沿用 0.5.0:401/403 → upstream_auth_failed,5xx → upstream_server_error
+    默认 `https://api.anthropic.com`(对齐 Anthropic Python SDK 约定)
+  - CLI `--base-url` / `--api-key` 通过 `provider_overrides` 注入到 inline
+    options(详 §5.6)
+- 流式:从 `ClientCache.get(self._spec)` 拿 client → SseParser 消费 SSE 字节
+  → yield `ChatEvent`
+- 错误码映射:401/403 → upstream_auth_failed,429 → rate_limited,5xx →
+  upstream_server_error,httpx 网络异常 → upstream_unreachable
 
-### 5.2 `MockProvider`(`chariot/providers/builtin/mock.py`)
+### 5.4 `MockProvider`(`chariot/providers/builtin/mock.py`)
 
-- 不走任何 HTTP / SSE,直接 `yield` Claude 形态的 ChatEvent 序列:
-  `message_start` → `content_block_start(text)` → `content_block_delta(text_delta)+`
-  → `content_block_stop` → `message_delta(stop_reason=end_turn)` → `message_stop`
-  → `stream_done`
-- 0.5.0 的"手工拼 Anthropic SSE"代码完全删掉,但事件形态不变(从拼字节升级
-  为产 typed dataclass)
+- 不走任何 HTTP,直接 `yield` Claude 形态的 ChatEvent 序列
+- options 容忍任意字段(测试 / 默认 seed entry 用)
 
-### 5.3 `OpenAIProvider`(0.7.0,`chariot/providers/builtin/openai.py`)
+### 5.5 `OpenAIProvider`(0.7.0,`chariot/providers/builtin/openai.py`)
 
-- OpenAI Chat Completions / Responses 兼容(覆盖 OpenRouter / Kimi / DeepSeek /
-  z.ai / Xiaomi / NVIDIA NIM 等)
-- Provider 间共性(httpx client / timeout / 错误码映射)抽到 `_HttpProviderBase`
-  父类共享(放 `providers/base.py` 同文件或 `providers/_http_base.py`)
+- OpenAI Chat Completions 兼容(覆盖 OpenRouter / Kimi / DeepSeek / z.ai
+  / Xiaomi / NVIDIA NIM 等)
+- 同样不持 client;构造 ClientSpec(provider_type="openai")向 `ClientCache`
+  要 client。Anthropic / OpenAI 的 spec 不互相命中(provider_type 不同 → 不同
+  cache key)
+- 内部翻译 ChatRequest → OpenAI body / SSE event → ChatEvent
 
-### 5.4 `ProviderProber`(`chariot/providers/prober.py`)
+### 5.6 三种 override 路径(per-process / per-session / per-call)
 
-- 共享 utility:对任意 Provider 实例做 ping(发个最小 chat 请求验通)
-- 给 `chariot provider probe <name>` CLI 用
+`provider entry` 的核心字段(`model` / `base_url` / `api_key` / 其它 options)在
+0.6.5 起按"override 维度"分流到三条路径,**每条路径触发的重建粒度不同**。
 
-### 5.5 参数传递与覆盖
+| Override 路径 | 触发器 | 改谁 | 谁重建 | 谁不变 |
+|---|---|---|---|---|
+| **per-process** | DB 改 entry.options | entry.options | 整个进程下次启动起的 Provider | DB / 已有进程 |
+| **per-session** `provider_overrides` | CLI `--base-url` / `--api-key`、Gateway session 配置 | merged options(进 AgentRegistry.acquire) | session 内的 Provider 实例 | 其它 session;若 spec 同则连 client 都不变 |
+| **per-call** `req.model` | CLI `--model`、ChatContext.model_override | 单次 ChatRequest.model 字段 | **零**(只走 wire body) | Provider / Client / Spec 全部不变 |
 
-`provider entry` 的三个核心字段 —— `model` / `base_url` / `api_key` —— 在 chariot
-里走的不是同一条路径,看不清这点很容易以为 AIAgent 要"传递"它们。实际**AIAgent
-不知道 `base_url` / `api_key` 的存在**,它只持有 `dict[entry_name → BaseProvider 实例]`,
-每个 Provider 实例自己内部抓着 httpx client。
+**为什么这么分**:
 
-#### 装载时:DB → Provider 实例
+1. **`model` 切 LLM id**:不影响 (base_url, api_key) → 不影响 ClientSpec →
+   不需要新 client;甚至不需要新 Provider 实例(同 base_url + api_key 的多个
+   "model id" 切来切去本就是同 client 的不同 wire body)。走 `req.model`
+   per-call 字段,零开销
+2. **`base_url` / `api_key` 切连接维度**:必须重算 ClientSpec;Provider 实例
+   也要重建(因为 `self._spec` 是 frozen);但底下 ClientCache 按 spec 命中,
+   同 spec 已存在 → 复用 client,只是套了个新 Provider 壳
+3. **DB entry 改**:per-process 改 —— 下次启动起的进程读新 options。已活着的
+   AIAgent 不受影响(per-session 缓存住了)
 
-```
-DB row: providers.options (JSON 列)
-   {"model": "qwen2.5:1.5b",
-    "base_url": "http://...:64388",
-    "api_key": "EMPTY",
-    "api_key_env": "ANTHROPIC_API_KEY"}
-        │ ProviderRepo._row_to_entry
-        ▼
-   ProviderEntry(name, type, options, params)
-        │ ProviderRegistry.build(entry.type, entry.options)
-        │   → AnthropicProvider.from_options(options)
-        │     → AnthropicProvider.__init__(config, api_key, base_url)
-        ▼
-   AnthropicProvider 实例(挂在 AIAgent._providers)
-     self.config.model = "qwen2.5:1.5b"
-     self._client      = httpx.AsyncClient(
-       base_url="http://...:64388",
-       headers={"x-api-key": "EMPTY", ...})
-```
-
-#### 三字段的不同归宿
-
-| 字段 | 落到哪 | 何时使用 | 谁知道它 |
-|---|---|---|---|
-| `model` | `BaseProviderConfig.model`(`self.config`) | **每次** `_build_body` 时写到 `body["model"]`(wire 字段) | 仅 Provider 内部 |
-| `api_key` | `httpx.AsyncClient.headers["x-api-key"]` | client 级,焊在 client 里;每个请求自带 | 仅 Provider 内部(client 持有) |
-| `base_url` | `httpx.AsyncClient.base_url` | client 级,`build_request` 拼出最终 URL | 仅 Provider 内部(client 持有) |
-
-**关键性质**:
-- `base_url` / `api_key` **不流经 `ChatRequest`**,也不出现在 `BaseProvider.generate(req)`
-  的签名后面。它们在 `from_options` 阶段就"焊"进了 `httpx.AsyncClient` 实例,
-  以后任何 `self._client.send(...)` 都自带这两项
-- `model` 略不同:虽然实例化时落到 `self.config.model`,但每次 `generate` 调
-  `_build_body` 时**必须** `body["model"] = self.config.model`(覆盖 `req.provider_name`,
-  因为 wire 字段名是 model 而不是 provider_name)。漏掉这步上游 404 not_found_error
-  (S.7.1 修复)
-- `req.provider_name` 跟 wire `body.model` 是**两个不同 concept**:前者是 chariot
-  路由 key,后者是上游识别的真实 LLM id。Provider 内部做最后一跳翻译
-
-#### CLI per-call 覆盖(S.7.3):options dict merge + 重建实例
-
-`chariot chat --model X --base-url Y --api-key Z` 这套 flag 的实现机制 = **CLI
-flag 在 Provider 实例化前最后一刻 merge 进 `entry.options` 那个 dict**。整条链:
+**per-session override 链路**(CLI `chariot chat --base-url Y --api-key Z`):
 
 ```
-CLI flag         (--model X / --base-url Y / --api-key Z)
+CLI flag       (--base-url Y / --api-key Z;--model 不在这条路径!)
    │
    ▼
-patch dict       {"model": "X", "base_url": "Y", "api_key": "Z"}  (空 flag 不进)
+options patch  {"base_url": "Y", "api_key": "Z"}
    │
    ▼
-浅 merge        merged_options = {**entry.options, **patch}    ← patch 覆盖同名字段
+provider_overrides = {"<provider_name>": patch}
    │
    ▼
-ProviderRegistry.build(entry.type, merged_options)
-   │
+AgentRegistry.acquire(session_key, db_path=..., provider_overrides=...)
+   │ 首次 acquire 时把 overrides[name] merge 进 entry.options
    ▼
-新 Provider 实例(httpx client 用 merged 字段重建)
-   │
+AIAgent.from_db(db_path, provider_overrides=...)
+   │ 内部对每个 entry.name,merged_options = {**entry.options, **overrides[name]}
+   │ → ProviderRegistry.build(type, merged_options)
    ▼
-agent._providers[name] = new_instance      ← 原地替换,旧实例 GC
+新 AnthropicProvider 实例 (self._spec 反映 merged base_url / api_key)
+   │ generate 时 ClientCache.get(self._spec)
+   ▼
+命中或新建 httpx client(同 spec 已存在 → 复用)
 ```
 
-实现入口:`AIAgent.patch_provider_options(name, *, options_overrides=...)`。
+**per-call override 链路**(CLI `chariot chat --model claude-haiku-4-5`):
 
-**为什么这套设计 work**:Provider 实例化入口是 `from_options(options: dict)` 单一
-dict 参数 —— dict 是 merge 友好的结构,patch 进去 Provider 自己 parse / 校验,
-不需要改 Provider 接口,也不需要新 layer。
+```
+CLI flag --model
+   │
+   ▼
+ChatContext.model_override = "claude-haiku-4-5"
+   │
+   ▼
+ChatRequest.model = "claude-haiku-4-5"   ← 每轮 _build_request 都带
+   │
+   ▼
+AnthropicProvider._build_body:
+   body["model"] = req.model or self.config.model
+   │
+   ▼
+wire body 写入 "claude-haiku-4-5"
+```
 
-**链路其它环节不知道 override 这件事**:`ChatRequest` 不变 / `AIAgent.run` 路由
-逻辑不变 / `AgentLoop` 不变 / `Provider.generate` 看的是 `self.config.model` /
-`self._client`(已重建)。
+**两条路径同时触发**(`--model X --base-url Y`):per-session 重建 Provider
+(spec 反映 Y),per-call 把 X 写进每轮 wire body。互不干扰。
 
 #### 副作用 / 适用边界
 
-1. **Provider 必须无状态**(不缓存 options 之外的东西)→ 重建无副作用。所有
-   `BaseProvider` 子类要遵守这条
-2. **httpx client 不复用**:override 一次重建一个 client(连接池跟着重建)。
-   CLI 进程一次只跑一次 chat,无关紧要;但**长跑场景**(sidecar / gateway)
-   如果引入"per-request override"会连接池爆炸 —— 届时得改架构(可能引入
-   `ChatRequest.model` 字段 + Provider 内部 request-scoped client)
-3. **不进 DB,不进 ChatContext**:override 仅活在 `agent._providers` 里,进程
-   退出就消失。对应 CLI "本次调用" 的语义
-4. **type-aware 由 Provider 自己处理**:CLI 不校验 `--api-key` 对 mock provider
-   是不是无意义 —— 给它,mock 自己忽略;OpenAIProvider(0.7.0)接入时也走同
-   套路,自己消化 options 字段
+1. **Provider 必须无 per-request mutable state**:`generate(req)` 不在 self
+   上挂临时数据;同实例可并发跑 N 个 generate(Gateway 场景)
+2. **per-session override 重建 Provider 但不必重建 client**:同 spec 命中
+   `ClientCache`,连接 keepalive 保住
+3. **per-call override 零重建**:`--model` 切来切去都不动 Provider / Client
+4. **AIAgent 不参与 override 解释**:`provider_overrides` 在 `from_db` 装载时
+   merge 进 entry.options,落到 Provider `__init__`;之后 AIAgent 只看
+   `req.provider_name`(路由)+ `req.model`(per-call wire 覆盖)
 
 #### AIAgent 的角色(零参与)
 
-AIAgent **不参与** `model` / `base_url` / `api_key` 的传递。它只做两件事:
+AIAgent **不参与** `base_url` / `api_key` 的解释。它只做三件事:
 
 1. **路由**:按 `req.provider_name` 从 `self._providers` 挑出对应实例
 2. **委托**:调 `provider.generate(req)`,流式 yield `ChatEvent`
+3. **per-call model 透传**:`req.model` 跟着 ChatRequest 一路到 Provider,
+   AIAgent 不看(透明)
 
-`agent/run.py` 全文搜不到 `base_url` / `api_key`(除了 `patch_provider_options`
-内部把 patch 转给 ProviderRegistry,但它自己不解释这俩字段的语义)—— 那是
-Provider 内部细节。AIAgent 只看 entry name 和 ChatEvent。
+`agent/run.py` 全文搜不到 `base_url` / `api_key` 的语义解释 —— 那是 Provider
+内部细节。AIAgent 只看 entry name + ChatEvent。
 
-这套设计的好处:加新 Provider 类型(`OpenAIProvider` / `LocalLlamaProvider`
-/ ...)不用动 AIAgent 一行代码。新写 `BaseProvider` 子类 + 注册到
-`ProviderRegistry`,自己处理各家的 base_url / api_key / auth 形态 / SSE 解析
-就行。
+加新 Provider 类型(`OpenAIProvider` / `LocalLlamaProvider` / ...)零侵入:
+新写 `BaseProvider` 子类 + 在 `ProviderRegistry` 注册,自己处理各家的
+base_url / api_key / auth 形态 / SSE 解析。
+
+### 5.7 `AgentRegistry`(`chariot/agent/registry.py`)
+
+```python
+class AgentRegistry:
+    """per-session AIAgent 缓存(LRU 32,asyncio.Lock 并发安全)。
+
+    撤 0.6.0 的 AIAgent._current 单例 —— 单例会卡住"同进程多 session"场景
+    (Gateway 同时服务多个 chat_id)。
+    """
+    _MAX_AGENTS: ClassVar[int] = 32
+    _agents: ClassVar[OrderedDict[str, AIAgent]] = OrderedDict()
+    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    @classmethod
+    async def acquire(
+        cls,
+        session_key: str,
+        *,
+        db_path: Path,
+        provider_overrides: dict[str, dict[str, str]] | None = None,
+    ) -> AIAgent:
+        """同 session_key → 同实例;首次构造 + cache。
+
+        provider_overrides 仅首次 acquire 时生效(cached agent 忽略后续 overrides)。
+        """
+
+    @classmethod
+    async def release(cls, session_key: str) -> None: ...
+
+    @classmethod
+    async def aclose_all(cls) -> None: ...
+```
+
+**session_key 选择**(各 surface 各自决定):
+- CLI:`"process"`(整进程一个 session)
+- Telegram Gateway:`f"tg:{chat_id}"`
+- Discord Gateway:`f"dc:{guild_id}:{channel_id}"`
+- ACP:连接级 connection id
+- MCP:同上
+
+**LRU 不 aclose**:同 ClientCache,evict 不调 AIAgent 的 close —— 等 GC 处理。
+进程退出靠 `aclose_all` 显式释放(CLI `installed_runtime` 的 finally 段)。
+
+### 5.8 `ProviderProber`(`chariot/providers/prober.py`)
+
+- 共享 utility:对任意 ProviderEntry 做 ping(发个最小 chat 请求验通)
+- 给 `chariot provider probe <name>` CLI 用;独立路径,不进 ClientCache
+  (probe 偶发 + entry 维度 override 多,缓存命中率低)
 
 ## 6. AIAgent 内核(`chariot/agent/run.py` + `loop.py`)
 
@@ -559,21 +705,39 @@ Provider 内部细节。AIAgent 只看 entry name 和 ChatEvent。
 
 ```python
 class AIAgent:
+    """AIAgent 主体。**0.6.5 起撤单例 + 撤 patch_provider_options**;
+    生命周期由 `AgentRegistry`(per-session 缓存)管(详 §5.7)。
+
+    并发约束:同实例可被多个 coroutine 并发调 run(...)
+    (Gateway 高并发场景);run 内部不在 self 上挂 per-request mutable state。
+    """
     def __init__(
         self,
         *,
         providers: dict[str, BaseProvider],   # entry_name → BaseProvider 子类
         tools: dict[str, BaseTool],           # tool_name → BaseTool 子类
-        repo: ConvoRepo,           # 持久化层(注入,测试可 mock)
-        lock_manager: ConvoLockManager,
+        sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+        lock_manager: ConvoLockManager | None = None,
     ) -> None: ...
 
     @classmethod
-    def from_db(cls, db_path: Path) -> Self:
-        """从 ~/.chariot/chariot.db 装载 ModelEntry / ToolEntry,
+    async def from_db(
+        cls,
+        db_path: Path,
+        *,
+        provider_overrides: dict[str, dict[str, str]] | None = None,
+    ) -> Self:
+        """从 `~/.chariot/chariot.db` 装载 ProviderEntry / ToolEntry,
         构造所有 Provider / Tool 实例,返就绪 AIAgent。
 
-        每个 surface 进程启动时调一次。"""
+        `provider_overrides`(0.6.5+):per-session inline patch,形如
+        `{"claude": {"base_url": X, "api_key": Y}}`。装载时对每个 entry,
+        merged_options = {**entry.options, **overrides[entry.name]} 落到
+        Provider.from_options。**注意**:`--model` 走 per-call ChatRequest.model
+        路径,不在这里(详 §5.6)。
+
+        通常由 `AgentRegistry.acquire` 调用,而不是业务方直接 from_db。
+        """
 
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """主入口。"""

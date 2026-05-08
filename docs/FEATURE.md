@@ -1,7 +1,13 @@
-# Chariot 0.6.0 推进表
+# Chariot 0.6.x 推进表
 
-> **当前活跃**:`0.6.0`
+> **当前活跃**:`0.6.5`(基于 0.6.0 的架构修正增量;0.6.0 主线步骤未变)
 > **上一版归档**:[`docs/history/0.5.0/FEATURE.md`](history/0.5.0/FEATURE.md)
+>
+> **0.6.5 主题**:对照 hermes-agent 修正 0.6.0 长跑场景架构盲区。Provider 不再持
+> httpx client(升 `ClientCache` 进程级共享)+ AIAgent 撤单例(改 `AgentRegistry`
+> per-session)+ `ChatRequest.model` per-call 字段加回。Surface / 工具 / DB
+> schema 全部不变。详 [本文 0.6.5 patch 列表](#065-patch-列表2026-05-增量) +
+> [`DESIGN.md`](DESIGN.md) §5 整章。
 >
 > **0.6.0 主题**:**架构定位扭转 + 目录全面重组 + Claude 形态 IR**。`server/`
 > 退役;顶层目录按职责重组(`agent/` 缩成狭义内核,`tools/` / `providers/` /
@@ -636,6 +642,113 @@ base_url / api_key inline"实现最高优先级。
   - `_resolve_base_url` 优先级反了(env > inline)
   - 空 patch dict 也重建 Provider(浪费 + 干扰单例 hashing)
   - probe 的 override 落到 DB(应只改临时 entry,不动 ProviderRepo)
+
+---
+
+## 0.6.5 patch 列表(2026-05 增量)
+
+> **背景**:0.6.0 落地后审视长跑场景(sidecar / Gateway / 高并发)发现三处架构
+> 盲区:① Provider 实例持 httpx client → per-call override 重建 client →
+> 连接池频繁 churn;② AIAgent 单例 → 同进程不能服务多个 session;③ 0.6.0
+> 把 `ChatRequest.model` 字段去掉转 `provider_name` 后,per-call 切 LLM id 也
+> 必须走 Provider 重建路径,过度。
+>
+> **对照参考**:hermes-agent 的 stateless `ProviderTransport` + 进程级
+> `_client_cache` + per-session `_agent_cache` + 正交 `CredentialPool`
+> 模式。0.6.5 在 chariot 里做对应实现。
+>
+> **0.6.5 主题**:**框架修正,绝不留技术债**(用户原话)。Surface / 工具 / DB
+> schema / IR(除 `model` 字段加回)全部不变,只改 Provider / Client / Agent
+> 三层的生命周期边界。
+
+### S.0 ✅ ClientCache + ClientSpec(进程级 httpx client 缓存)
+
+- 新建 `chariot/providers/clients.py`:`ClientSpec`(frozen dataclass,hashable)
+  + `ClientCache`(LRU 16,asyncio.Lock 并发安全)
+- evict 不调 `client.aclose()`(避免中断 in-flight);进程退出靠 `aclose_all`
+- 新增 `tests/providers/test_clients.py` 14 个 case:
+  - `ClientSpec` frozen / hashable / 同字段相等
+  - `ClientCache.get` 命中 / 未命中
+  - LRU evict(超 16 弹最老,并发 evict 不出锁竞争)
+  - 同 spec 并发 acquire → 不重复建
+  - `aclose_all` 关全部 + 幂等
+
+### S.1 ✅ BaseProvider 接口改造 + AnthropicProvider/MockProvider 重写
+
+- `BaseProvider.__init__` 不再 `(*, config, api_key, base_url, client)`,
+  改 `(*, config, options)` —— 所有实现自己从 options 解析 + 构造 ClientSpec
+- 撤 0.6.0 短暂引入的 `BaseProvider.aclose()` ABC(Provider 不再持有可关资源)
+- `AnthropicProvider`:
+  - `_build_spec()` 从 `self._options` 算 ClientSpec(构造时一次)
+  - `generate(req)` 内部 `client = await ClientCache.get(self._spec)`
+  - `_build_body` 改 `body["model"] = req.model or self.config.model`
+  - 加 `max_connections` / `max_keepalive` options(默认 20 / 10,Gateway 高并发可调)
+- `MockProvider`:options 容忍任意字段(测试用)
+- `tests/providers/builtin/test_anthropic.py`:`_make_provider` 改 monkeypatch
+  `ClientCache.get` 注入 MockTransport 客户端;新增 per-call `req.model` 优先
+  + 回退到 `config.model` 两个 case
+
+### S.2 ✅ AIAgent 撤单例 + AgentRegistry per-session 缓存
+
+- 撤 `AIAgent._current` ClassVar / `current()` / `uninstall()` /
+  `patch_provider_options()`(S.7.3 临时方案)
+- 新建 `chariot/agent/registry.py`:`AgentRegistry`(LRU 32,asyncio.Lock)
+- `AIAgent.from_db(db_path, *, provider_overrides=None)` —— 装载时一次性把
+  `overrides[name]` merge 进 `entry.options`,落 Provider.from_options
+- `init_db` 改幂等(同 path 复用 engine);多 AIAgent 共享 engine
+- `tests/agent/test_registry.py` 10 个 case;`tests/agent/test_run.py` 改写
+  `TestPatchProviderOptions` → `TestFromDbProviderOverrides`
+
+### S.3 ✅ CLI surface 适配(撤 patch_provider_options)
+
+- `chariot/cli/_runtime.py`:`installed_runtime(provider_overrides=...)` ——
+  → `AgentRegistry.acquire("process", db_path=..., provider_overrides=...)`;
+  退出顺序 `AgentRegistry.aclose_all` → `ClientCache.aclose_all` → `dispose_db`
+- `chariot/cli/commands/chat.py`:撤 `agent.patch_provider_options(...)` 调用,
+  改预处理把 `--base-url` / `--api-key` 收成 `provider_overrides` dict(`--model`
+  不在,见 S.4)
+- 全套测试 506 → 506 不变(`AIAgent.uninstall()` 引用从 fixture 移除)
+
+### S.4 ✅ ChatRequest.model 字段加回 + per-call wire 覆盖路径
+
+- `ChatRequest` 加 `model: str | None = None`(0.7.0+ 路标的提前实现)
+- `ChatContext` 加 `model_override: str | None = None`,_build_request 透传
+  到 `ChatRequest.model`
+- `AnthropicProvider._build_body`:`body["model"] = req.model or self.config.model`
+- `chariot chat --model X`:不再走 `provider_overrides` 路径(改 ChatContext
+  per-call),保留 `--base-url` / `--api-key` 走 provider_overrides
+- 新增断言:`per_call_model_override_takes_precedence` /
+  `per_call_model_none_falls_back_to_config`(`tests/providers/builtin/test_anthropic.py`)
+- 全套测试 508 全绿(原 506 + 2 新 case)
+
+### S.5 ⏳ 文档全套(DESIGN §5 重写 + 0.6.5 主题段 + 版本号 bump)
+
+- `docs/DESIGN.md`:
+  - 顶部 banner 加 0.6.5 主题段(增量 vs 0.6.0)
+  - §3.1 ChatRequest 加 `model` 字段说明 + per-call 设计动机
+  - §5 整章重写(四层生命周期 + ClientCache / ClientSpec / BaseProvider 新接口
+    / 三种 override 路径 / AgentRegistry)
+  - §6.1 AIAgent 类描述加并发约束 + from_db 新签名
+- `docs/FEATURE.md`:本节(0.6.5 patch 列表 S.0~S.5)
+- 版本号 bump:`pyproject.toml` / `chariot/__init__.py`(若有)
+- README 不动(用户层无 visible 变化,只是底层架构)
+
+**验收**:
+
+- **单测**:全套 ≥ 508 绿(本步只动文档,不应改测试结果)
+- **静态**:三件套全绿
+- **手测**:
+  - `chariot chat --model claude-haiku-4-5 "hi"` → 上游 body.model = haiku,**不**触发 Provider 重建
+  - `chariot chat --base-url https://proxy.test/ "hi"` → Provider 重建,
+    ClientCache 新 spec(若历史无相同 spec)
+  - `chariot chat --model X --base-url Y "hi"` → 两条路径同时生效:Provider
+    重建用 Y,wire body.model = X
+- **回归**:0.6.0 验收命令仍通(`chariot status` / `provider list` / `chat` /
+  REPL / `--convo`);DB schema / providers 表内容不变
+- **不通过特征**:
+  - DESIGN §5 还在讲 0.6.0 的"Provider 持 client"模型
+  - FEATURE.md 没立 0.6.5 段
+  - 版本号没 bump
 
 ### S.8 ⏳ rpc/jsonrpc.py + sidecar 新建(stdio JSON-RPC)
 
