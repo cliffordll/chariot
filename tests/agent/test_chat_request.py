@@ -92,20 +92,26 @@ class TestChatRequestDefaults:
 class TestClaudeApiInterop:
     """ChatRequest 结构跟 Claude Messages API 1:1;路由字段 `provider_name` 是 chariot 自己的。"""
 
-    def test_no_wire_model_field(self) -> None:
-        """`ChatRequest` 没有 `model` 字段 —— wire body 里的 `model` 由
-        AnthropicProvider 内部从 `self.config.model` 写。"""
+    def test_model_field_default_none(self) -> None:
+        """0.6.5+ 加回 `model: str | None = None` 字段(per-call LLM id 覆盖)。
+
+        默认 None;Provider 内部按 `req.model or self.config.model` 决定 wire
+        body["model"]。`provider_name`(路由 key)≠ `model`(LLM id)。
+        """
         field_names = {f.name for f in dataclasses.fields(ChatRequest)}
-        assert "model" not in field_names
+        assert "model" in field_names
         assert "provider_name" in field_names
+        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        assert req.model is None
 
     def test_asdict_contains_claude_structural_fields(self) -> None:
         """`dataclasses.asdict(req)` 字段集合 ⊇ Claude API 结构字段(messages /
-        max_tokens / system / tools / sampling 等);wire `model` 不在内。"""
+        model / max_tokens / system / tools / sampling 等)。"""
         req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
         d = dataclasses.asdict(req)
         claude_structural_fields = {
             "messages",
+            "model",
             "max_tokens",
             "system",
             "tools",
@@ -118,10 +124,10 @@ class TestClaudeApiInterop:
             "thinking",
         }
         assert claude_structural_fields.issubset(d.keys())
-        # wire `model` 不在 dataclass 里(由 Provider 内部写)
-        assert "model" not in d
-        # chariot 路由字段在
+        # chariot 路由字段也在
         assert "provider_name" in d
+        # 默认 None,wire body 构造时会被 Provider 滤掉(asdict 仍含)
+        assert d["model"] is None
 
     def test_chariot_extension_fields_present(self) -> None:
         req = ChatRequest(

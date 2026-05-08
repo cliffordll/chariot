@@ -72,8 +72,9 @@ class ChatContext:
     """一次聊天会话的上下文:AIAgent 引用 + 会话配置 + 多轮历史。"""
 
     agent: AIAgent
-    # provider entry name(0.6.0 v6 起;v5 之前叫 model)。透传给 ChatRequest.model
-    # 字段(那个字段名沿用 Claude API 习惯,内容是 chariot 路由 key 即 entry name)。
+    # provider entry name(0.6.0 v6 起):chariot 路由 key,对应 DB providers
+    # 表的 entry name。透传给 ChatRequest.provider_name(0.6.5+ 起字段名跟
+    # wire `model` 区分开)。
     provider_name: str = ""
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
@@ -82,6 +83,10 @@ class ChatContext:
     # self.messages 仍累积本进程内的轮(便于 REPL 打印 / 撤回);发请求时
     # stateful 模式只送"这一轮新增"避免双 persist
     convo_id: str | None = None
+    # 0.6.5+:CLI `--model` flag 的承载;每轮 req 透传给 `ChatRequest.model`,
+    # Provider 内部用 `req.model or self.config.model` 决定 wire body["model"]。
+    # None = 不覆盖,沿用 entry.options.model(常态)
+    model_override: str | None = None
 
     # ---------- 状态操作 ----------
 
@@ -174,12 +179,15 @@ class ChatContext:
         """把对话历史组装成 ChatRequest。
 
         req.messages 取值取决于 stateful / stateless;详见模块级 docstring 契约段。
-        `ChatRequest.provider` 是 chariot 路由 key(entry name);wire 字段
-        `body.model` 由 AnthropicProvider 内部从 `self.config.model` 写。
+        `ChatRequest.provider_name` 是 chariot 路由 key(entry name);wire 字段
+        `body.model` 由 Provider 内部从 `req.model or self.config.model` 决定
+        —— `model_override` 非 None 时走 per-call 覆盖(CLI `--model`),
+        否则用 entry.options.model。
         """
         return ChatRequest(
             provider_name=self.provider_name,
             messages=[self._to_message(m) for m in self._messages_to_send()],
+            model=self.model_override,
             max_tokens=self.max_tokens,
             convo_id=self.convo_id,
         )
