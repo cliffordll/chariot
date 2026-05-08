@@ -3,8 +3,7 @@
  * 把 `dist/chariot-sidecar.exe`(由 scripts/build.py 产出)同步到 Tauri 期待的
  * `tauri/binaries/chariot-sidecar-<host-triplet>.exe` 位置。
  *
- * 0.6.5 S.9 起 sidecar 走 stdio JSON-RPC,exe 名 `chariot-sidecar`(0.5.0 时
- * 是 `chariot-server`,跑 HTTP)。Tauri 2 的 externalBin 用 rustc 当前 host
+ * sidecar 走 stdio JSON-RPC。Tauri 2 的 externalBin 用 rustc 当前 host
  * triplet 作文件名后缀。本脚本通过 `rustc -vV` 读 host,避免硬编码。
  *
  * 被 `scripts/build.py --sync-sidecar` 和 `bun --filter=@chariot/desktop sync-sidecar` 调用。

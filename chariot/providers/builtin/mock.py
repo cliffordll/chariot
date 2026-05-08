@@ -1,11 +1,8 @@
-"""MockProvider —— 协议无关 mock(0.6.0+)。
+"""MockProvider —— 协议无关 mock。
 
-替代 0.5.0 `chariot/server/model/mock.py` 的 `MockModel`。差异:
-
-- **不再手工拼 Anthropic SSE 字节**:0.5.0 MockModel 为了走 server 透传路径,
-  得手工构造 SSE 帧;0.6.0 直接 yield `ChatEvent`(typed),协议无关
-- **不消费 options**:`create(options)` 完全不读 options(沿用 0.5.0
-  MockModel 行为);options 不合法不报错(mock 本来就是宽容的)
+- 直接 yield `ChatEvent`(typed),协议无关 / 不构造 SSE 字节
+- **不消费 options**:`create(options)` 完全不读 options;options 不合法不报错
+  (mock 本来就是宽容的)
 
 输出形态(Claude 形态序列,详见 DESIGN §3.2):
 

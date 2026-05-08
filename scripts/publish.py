@@ -13,12 +13,12 @@
     uv run python scripts/publish.py tag delete [--push] 删本地 tag;--push 同时删 origin
 
 build 产物按版本号归集到 `dist/chariot-<ver>/`(三个 exe 同目录,满足桌面侧
-"sidecar 必须跟主 exe 同目录"的硬约束;chariot-server.exe 一份双重身份):
+"sidecar 必须跟主 exe 同目录"的硬约束):
 
     dist/
     └── chariot-<ver>/
         ├── chariot.exe                       CLI
-        ├── chariot-server.exe                server / 桌面 sidecar
+        ├── chariot-sidecar.exe               Tauri stdio JSON-RPC sidecar
         ├── chariot-desktop.exe               桌面壳
         ├── Chariot_<ver>_x64-setup.exe       NSIS installer(--installer 才有)
         └── latest.json                       updater manifest(--installer 才有)
@@ -26,7 +26,7 @@ build 产物按版本号归集到 `dist/chariot-<ver>/`(三个 exe 同目录,满
 版本号 source-of-truth(7 处,bump 时同步,差一位 updater / installer 名都会乱):
 
     pyproject.toml                                  · Python 包
-    chariot/__init__.py · __version__               · server /admin/status 输出
+    chariot/__init__.py · __version__               · `chariot status` / sidecar 输出
     package.json · packages/{app,desktop}/package.json · workspace meta
     packages/desktop/tauri/Cargo.toml               · 桌面 exe Windows 文件属性
     packages/desktop/tauri/tauri.conf.json          · NSIS installer 名 + updater latest.json
@@ -260,7 +260,7 @@ def _move(src: Path, dst: Path) -> None:
 
 
 def _build_python_exes() -> None:
-    """跑 scripts/build.py 产 dist/chariot.exe + dist/chariot-server.exe + sync sidecar。"""
+    """跑 scripts/build.py 产 dist/chariot.exe + dist/chariot-sidecar.exe + sync sidecar。"""
     _run(
         [
             "uv",
@@ -290,14 +290,13 @@ def _build_desktop(installer: bool) -> None:
 def _collect(release_dir: Path, installer: bool) -> None:
     """把所有产物归集到 release_dir(dist/chariot-<ver>/)。
 
-    - dist/chariot.exe / dist/chariot-server.exe(build.py 直接写到 dist/ root)→ move
-    - target/release/chariot-desktop.exe → copy(chariot-server.exe 内容跟上面那份
-      一致,move 已搬走,不再重复)
+    - dist/chariot.exe / dist/chariot-sidecar.exe(build.py 直接写到 dist/ root)→ move
+    - target/release/chariot-desktop.exe → copy
     - target/release/bundle/nsis/{Chariot_*_x64-setup.exe, latest.json} → copy(--installer)
     """
     release_dir.mkdir(parents=True, exist_ok=True)
 
-    for name in ("chariot.exe", "chariot-server.exe"):
+    for name in ("chariot.exe", "chariot-sidecar.exe"):
         src = _DIST_DIR / name
         if not src.exists():
             raise RuntimeError(f"找不到 PyInstaller 产物:{src}(build.py 是否成功?)")
@@ -504,7 +503,7 @@ def main() -> int:
         help="新版本号:X.Y.Z(可带 -rc1 / +meta)或 patch / minor / major 关键字",
     )
 
-    p_build = sub.add_parser("build", help="一键产 CLI + server + desktop exe → dist/")
+    p_build = sub.add_parser("build", help="一键产 CLI + sidecar + desktop exe → dist/")
     p_build.add_argument(
         "--installer",
         action="store_true",

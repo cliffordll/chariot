@@ -1,6 +1,6 @@
 -- Chariot schema v2 · 模型配置 DB 化
 -- 0.3.0 起 [[models]] / active 不再读 ~/.chariot/config.toml,改存这两张表。
--- ORM 镜像:`ModelRow` / `SettingRow` 在 chariot/server/database/models.py。
+-- ORM 镜像:`ProviderRow`(原 `ModelRow`)/ `SettingRow` 在 chariot/database/models.py。
 --
 -- 不在 SQL 里 seed mock —— seed 用 Python 写(`ModelRepo.seed_if_empty()`),
 -- 表空时由 lifespan startup 调一次,避免 SQL hardcode "mock" 字符串两份。

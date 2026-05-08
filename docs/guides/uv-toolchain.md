@@ -31,13 +31,13 @@ uv python pin 3.12
 uv init --package
 # 自动生成 pyproject.toml + src/<name>/__init__.py + README.md
 
-# 3. 装依赖(例:装 fastapi 和 httpx)
-uv add fastapi httpx
+# 3. 装依赖(例:装 httpx 和 typer)
+uv add httpx typer
 # 自动更新 pyproject.toml 的 dependencies + 生成/更新 uv.lock
 # 同时在 .venv/ 里装好包
 
 # 4. 跑代码
-uv run python -c "import fastapi; print(fastapi.__version__)"
+uv run python -c "import httpx; print(httpx.__version__)"
 ```
 
 跑完之后目录里会有：
@@ -90,7 +90,7 @@ uv remove sqlalchemy
 
 ```bash
 # 升级单个包
-uv lock --upgrade-package fastapi
+uv lock --upgrade-package httpx
 
 # 升级所有包到 pyproject.toml 里版本约束允许的最新
 uv lock --upgrade
@@ -122,7 +122,7 @@ uv sync
 ```bash
 uv run ruff check .
 uv run pytest
-uv run python -m chariot.server
+uv run chariot status
 ```
 
 `uv run` = "在 `.venv` 的 context 里跑这条命令"，不用手动 activate 虚拟环境。
@@ -176,7 +176,6 @@ name = "chariot"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
     "httpx>=0.28",
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite",
@@ -185,7 +184,6 @@ dependencies = [
 
 [project.scripts]
 chariot = "chariot.cli.__main__:main"
-chariot-server = "chariot.server.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -227,13 +225,14 @@ asyncio_mode = "auto"
 
 ```toml
 [[package]]
-name = "fastapi"
-version = "0.115.2"
+name = "httpx"
+version = "0.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pydantic" },
-    { name = "starlette" },
-    ...
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "httpcore" },
+    { name = "idna" },
 ]
 wheels = [
     { url = "...", hash = "sha256:abc..." },
@@ -256,8 +255,8 @@ wheels = [
 
 因为它是**复现性的唯一保证**。
 
-- 没 lock：`pyproject.toml` 里写 `fastapi>=0.115`，今天装 `0.115.2`，一个月后装 `0.116.0`，行为可能变了
-- 有 lock：所有人、所有环境、永远装 `0.115.2`，直到你主动升级
+- 没 lock：`pyproject.toml` 里写 `httpx>=0.28`，今天装 `0.28.1`，一个月后装 `0.29.0`，行为可能变了
+- 有 lock：所有人、所有环境、永远装 `0.28.1`,直到你主动升级
 
 CI、生产、本地**必须一致**，lock 是实现这个一致性的文件。
 

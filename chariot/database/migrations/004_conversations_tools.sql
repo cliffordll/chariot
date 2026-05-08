@@ -1,6 +1,6 @@
 -- Chariot schema v4 · Conversation 层 + Tool 层(0.4.0)
 -- 加三张表:conversations / messages / tools
--- ORM 镜像:`ConversationRow` / `MessageRow` / `ToolRow` 在 chariot/server/database/models.py
+-- ORM 镜像:`ConvoRow`(原 `ConversationRow`)/ `MessageRow` / `ToolRow` 在 chariot/database/models.py
 --
 -- conversations.id:ULID 26 字符(校验在 controller 层做,repo 接受任意非空字符串)
 -- messages.role:'user' | 'assistant'(Anthropic 协议原生两种,对齐 Claude Code transcript);

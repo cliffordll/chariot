@@ -4,7 +4,8 @@
 **面向**:第一次改 `chariot` CLI 子命令、或者想新增一条命令时查的自己。
 **前置**:项目已装 `typer>=0.13`(`pyproject.toml` 里有),会 Python 类型注解。
 
-当前子命令(见 `chariot/cli/__main__.py`):`status / start / stop / chat / logs / stats / model`,其中 `model` 是二级子命令组(`model list / use / probe / add / edit / rm / duplicate`)。
+当前子命令(见 `chariot/cli/__main__.py`):`status / chat / logs / stats / provider / tool / convo`,
+其中 `provider` / `tool` / `convo` 是二级子命令组(参见 `chariot/cli/commands/`)。
 
 ---
 
@@ -30,7 +31,7 @@
 | **fire** | 反射式,没有统一的 `--help` / option 规约,不适合对外 CLI |
 | **Typer** ✅ | 类型注解驱动 + 内置 Rich + 嵌套 Typer = 子命令树天然 + pyright 对参数类型命中 |
 
-已经在用 pydantic / FastAPI 这类类型驱动栈的项目,Typer 几乎零额外学习成本。
+已经在用类型驱动栈(pydantic / dataclass)的项目,Typer 几乎零额外学习成本。
 
 ---
 
@@ -59,9 +60,8 @@ def _root(
 
 
 for mod in (
-    status_mod, start_mod, stop_mod,
-    logs_mod, stats_mod, chat_mod,
-    model_mod,
+    status_mod, logs_mod, stats_mod, chat_mod,
+    provider_mod, tool_mod, convo_mod,
 ):
     mod.register(app)
 ```
@@ -84,43 +84,44 @@ for mod in (
 
 ### 3.1 简单子命令(一级)
 
-例:`chariot status` / `chariot stop` / `chariot logs`
+例:`chariot status` / `chariot chat` / `chariot logs`
 
 ```python
 # chariot/cli/commands/status.py
 import typer
 
 def status_cmd() -> None:
-    """显示 server 状态。"""
+    """显示 chariot 运行状态。"""
     ...
 
 def register(app: typer.Typer) -> None:
-    app.command("status", help="显示 server 状态")(status_cmd)
+    app.command("status", help="显示 chariot 运行状态")(status_cmd)
 ```
 
 ### 3.2 二级子命令(分组)
 
-例:`chariot model list` / `chariot model add ...` / `chariot model use <name>`(`chariot/cli/commands/model.py` 是真实参考)
+例:`chariot provider list` / `chariot provider add ...` / `chariot provider probe <name>`
+(`chariot/cli/commands/provider.py` 是真实参考)
 
 ```python
-# chariot/cli/commands/model.py
+# chariot/cli/commands/provider.py
 import typer
 
-model_app = typer.Typer(
-    name="model",
-    help="管理 model entries(0.3.0 起住 chariot 内置 SQLite)",
+provider_app = typer.Typer(
+    name="provider",
+    help="管理 provider entries(住 chariot 内置 SQLite)",
     no_args_is_help=True,
 )
 
 
-@model_app.command("list", help="列出可用 model + 当前 active")
+@provider_app.command("list", help="列出可用 provider + 当前 default")
 def list_cmd() -> None: ...
 
 
-@model_app.command("add", help="新建 model entry(写入 DB)")
+@provider_app.command("add", help="新建 provider entry(写入 DB)")
 def add_cmd(
     name: Annotated[str, typer.Option("--name", help="entry 名(用户面 ID,需唯一)")],
-    type: Annotated[str, typer.Option("--type", help="model type(mock / anthropic / ...)")],
+    type: Annotated[str, typer.Option("--type", help="provider type(mock / anthropic / ...)")],
     options: Annotated[
         list[str] | None,
         typer.Option("-o", "--option", help="key=value 形式的 options;可重复"),
@@ -129,14 +130,14 @@ def add_cmd(
 
 
 def register(app: typer.Typer) -> None:
-    app.add_typer(model_app)
+    app.add_typer(provider_app)
 ```
 
 关键点:
 - 二级分组用 **独立的 `typer.Typer` 实例** 挂到根 app
-- `app.add_typer(sub_app)` 注册;若 `sub_app` 自带 `name="model"`,根 app 直接拿;否则 `add_typer(sub_app, name="model")` 显式指定
+- `app.add_typer(sub_app)` 注册;若 `sub_app` 自带 `name="provider"`,根 app 直接拿;否则 `add_typer(sub_app, name="provider")` 显式指定
 - sub_app 内的 `@.command(...)` 就是二级命令
-- `no_args_is_help=True` 给 sub_app 加上,让 `chariot model` 裸跑也打 help
+- `no_args_is_help=True` 给 sub_app 加上,让 `chariot provider` 裸跑也打 help
 
 ---
 
@@ -158,7 +159,7 @@ def chat_cmd(
 ### 4.2 选项参数
 
 ```python
-@model_app.command("edit", help="编辑现有 entry(改 type 或 options;改 active 自动 rebuild)")
+@provider_app.command("edit", help="编辑现有 entry(改 type 或 options)")
 def edit_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
     type: Annotated[
@@ -181,7 +182,7 @@ def edit_cmd(
 
 ### 4.3 别名 / 短 flag
 
-`typer.Option("--quiet", "-q", ...)` 注册时把短形式作为额外位置参数传进去;`typer.Option("--as", ...)` 则给 Python 关键字冲突的字段名(`as` 是 Python 关键字)起一个对外名字,Python 端参数仍叫 `as_name`(见 `model duplicate --as new-name`)。
+`typer.Option("--quiet", "-q", ...)` 注册时把短形式作为额外位置参数传进去;`typer.Option("--as", ...)` 则给 Python 关键字冲突的字段名(`as` 是 Python 关键字)起一个对外名字,Python 端参数仍叫 `as_name`。
 
 ### 4.4 受限值集合
 
@@ -209,14 +210,16 @@ def list_cmd(
 ALLOWED = {"mock", "anthropic"}
 
 def add_cmd(
-    type: Annotated[str, typer.Option("--type", help="model type")] = "mock",
+    type: Annotated[str, typer.Option("--type", help="provider type")] = "mock",
 ) -> None:
     if type not in ALLOWED:
         Renderer.die(f"--type 必须是 {' / '.join(sorted(ALLOWED))} 之一,收到 {type!r}")
         return
 ```
 
-项目偏 B —— 错误文案能讲中文 / 加上下文。**但 `chariot model add --type` 不在客户端校验**,故意让 server 端 `unknown_type` 错误(包含已注册 type 列表)统一管,避免客户端和 server 重复维护一份白名单。
+项目偏 B —— 错误文案能讲中文 / 加上下文。**但 `chariot provider add --type` 不在客户端校验**,
+让 `ProviderRegistry.reserve()` 抛 `ConfigError("unknown_type", ...)`(包含已注册 type 列表)统一管,
+避免命令层和 registry 重复维护一份白名单。
 
 ---
 
@@ -227,7 +230,7 @@ def add_cmd(
 1. 新建 `chariot/cli/commands/ping.py`:
    ```python
    import typer
-   from chariot.cli.core.render import Renderer
+   from chariot.cli.render import Renderer
 
    def ping_cmd() -> None:
        Renderer.out("pong")
@@ -266,15 +269,16 @@ def test_root_help() -> None:
     assert "status" in result.output
 ```
 
-**重点**:项目 CLI 测试只验 **typer 接线**(`--help` 全通 / 参数校验 / 退出码),**不真调 server**。真调 server 的集成测试用 `@pytest.mark.integration` 标记,默认跳过。
+**重点**:项目 CLI 测试只验 **typer 接线**(`--help` 全通 / 参数校验 / 退出码),**不真调上游 LLM**。
+真打上游的集成测试用 `@pytest.mark.integration` 标记,默认跳过。
 
 二级命令的 help 也覆盖:
 
 ```python
-def test_model_help() -> None:
-    result = runner.invoke(app, ["model", "--help"])
+def test_provider_help() -> None:
+    result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
-    for sub in ("list", "use", "add", "edit", "rm", "duplicate"):
+    for sub in ("list", "add", "edit", "rm", "probe"):
         assert sub in result.output
 ```
 
@@ -289,7 +293,7 @@ def test_model_help() -> None:
 | 运行报错泄 `api_key` 值 | `pretty_exceptions_show_locals=True` 在 locals 印变量 | 保持 `False`(项目默认);真要调试用单独 flag 控 |
 | `chariot model add -o key` 不报错就继续跑 | `_parse_kv_options` 看到 `=` 缺失会 `die`;但默认 `None` 让 `if "=" not in raw` 走不到 | 给 `-o` 至少传一次合法值,或在 typer 层加 `parser=` 校验 |
 | Python 关键字冲突的字段名传不进去 | `as` / `class` 等关键字不能直接当 Python 参数名 | 用 `as_name: ... typer.Option("--as", ...)`,对外 `--as`、对内 `as_name` |
-| REPL 里 typer 命令对 `/reset` 无效 | REPL 是项目自己的 input 循环,不走 typer | REPL 命令在 `cli/core/repl.py` 单独解析,不通过 `app()` |
+| REPL 里 typer 命令对 `/reset` 无效 | REPL 是项目自己的 input 循环,不走 typer | REPL 命令在 `cli/repl.py` 单独解析,不通过 `app()` |
 
 ---
 
@@ -298,5 +302,5 @@ def test_model_help() -> None:
 - Typer 官方:<https://typer.tiangolo.com/>
 - Click(底层)文档:<https://click.palletsprojects.com/>
 - 项目入口:`chariot/cli/__main__.py`
-- 项目命令实现:`chariot/cli/commands/*.py`(`status / start / stop / chat / logs / stats / model`)
-- 项目测试:`tests/cli/test_commands.py`
+- 项目命令实现:`chariot/cli/commands/*.py`(`status / chat / logs / stats / provider / tool / convo`)
+- 项目测试:`tests/cli/`
