@@ -32,7 +32,7 @@ AgentRegistry / ClientCache / DBState 这些类的 ClassVar 上。
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from chariot.agent.registry import AgentRegistry
@@ -48,7 +48,7 @@ _CLI_SESSION_KEY = "process"
 async def installed_runtime(
     *,
     provider_overrides: dict[str, dict[str, str]] | None = None,
-) -> AsyncIterator[AIAgent]:
+) -> AsyncGenerator[AIAgent, None]:
     """进程级 AIAgent + DB 连接池 + httpx client 缓存的生命周期。
 
     `provider_overrides`(0.6.5 起):per-process 注入到 entry.options 的 patch,

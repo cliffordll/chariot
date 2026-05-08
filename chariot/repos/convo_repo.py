@@ -28,7 +28,7 @@ messages,行为不被全局开关影响。
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -88,7 +88,7 @@ class ConvoRepo:
         *,
         timeout_s: float | None = None,
         max_retries: int | None = None,
-    ) -> AsyncIterator[None]:
+    ) -> AsyncGenerator[None, None]:
         """SQLite advisory lock 包 critical section(load history + append message)。
 
         实现:每次 acquire 在本 session 上跑 `BEGIN IMMEDIATE`(获 RESERVED
