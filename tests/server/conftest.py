@@ -20,11 +20,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.database.session import dispose_db, init_db
 from chariot.server.agent import Agent
-from chariot.server.database.session import dispose_db, init_db
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
-from chariot.server.tool.registry import ToolRegistry
+from chariot.tools.registry import ToolRegistry
 
 
 @pytest_asyncio.fixture

@@ -19,9 +19,9 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.config import ChariotConfig, ProviderEntry
+from chariot.database.models import LogEntry
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig, ModelEntry
-from chariot.server.database.models import LogEntry
 from chariot.server.model.base import Model
 from chariot.server.model.mock import MockModel
 from chariot.server.service.exceptions import ServiceError
@@ -69,9 +69,9 @@ def test_install_from_empty_config() -> None:
 def test_install_from_config_builds_dict() -> None:
     """有 entry → ModelRegistry.build,字典 keyed by name。"""
     config = ChariotConfig(
-        models=(
-            ModelEntry(name="m1", type="mock", options={}),
-            ModelEntry(name="m2", type="mock", options={}),
+        providers=(
+            ProviderEntry(name="m1", type="mock", options={}),
+            ProviderEntry(name="m2", type="mock", options={}),
         ),
     )
     a = Agent.install_from_config(config)
@@ -83,14 +83,14 @@ def test_install_from_config_is_idempotent_full_reset() -> None:
     """install_from_config 是幂等的全量重置:再次调用,删除的 entry 清出字典。"""
     Agent.install_from_config(
         ChariotConfig(
-            models=(
-                ModelEntry(name="a", type="mock", options={}),
-                ModelEntry(name="b", type="mock", options={}),
+            providers=(
+                ProviderEntry(name="a", type="mock", options={}),
+                ProviderEntry(name="b", type="mock", options={}),
             )
         )
     )
     Agent.install_from_config(
-        ChariotConfig(models=(ModelEntry(name="a", type="mock", options={}),))
+        ChariotConfig(providers=(ProviderEntry(name="a", type="mock", options={}),))
     )
     a = Agent.current()
     assert set(a.models.keys()) == {"a"}
@@ -186,7 +186,7 @@ async def test_handle_writes_log_on_success(
     assert len(rows) == 1
     log = rows[0]
     assert log.status == "ok"
-    assert log.model == "claude-prod"
+    assert log.provider == "claude-prod"
     assert log.error is None
     assert log.latency_ms is not None and log.latency_ms >= 0
 

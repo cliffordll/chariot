@@ -1,13 +1,13 @@
 """`chariot` CLI 入口。
 
-子命令
-------
-- `chariot status`
-- `chariot start`
-- `chariot stop`
+子命令(0.6.0 库化后,撤 daemon `start` / `stop`;0.6.0 起
+`model` rename → `provider`,`conversation` rename → `convo`):
+
+- `chariot status`     —— DB 路径 / providers / tools / version
 - `chariot logs [-n N]`
 - `chariot stats [period]`
-- `chariot chat [text]`  # 一次性 / REPL
+- `chariot chat [text]` —— 一次性 / REPL,直接构造 AIAgent
+- `chariot provider ...` / `tool ...` / `convo ...`
 """
 
 from __future__ import annotations
@@ -20,25 +20,19 @@ from chariot.cli.commands import (
     chat as chat_mod,
 )
 from chariot.cli.commands import (
-    conversation as conversation_mod,
+    convo as convo_mod,
 )
 from chariot.cli.commands import (
     logs as logs_mod,
 )
 from chariot.cli.commands import (
-    model as model_mod,
-)
-from chariot.cli.commands import (
-    start as start_mod,
+    provider as provider_mod,
 )
 from chariot.cli.commands import (
     stats as stats_mod,
 )
 from chariot.cli.commands import (
     status as status_mod,
-)
-from chariot.cli.commands import (
-    stop as stop_mod,
 )
 from chariot.cli.commands import (
     tool as tool_mod,
@@ -64,21 +58,19 @@ def _root(  # pyright: ignore[reportUnusedFunction] — typer @app.callback() �
     ] = False,
 ) -> None:
     """根 callback:处理全局 flag。子命令执行前会先跑这里。"""
-    from chariot.cli.core.render import Renderer
+    from chariot.cli.render import Renderer
 
     Renderer.QUIET = quiet
 
 
 for mod in (
     status_mod,
-    start_mod,
-    stop_mod,
     logs_mod,
     stats_mod,
     chat_mod,
-    model_mod,
+    provider_mod,
     tool_mod,
-    conversation_mod,
+    convo_mod,
 ):
     mod.register(app)
 

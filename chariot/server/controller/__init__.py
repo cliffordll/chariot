@@ -18,10 +18,10 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from chariot.server.controller import (
-    conversations,
+    convos,
     dataplane,
     logs,
-    models,
+    providers,
     runtime,
     stats,
     tools,
@@ -33,9 +33,9 @@ admin_router = APIRouter()
 admin_router.include_router(runtime.router)
 admin_router.include_router(logs.router)
 admin_router.include_router(stats.router)
-admin_router.include_router(models.router)
+admin_router.include_router(providers.router)
 admin_router.include_router(tools.router)
-admin_router.include_router(conversations.router)
+admin_router.include_router(convos.router)
 
 dataplane_router = APIRouter()
 dataplane_router.include_router(dataplane.router)

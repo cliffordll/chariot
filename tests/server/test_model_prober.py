@@ -16,7 +16,7 @@ from typing import Any, Self
 import pytest
 from fastapi.responses import Response
 
-from chariot.server.config import ModelEntry
+from chariot.agent.config import ProviderEntry
 from chariot.server.model.base import Model
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
@@ -73,7 +73,7 @@ class _UnexpectedErrorModel(Model):
 
 async def test_probe_mock_entry_succeeds() -> None:
     """mock 走本地 echo,不发 HTTP,probe 必通。"""
-    entry = ModelEntry(name="m", type="mock", options={})
+    entry = ProviderEntry(name="m", type="mock", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is True
     assert result.error is None
@@ -82,7 +82,7 @@ async def test_probe_mock_entry_succeeds() -> None:
 
 async def test_probe_unknown_type_returns_config_error() -> None:
     """type 未注册 → ModelRegistry.build 抛 ConfigError → probe 包成 config_error。"""
-    entry = ModelEntry(name="x", type="no_such_type", options={})
+    entry = ProviderEntry(name="x", type="no_such_type", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is False
     assert result.error is not None
@@ -97,7 +97,7 @@ async def test_probe_anthropic_missing_api_key_returns_config_error(
 ) -> None:
     """anthropic 没填 api_key 也没 export env → from_config 抛 ConfigError。"""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    entry = ModelEntry(
+    entry = ProviderEntry(
         name="claude",
         type="anthropic",
         options={"model": "claude-opus-4-5"},
@@ -112,7 +112,7 @@ async def test_probe_anthropic_missing_api_key_returns_config_error(
 async def test_probe_upstream_service_error_propagates_code() -> None:
     """respond raise ServiceError → ok=False,code/message 直接透传。"""
     ModelRegistry.register("fake_svc_err", _ServiceErrorModel)
-    entry = ModelEntry(name="x", type="fake_svc_err", options={})
+    entry = ProviderEntry(name="x", type="fake_svc_err", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is False
     assert result.error is not None
@@ -125,7 +125,7 @@ async def test_probe_upstream_service_error_propagates_code() -> None:
 async def test_probe_unexpected_exception_caught_as_internal_error() -> None:
     """respond raise 非 ServiceError 异常 → 兜底成 probe_internal_error,不上抛。"""
     ModelRegistry.register("fake_boom", _UnexpectedErrorModel)
-    entry = ModelEntry(name="x", type="fake_boom", options={})
+    entry = ProviderEntry(name="x", type="fake_boom", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is False
     assert result.error is not None
@@ -136,7 +136,7 @@ async def test_probe_unexpected_exception_caught_as_internal_error() -> None:
 async def test_probe_ok_model_returns_ok() -> None:
     """正常 respond 返 200 → ok=True。"""
     ModelRegistry.register("fake_ok", _AlwaysOkModel)
-    entry = ModelEntry(name="x", type="fake_ok", options={})
+    entry = ProviderEntry(name="x", type="fake_ok", options={})
     result = await ModelProber.probe(entry)
     assert result.ok is True
     assert result.error is None

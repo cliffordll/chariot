@@ -12,7 +12,7 @@ import httpx
 import pytest
 from fastapi.responses import StreamingResponse
 
-from chariot.server.config import ConfigError
+from chariot.agent.config import ConfigError
 from chariot.server.model.anthropic import AnthropicModel
 from chariot.server.service.exceptions import ServiceError
 

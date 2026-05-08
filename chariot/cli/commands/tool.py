@@ -1,4 +1,6 @@
-"""`chariot tool list / enable / disable / config` —— 内置工具配置(0.4.0)。
+"""`chariot tool list / enable / disable / config` —— 内置工具配置。
+
+0.6.0 库化版:撤旧 ProxyClient,直接走 ToolRepo。
 
 二级子命令组(typer.Typer 嵌套):
 
@@ -9,8 +11,6 @@
 - `chariot tool enable <name>`:启用
 - `chariot tool disable <name>`:禁用
 - `chariot tool config <name> -o key=value [-o ...]`:覆写 options(整体替换,非 merge)
-
-server 未运行 → 错误退出。
 """
 
 from __future__ import annotations
@@ -19,11 +19,12 @@ import asyncio
 import json
 from typing import Annotated, Any
 
-import httpx
 import typer
 
-from chariot.cli.core.render import Renderer
-from chariot.sdk.client import ProxyClient
+from chariot.agent.exceptions import ConfigError, ToolNotFound
+from chariot.cli._runtime import installed_runtime
+from chariot.cli.render import Renderer
+from chariot.repos.tool_repo import ToolRepo
 
 tool_app = typer.Typer(
     name="tool",
@@ -41,12 +42,8 @@ def list_cmd() -> None:
 
 
 async def _list() -> None:
-    try:
-        async with ProxyClient.discover_session(spawn_if_missing=False) as client:
-            data = await client.list_tools()
-    except RuntimeError:
-        Renderer.die("server 未运行;先 `chariot start` 起一份")
-        return
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        entries = await ToolRepo(session).list_entries()
 
     rows = [
         (
@@ -55,7 +52,7 @@ async def _list() -> None:
             "ON" if e.enabled else "off",
             json.dumps(e.options, ensure_ascii=False),
         )
-        for e in data.entries
+        for e in entries
     ]
     Renderer.table(["name", "type", "enabled", "options"], rows, title="tools")
 
@@ -63,7 +60,7 @@ async def _list() -> None:
 # ---------- enable / disable ----------
 
 
-@tool_app.command("enable", help="启用一个工具(Agent 立即 rebuild,LLM 下一轮可见)")
+@tool_app.command("enable", help="启用一个工具(下次起的 AIAgent 看见)")
 def enable_cmd(
     name: Annotated[
         str,
@@ -81,16 +78,13 @@ def disable_cmd(
 
 
 async def _set_enabled(name: str, enabled: bool) -> None:
-    try:
-        async with ProxyClient.discover_session(spawn_if_missing=False) as client:
-            try:
-                tool = await client.update_tool(name, enabled=enabled)
-            except httpx.HTTPStatusError as e:
-                Renderer.die(f"修改失败 (HTTP {e.response.status_code}): {e.response.text}")
-                return
-    except RuntimeError:
-        Renderer.die("server 未运行;先 `chariot start` 起一份")
-        return
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                tool = await ToolRepo(session).update(name, enabled=enabled)
+        except ToolNotFound as e:
+            Renderer.die(f"修改失败: {e}")
+            return
     state = "ON" if tool.enabled else "off"
     Renderer.out(f"~ {tool.name}: {state}")
 
@@ -135,16 +129,16 @@ async def _config(name: str, options: list[str]) -> None:
         Renderer.die("至少给一个 -o key=value;否则无事可做")
         return
     opts = _parse_kv(options)
-    try:
-        async with ProxyClient.discover_session(spawn_if_missing=False) as client:
-            try:
-                tool = await client.update_tool(name, options=opts)
-            except httpx.HTTPStatusError as e:
-                Renderer.die(f"修改失败 (HTTP {e.response.status_code}): {e.response.text}")
-                return
-    except RuntimeError:
-        Renderer.die("server 未运行;先 `chariot start` 起一份")
-        return
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                tool = await ToolRepo(session).update(name, options=opts)
+        except ToolNotFound as e:
+            Renderer.die(f"修改失败: {e}")
+            return
+        except ConfigError as e:
+            Renderer.die(f"修改失败: {e}")
+            return
     Renderer.out(f"~ {tool.name}: options={json.dumps(tool.options, ensure_ascii=False)}")
 
 

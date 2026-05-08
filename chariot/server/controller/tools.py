@@ -23,18 +23,18 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from chariot.server.agent import Agent
-from chariot.server.config import (
+from chariot.agent.config import (
     ChariotConfig,
     ConfigError,
     ToolConfig,
     ToolEntry,
     ToolNotFound,
 )
-from chariot.server.database.session import SessionDep
-from chariot.server.repository.tool_repo import ToolRepo
+from chariot.database.session import SessionDep
+from chariot.repos.tool_repo import ToolRepo
+from chariot.server.agent import Agent
 from chariot.server.service.exceptions import ServiceError
-from chariot.server.tool.registry import ToolRegistry
+from chariot.tools.registry import ToolRegistry
 
 __all__ = [
     "ToolOut",

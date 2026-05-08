@@ -30,7 +30,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from chariot.server.config import ConfigError, ModelEntry
+from chariot.agent.config import ConfigError, ProviderEntry
 from chariot.server.model.registry import ModelRegistry
 from chariot.server.service.exceptions import ServiceError
 
@@ -56,7 +56,7 @@ class ProbeResult(BaseModel):
 
 
 class ModelProber:
-    """探针工具类 —— 给一条 ModelEntry,临时 build + 发最小请求 + 报结果。"""
+    """探针工具类 —— 给一条 ProviderEntry,临时 build + 发最小请求 + 报结果。"""
 
     # 最小合法 Messages 请求体;model 字段会被 AnthropicModel 按 entry.options.model
     # 改写,这里写啥都行。
@@ -69,7 +69,7 @@ class ModelProber:
     ).encode("utf-8")
 
     @classmethod
-    async def probe(cls, entry: ModelEntry) -> ProbeResult:
+    async def probe(cls, entry: ProviderEntry) -> ProbeResult:
         """对 entry 执行一次探针。永不 raise —— 任何失败都包成 ProbeResult。"""
         t0 = time.monotonic()
         try:

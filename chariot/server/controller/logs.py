@@ -7,7 +7,7 @@ v0:server 每次 agent.handle() 会落一条 log;CLI / GUI 的 Logs 页从这里
 - `offset`(默认 0)
 - `since` / `until`:ISO 8601 时间戳过滤 `created_at`
 
-响应每条:id / created_at / model / input_tokens / output_tokens / latency_ms /
+响应每条:id / created_at / provider / input_tokens / output_tokens / latency_ms /
 status / error。
 """
 
@@ -19,8 +19,8 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from chariot.server.database.models import LogEntry
-from chariot.server.repository import LogRepoDep
+from chariot.database.models import LogEntry
+from chariot.repos import LogRepoDep
 
 router = APIRouter()
 
@@ -30,7 +30,7 @@ _MAX_LIMIT = 500
 class LogOut(BaseModel):
     id: str
     created_at: datetime
-    model: str | None
+    provider: str | None
     input_tokens: int | None
     output_tokens: int | None
     latency_ms: int | None
@@ -43,7 +43,7 @@ class LogOut(BaseModel):
         return cls(
             id=entry.id,
             created_at=entry.created_at,
-            model=entry.model,
+            provider=entry.provider,
             input_tokens=entry.input_tokens,
             output_tokens=entry.output_tokens,
             latency_ms=entry.latency_ms,

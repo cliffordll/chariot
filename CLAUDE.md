@@ -21,8 +21,8 @@
    - 用全局变量 + 多个函数共享它,直接改成类。
 
 3. **协议 / 格式的三分支 dispatch 必须用 Adapter 模式**
-   - 出现 `if fmt is MESSAGES ... elif fmt is COMPLETIONS ... elif fmt is RESPONSES` 连续三次以上 → 一定是 `ProtocolAdapter` ABC + 三个子类 + dispatch 字典。
-   - 参考:`chariot/server/model/mock.py`(server 侧)、`chariot/sdk/_adapters.py`(客户端)。
+   - 出现 `if fmt is MESSAGES ... elif fmt is COMPLETIONS ... elif fmt is RESPONSES` 连续三次以上 → 一定是 `BaseAdapter` ABC + 三个子类 + dispatch 字典。
+   - 参考:0.6.0+ `chariot/providers/builtin/anthropic.py`(SSE 帧 → ChatEvent dispatch)、`chariot/providers/builtin/openai.py`(0.7.0,OpenAI ↔ Claude 翻译)。
 
 4. **内聚优先于 DRY**
    - 两个函数逻辑相近但服务不同对象时,宁可各自收进自己的类、轻微重复,也不要提取到顶层的"通用 helper"模块。
@@ -86,22 +86,41 @@
 - **跨层统一**:同一概念在 API / CLI / DB / 模块名之间保持一致(例:`logs` 表 ↔ `/admin/logs` ↔ `chariot logs` ↔ `logger.py`)
 - **非破坏优先**:重命名用 rename 而非"删旧建新";废弃文档打归档 banner 不删;代码删除前优先确认无引用
 - **识别 vs 自然语言**:批量重命名标识符时,不动中文散文里的自然描述(例:schema 里 `request_logs` → `logs`,但文档里"请求日志"这类描述词不改)
+- **命名规范 —— 清晰明了,不太短不太长**:目录 / 文件名 / 类名 / 函数名都按这条判;两端都规避:
+  - 太短无信息:`a.py` / `Foo.py` / `class M:` / `def do(...)`(单字母 / 通用名 / 无领域信息)
+  - 太长难读:`anthropic_provider_with_streaming_tool_loop.py` / `class ConvoLockManagerForCrossProcessAdvisoryLock`(把上下文已知的修饰塞进名字)
+  - 中庸目标:**"足够说清楚 + 上下文已知就省略"**。已经在 `chariot/providers/builtin/` 下,文件叫 `anthropic.py` 即可,不需要 `anthropic_provider.py`;在 `chariot/agent/` 下,文件叫 `run.py` / `loop.py` 即可,不需要 `run_agent.py` / `agent_loop.py`(目录已表达)
+  - **关键名字规则**:核心类 = `AIAgent`(不是 `Agent` —— 项目里要明显区分"AI 主体"与一般意义上的"代理 / 客户端");agent 主循环类 = `AgentLoop`;放 `chariot/agent/run.py` + `loop.py`(目录已说 agent,文件名不重复);`ProviderRegistry` / `ToolRegistry` / `ConvoRepo` / `ConvoLockManager` 等领域内已具体,不再加修饰
+- **抽象基类用 `Base*` 前缀**:`BaseProvider` / `BaseTool` / `BaseSkill` / `BaseGateway` / `BaseProviderConfig`。理由:跟 Python 主流惯例对齐(pydantic `BaseModel` / FastAPI `BaseHTTPMiddleware` / Django `BaseSettings`),零学习成本。具体子类不带前缀(`AnthropicProvider` / `ReadFileTool` / `TelegramGateway` 等)。文件名沿用 `base.py` 惯例(`xxx/base.py` 装该层的 base class)。**不用 `Abs*` / `ABC*`**(歧义大,前者像"absolute"后者像 Python `abc` 模块名)
+- **复数 / 单数规则**:
+  - **装多个同类实例的目录用复数**:`tools/` `providers/` `repos/` `gateways/` `commands/`
+  - **单一概念 / 一个 surface 用单数**:`agent/` `cli/` `sidecar/` `database/` `acp/` `mcp/`(`acp` `mcp` 是单一协议实现,不复数)
+- **抽象 / 实现分层 — `builtin/` 子目录承载具体实现**:装多个可插拔实现的目录套这套:
+  - `tools/{base.py, registry.py, builtin/{read_file.py, list_dir.py, ...}}`
+  - `providers/{base.py, registry.py, prober.py, _sse.py, builtin/{mock.py, anthropic.py, ...}}`
+  - `gateways/{base.py, registry.py, builtin/{telegram.py, discord.py, ...}}`(0.8.0+)
+  - 顶层装契约 + 共享 utility,`builtin/` 装项目自带的实现
+  - 0.11.0+ 加 `external/` 子目录装第三方插件 / 用户安装的实现
+  - **`acp/` `mcp/` 不套**(单一协议实现,不是"多个可插拔的 ACP / MCP 实现")
 
 ## 实现原则
 
-- **优先面向对象**:新功能优先用类封装(参考现有:`Agent` / `MockModel` / `ChatContext` / `Renderer` / `LogRepo` / `LogWriter`)。类承载配置 + 状态,模块尾部暴露单例 `xxx = Xxx()` 供调用方直接 import 使用;纯无状态工具才散函数
-- **分层窄接口**:Controller 只调 `Agent.handle`,不知道有 `Model`;Agent 只调 `Model.respond`,不知道具体实现。加新能力(新 Model 实现 / Agent 进化逻辑)**绝不**穿层 —— 接口契约见 `DESIGN.md` §5
-- **优先复用已有抽象**:动手前先扫一眼相邻层有无现成函数 / 类可用(`get_agent()` / `ProxyClient.discover_session()` / `log_writer.record` 等)。重写一遍之前先问"能不能调用它",避免两套代码各自漂移
+- **优先面向对象**:新功能优先用类封装(参考现有:`AIAgent` / `AgentLoop` / `MockProvider` / `AnthropicProvider` / `ChatContext` / `Renderer` / `LogRepo` / `LogWriter`)。类承载配置 + 状态,模块尾部暴露单例 `xxx = Xxx()` 供调用方直接 import 使用;纯无状态工具才散函数
+- **分层窄接口**:Surface 只调 `AIAgent.run`,不知道有 `BaseProvider` 子类;`AIAgent` 只调 `BaseProvider.generate`,不知道具体实现;`AgentLoop` 跑工具循环但不知 wire format。加新能力(新 Provider 实现 / 新 Tool / AIAgent 进化逻辑)**绝不**穿层 —— 接口契约见 `DESIGN.md` §5 / §6(0.6.0+)
+- **优先复用已有抽象**:动手前先扫一眼相邻层有无现成函数 / 类可用(`AIAgent.bootstrap()` / `lock_manager.acquire()` / `log_writer.record()` / `ProviderProber.probe()` 等)。重写一遍之前先问"能不能调用它",避免两套代码各自漂移
 - **例外**:一次性脚本 / 实验性验证可以散函数,但落入生产路径前要按上面两条重构
 
 ## 技术栈(已决策)
 
-- **语言**:Python 3.12+,单包布局(参见 `docs/DESIGN.md` §7)
-- **后端**:FastAPI · SQLAlchemy 2.x async · aiosqlite · httpx · typer
+- **语言**:Python 3.12+,单包布局(参见 `docs/DESIGN.md` §11)
+- **内核库**(0.6.0+ 库化):SQLAlchemy 2.x async · aiosqlite · httpx · typer · prompt_toolkit
+- **Surface 通信**:stdio JSON-RPC 框架共享(`chariot/rpc/jsonrpc.py`)给 sidecar / acp / mcp;CLI 内进程直调,无 IPC;Gateways(0.8.0+)走各平台 Bot SDK
+- **撤掉**(0.6.0 S.11 之后):FastAPI / uvicorn(0.5.0 server 退役)
 - **前端**:React · TypeScript · Vite · Tailwind · shadcn/ui
-- **桌面**:Tauri 2.x(Rust)
+- **桌面**:Tauri 2.x(Rust);Tauri ↔ Python sidecar 走 stdio JSON-RPC
 - **包管理**:uv(Python) · bun(前端 / Tauri workspace)
-- **打包**:PyInstaller 单文件 exe(作为 Tauri sidecar 分发)
+- **打包**:PyInstaller 单文件 exe(作为 Tauri sidecar 分发,产物 `chariot-sidecar.exe`)
+- **并发模型**:全栈 asyncio(IO 密集场景);CPU 真并行用 `asyncio.run_in_executor` + ProcessPoolExecutor 包,不引入 threading 主导
 - **平台优先级**:Windows 11 > macOS > Linux
 
 ## 开发环境
@@ -109,18 +128,55 @@
 - **开发机**:Windows 11 Pro
 - **Shell**:bash(git bash),**不要用 PowerShell 特有语法**
 - **路径**:脚本里用 Unix 风格(`/`),避免 `\`
-- **可执行 sentinel**:Windows 下调试 CLI / server 可执行,直接 `python -m chariot.server` / `python -m chariot.cli` 不依赖 exe,打包验证到阶段 6 再做
+- **可执行 sentinel**:Windows 下调试,直接 `python -m chariot.cli` / `python -m chariot.sidecar`(0.6.0 起)/ `python -m chariot.server`(过渡期 S.10 之前)/ `python -m chariot.gateways`(0.8.0+)不依赖 exe;打包验证到 S.9 再做
 - **commit 前静态检查**:`uv run ruff check .` + `uv run ruff format --check .` + `uv run pyright chariot/` + `uv run pytest -q`(CI `ci.yml` 跑这全套,本地漏一步就红 CI)
 
 ## 已知敏感点
 
-实现时别绕开的关键细节:
+实现时别绕开的关键细节。**按版本分两类**:0.6.0+ 是新基线,过渡期 0.5.0 项
+S.1 ~ S.10 仍生效,S.11 撤 server/ 后失效。
 
-- **`endpoint.json` spawn 并发保护**:`spawn.lock` 独占创建 + `.tmp` → `rename` 原子写入
-- **watcher 优雅关闭**:5 步流程,不硬杀
-- **流式错误传播**:200 已发后靠断 TCP,不伪造事件
-- **`logs.created_at` 索引 + `PRAGMA user_version` 迁移机制**
-- **Agent / Model 分层契约**:Model 无状态、不记 log、不碰 DB;Agent 才是唯一日志写入者。新 Model 实现(AnthropicAdapter / LocalLlama)遵守这三条
+### 0.6.0+(库化后,主基线)
+
+- **Claude 形态 IR(三层 1:1)**:`ChatRequest` / `ChatEvent` / `messages.content`
+  跟 Claude Messages API 1:1 对齐(详 DESIGN §3.1 / §3.2 / §7.1)。
+  `AnthropicProvider` 几乎透传;`OpenAIProvider`(0.7.0+)/ 其它非 Claude
+  Provider 内部翻译。**翻译只在非 Claude Provider 内部发生**,不污染内核 /
+  不污染落库 / 不污染 surface
+- **流式输出契约**(0.1.0 沿用,0.6.0 转 ChatEvent 表达,详 DESIGN §6.4.2):
+  - Provider **200 前**抛 `ProviderError(code, ...)` → AIAgent 捕获后转
+    `ChatEvent(kind="error", error_type=..., error_message=...)` yield
+  - Provider **200 后**的错 → 直接 yield
+    `ChatEvent(kind="error", error_type="upstream_stream_error")` + return,
+    **不抛**(异常会污染 AsyncIterator 流契约)
+  - Provider **不产 `stream_done`**(那是 AgentLoop 跨轮收敛职责)
+  - 错误字段是 `error_type` / `error_message`,**不是** `code` / `message`
+- **sidecar 进程生命周期**:sidecar 由 Tauri 主进程 spawn,**stdin 关闭 = 自然
+  退出**(graceful);**不要主动 kill**。stdin EOF → asyncio 主循环 break →
+  清理 httpx / sqlalchemy → 退出。如果"sidecar 未退出"看是不是 stdin 没关
+- **AIAgent / Provider 分层契约**:
+  - `BaseProvider` 子类:**无状态、不记 log、不碰 DB**——纯输入输出
+  - `AIAgent` 是**唯一日志写入者**(通过 `LogWriter`)和持久化方(通过
+    `ConvoRepo`)
+  - `AgentLoop` 内部跑工具循环 + 注入 `tool_result` events,不暴露 SSE / JSON-RPC
+  - 新 Provider 实现(`OpenAIProvider` / `LocalLlamaProvider`)遵守这三条
+- **双层锁(进程内 + 跨进程)**(详 DESIGN §7.2):
+  - 进程内 `ConvoLockManager`(asyncio.Lock 字典)— 同进程内同 convo_id 串行
+  - 跨进程 SQLite `BEGIN IMMEDIATE` 短事务 — 多进程同 convo_id 串行写
+  - `lock_manager.acquire(convo_id, db_session=...)` 同时拿两层
+- **`logs.created_at` 索引 + `PRAGMA user_version` 迁移机制**(0.4.0 沿用)
+
+### 0.5.0 过渡期(S.1 ~ S.10 仍生效;S.11 撤 server/ 后失效)
+
+动 `chariot/server/runtime/` / `chariot/server/agent.py` 等老代码时仍遵守:
+
+- **`endpoint.json` spawn 并发保护**:`spawn.lock` 独占创建 + `.tmp` →
+  `rename` 原子写入(`server/runtime/endpoint.py`)
+- **watcher 优雅关闭**:5 步流程,不硬杀(`server/runtime/watcher.py`)
+- **旧 Agent / Model 分层契约**:Model 无状态、不记 log、不碰 DB(由
+  `BaseProvider` 在 0.6.0 接管)
+- **流式错误传播**:200 已发后靠断 TCP,不伪造事件(0.6.0 升级为 yield
+  `ChatEvent(kind="error")`,精神不变)
 
 ---
 

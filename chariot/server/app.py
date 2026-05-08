@@ -20,19 +20,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from chariot import __version__
+from chariot.agent.config import ChariotConfig, ToolConfig
+from chariot.database.session import dispose_db, init_db
+from chariot.repos.provider_repo import ProviderRepo
+from chariot.repos.tool_repo import ToolRepo
 from chariot.server.agent import Agent
-from chariot.server.config import ChariotConfig, ToolConfig
 from chariot.server.controller import (
     admin_router,
     dataplane_router,
     register_exception_handlers,
 )
-from chariot.server.database.session import dispose_db, init_db
-from chariot.server.repository.model_repo import ModelRepo
-from chariot.server.repository.tool_repo import ToolRepo
 
 # `chariot.server.tool/__init__.py` 的 4 个 ToolRegistry.register 副作用通过 Agent 模块
-# 链路自动触发(Agent 顶部 `from chariot.server.tool.registry import ToolRegistry`),
+# 链路自动触发(Agent 顶部 `from chariot.tools.registry import ToolRegistry`),
 # 不需要在这里再显式 import。
 
 _log = logging.getLogger("chariot.server.app")
@@ -45,7 +45,7 @@ async def _startup() -> Agent:
     """
     sm = await init_db()
     async with sm() as session:
-        await ModelRepo(session).seed_if_empty()
+        await ProviderRepo(session).seed_if_empty()
         await ToolRepo(session).seed_if_empty()
         model_config = await ChariotConfig.from_db(session)
         tool_config = await ToolConfig.from_db(session)
