@@ -340,11 +340,11 @@ export default function Chat() {
 
     try {
       const result = await runTurn(newMessages, {
-        model: selectedEntry,
+        provider: selectedEntry,
         maxTokens: sampling.maxTokens,
         temperature: sampling.temperature,
         topP: sampling.topP,
-        conversationId: convId,
+        convoId: convId,
         signal: ctrl.signal,
         onEvent: (ev) => {
           setPending((cur) => (cur ? { ...cur, blocks: applyEvent(cur.blocks, ev) } : cur));
@@ -373,8 +373,7 @@ export default function Chat() {
         setPending(null);
       }
     } catch (e) {
-      const msg =
-        e instanceof ChatError ? `HTTP ${e.status}: ${e.body.slice(0, 300)}` : extractErr(e);
+      const msg = e instanceof ChatError ? e.message : extractErr(e);
       setPending((cur) =>
         cur ? { ...cur, status: "error", errorMsg: msg } : cur,
       );
@@ -636,8 +635,8 @@ function MessagesView({
   }
   return (
     <ul className="space-y-4">
-      {messages.map((m) => (
-        <li key={m.seq}>
+      {messages.map((m, i) => (
+        <li key={m.seq ?? i}>
           <MessageRow msg={m} />
         </li>
       ))}

@@ -3,12 +3,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  api,
-  type ApiError,
-  type Tool,
-  type ToolsListResponse,
-} from "@/lib/api";
+import { api, ApiError, type Tool } from "@/lib/api";
+
+interface ToolsListResponse {
+  tools: Tool[];
+}
 
 /**
  * Tools 页 —— 内置工具配置(0.4.0)。
@@ -34,7 +33,7 @@ export default function Tools() {
     setState({ kind: "loading" });
     try {
       const data = await api.listTools();
-      setState({ kind: "ok", data });
+      setState({ kind: "ok", data: data as ToolsListResponse });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setState({ kind: "err", message: msg });
@@ -134,7 +133,7 @@ function ToolsCard({
         展开行可编辑 options 与查看 anthropic tool schema。
       </div>
       <ul className="mb-4 divide-y divide-border rounded-md border border-border">
-        {data.entries.map((tool) => (
+        {data.tools.map((tool: Tool) => (
           <ToolRow
             key={tool.name}
             tool={tool}
@@ -149,7 +148,7 @@ function ToolsCard({
 
       <div className="text-xs text-muted-foreground">
         registered types:{" "}
-        {data.types.map((t, i) => (
+        {Array.from(new Set(data.tools.map((tool: Tool) => tool.type))).map((t: string, i: number) => (
           <span key={t}>
             {i > 0 && ", "}
             <code className="font-mono">{t}</code>
