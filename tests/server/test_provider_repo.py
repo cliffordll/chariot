@@ -1,4 +1,4 @@
-"""ProviderRepo 测试 —— CRUD + duplicate 命名规则 + seed_if_empty + 校验路径。"""
+"""ProviderRepo 测试 —— CRUD + duplicate 命名规则 + seed_if_empty + 校验路径 + 默认 provider。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
+from chariot.agent.exceptions import ProviderNotFound
 from chariot.repos.provider_repo import ProviderRepo
 
 # ---------- create / get / list ----------
@@ -232,3 +233,85 @@ async def test_create_sets_timestamps(session: AsyncSession) -> None:
     rows = await repo.list_rows()
     assert rows[0].created_at is not None
     assert rows[0].updated_at is not None
+
+
+# ---------- 默认 provider(v7 起;is_default 列)----------
+
+
+async def test_get_default_returns_none_on_empty_db(session: AsyncSession) -> None:
+    """空表 → get_default 返 None。"""
+    repo = ProviderRepo(session)
+    assert await repo.get_default() is None
+
+
+async def test_get_default_returns_none_when_no_row_marked(session: AsyncSession) -> None:
+    """表里有行但没 is_default=1 → 返 None(初始无默认是合法状态)。"""
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.create(name="b", type="mock", options={})
+    assert await repo.get_default() is None
+
+
+async def test_set_default_then_get_default_returns_selected(session: AsyncSession) -> None:
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.create(name="b", type="mock", options={})
+    await repo.set_default("b")
+
+    default = await repo.get_default()
+    assert default is not None
+    assert default.name == "b"
+
+
+async def test_set_default_switches_atomically(session: AsyncSession) -> None:
+    """连续 set_default(a) → set_default(b),只有 b 是默认(a 自动清 0)。"""
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.create(name="b", type="mock", options={})
+    await repo.set_default("a")
+    await repo.set_default("b")
+
+    rows = await repo.list_rows()
+    by_name = {r.name: r for r in rows}
+    assert by_name["a"].is_default == 0
+    assert by_name["b"].is_default == 1
+
+
+async def test_set_default_idempotent_for_same_name(session: AsyncSession) -> None:
+    """重复 set_default(同 name)幂等;仍只一行 is_default=1。"""
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.set_default("a")
+    await repo.set_default("a")
+
+    rows = await repo.list_rows()
+    assert sum(r.is_default for r in rows) == 1
+
+
+async def test_set_default_unknown_name_raises(session: AsyncSession) -> None:
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    with pytest.raises(ProviderNotFound):
+        await repo.set_default("ghost")
+    # 失败时不应误改其它行
+    rows = await repo.list_rows()
+    assert all(r.is_default == 0 for r in rows)
+
+
+async def test_unset_default_clears_all(session: AsyncSession) -> None:
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.set_default("a")
+    await repo.unset_default()
+
+    assert await repo.get_default() is None
+    rows = await repo.list_rows()
+    assert all(r.is_default == 0 for r in rows)
+
+
+async def test_unset_default_no_op_when_no_default(session: AsyncSession) -> None:
+    """没默认时 unset_default 也不抛(no-op)。"""
+    repo = ProviderRepo(session)
+    await repo.create(name="a", type="mock", options={})
+    await repo.unset_default()  # 不应抛
+    assert await repo.get_default() is None

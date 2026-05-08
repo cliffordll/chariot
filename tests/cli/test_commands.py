@@ -98,6 +98,20 @@ def test_chat_has_convo_option() -> None:
     assert "new|ULID" in out
 
 
+def test_chat_has_provider_option() -> None:
+    """`chariot chat` 加 --provider 选项(v7 起;不传走 DB 默认)。"""
+    result = runner.invoke(app, ["chat", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "--provider" in out
+
+
+def test_chat_model_option_removed() -> None:
+    """`chariot chat --model` 在 v7 起下线;改 `--provider`(避免与 LLM model id 撞名)。"""
+    result = runner.invoke(app, ["chat", "--model", "anything", "hi"])
+    assert result.exit_code != 0
+
+
 def test_chat_convo_invalid_value_dies_locally() -> None:
     """非法 --convo 值 → CLI 立刻 die,不打 AIAgent。"""
     result = runner.invoke(app, ["chat", "--convo", "foo", "hi"])
@@ -119,18 +133,21 @@ def test_convo_show_requires_id() -> None:
     assert result.exit_code != 0
 
 
-def test_provider_subcommand_group_has_list_and_crud() -> None:
-    """`chariot provider` 子命令 = list/probe/add/edit/rm/copy(0.6.0 model→provider)。"""
+def test_provider_subcommand_group_has_list_show_use_and_crud() -> None:
+    """`chariot provider` 子命令(0.6.0 起):list / show / use / probe / add / edit / rm / copy。
+
+    v7 起新增 `show`(展示 entry,默认显示当前默认)+ `use`(设默认)。
+    """
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "probe", "add", "edit", "rm", "copy"):
+    for sub in ("list", "show", "use", "probe", "add", "edit", "rm", "copy"):
         assert sub in out, f"`chariot provider --help` 缺少子命令 {sub!r}"
 
 
-def test_provider_use_subcommand_removed() -> None:
-    """0.3.1 路由模型重构:active 概念删除,`chariot provider use` 也下线。"""
-    result = runner.invoke(app, ["provider", "use", "anything"])
+def test_provider_use_requires_name() -> None:
+    """`chariot provider use` 不带参数 → typer 报参数缺失。"""
+    result = runner.invoke(app, ["provider", "use"])
     assert result.exit_code != 0
 
 

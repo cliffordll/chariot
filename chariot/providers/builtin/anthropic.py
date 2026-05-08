@@ -55,8 +55,12 @@ class AnthropicProvider(BaseProvider):
     _WRITE_TIMEOUT_SEC: ClassVar[float] = 30.0
     _POOL_TIMEOUT_SEC: ClassVar[float] = 10.0
 
-    # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发)
-    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"convo_id", "agent_id"})
+    # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发);
+    # `provider_name` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
+    # 用 `self.config.model` 显式写入)
+    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"provider_name", "convo_id", "agent_id"}
+    )
 
     def __init__(
         self,
@@ -178,23 +182,28 @@ class AnthropicProvider(BaseProvider):
 
     # ---- 内部:body 拼装 ----
 
-    @classmethod
-    def _build_body(cls, req: ChatRequest) -> dict[str, Any]:
+    def _build_body(self, req: ChatRequest) -> dict[str, Any]:
         """`ChatRequest` → Anthropic API request body dict。
 
         步骤:
         1. `dataclasses.asdict(req)` 拿全字段
-        2. 剔除 chariot 扩展字段(`convo_id` / `agent_id`)
+        2. 剔除 chariot 扩展字段(`provider_name` / `convo_id` / `agent_id`);
+          `provider_name` 是 chariot 路由 key,Anthropic API 不识别
         3. 剔除 `None` 值字段(Anthropic API 不接受 null,且 max_tokens 等
           有默认 4096 不能漏)
-        4. 强制 `stream=True`(chariot 内核固定流式)
+        4. **写 `body["model"] = self.config.model`**:wire 字段名仍是 `model`
+          (Anthropic API 要求);值从 `entry.options.model` 来(实例化时落到
+          `self.config.model`)。`req.provider_name` 不参与 body 构造,只在
+          AIAgent 路由时用过
+        5. 强制 `stream=True`(chariot 内核固定流式)
         """
         full = dataclasses.asdict(req)
         body: dict[str, Any] = {
             k: v
             for k, v in full.items()
-            if k not in cls._CHARIOT_EXTENSION_FIELDS and v is not None
+            if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
         }
+        body["model"] = self.config.model
         body["stream"] = True
         return body
 

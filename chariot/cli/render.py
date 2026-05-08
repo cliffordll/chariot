@@ -246,14 +246,14 @@ class Renderer:
     def meta_line(
         cls,
         *,
-        model: str,
+        provider: str,
         input_tokens: int,
         output_tokens: int,
         latency_ms: int,
     ) -> None:
         """打 chat 收尾的 meta 行。
 
-        形如 `[claude-haiku-4-5 · 8→21 tok · 412ms]`。
+        形如 `[claude-haiku · 8→21 tok · 412ms]`(显示的是 provider entry name)。
 
         tok 数为 0 时显示 `?` 占位。`--quiet` 时完全抑制 meta 行。
         """
@@ -262,7 +262,7 @@ class Renderer:
         cls._close_live()
         in_s = str(input_tokens) if input_tokens > 0 else "?"
         out_s = str(output_tokens) if output_tokens > 0 else "?"
-        line = f"[{model} · {in_s}→{out_s} tok · {latency_ms}ms]"
+        line = f"[{provider} · {in_s}→{out_s} tok · {latency_ms}ms]"
         cls._stdout.print(f"[dim]{line}[/dim]", highlight=False)
 
     # ---------- stderr(不受 QUIET 影响)----------

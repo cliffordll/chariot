@@ -1,12 +1,18 @@
-"""AIAgent 输入 — `ChatRequest`(0.6.0+,跟 Claude Messages API 1:1 平铺)。
+"""AIAgent 输入 — `ChatRequest`(0.6.0+,结构跟 Claude Messages API 1:1 对齐)。
 
 设计依据(详见 `docs/DESIGN.md` §3.1):
-- 跟 Claude Messages API request body schema **1:1 平铺**
-- 字段命名 / 类型 / 默认值都对齐 Claude
-- AnthropicProvider 几乎透传:`dataclasses.asdict(req) → httpx.post(json=...)`
-- Claude API 用户能直接 `ChatRequest(**claude_body)` 把现有调用代码搬过来
+- **结构**(`messages.content`、tool_use / tool_result block 嵌套形式、role 词表)
+  跟 Claude Messages API request body 1:1
+- 字段类型 / 默认值都对齐 Claude
+- 命名上有一处偏离:**chariot 用 `provider_name` 字段做路由 key**(对应 DB
+  `providers` 表的 entry name;CLI flag 是 `--provider`,IR / 内部参数用
+  `provider_name`,长名避免跟 wire 字段歧义);Claude wire 字段名是 `model`
+  (LLM id),由 AnthropicProvider 在 `_build_body` 里写死 `body["model"]
+  = self.config.model`
+- Provider 内部都得做 entry name → wire 字段的最后一跳翻译,这步不可省
 
 关于 chariot 扩展字段:
+- `provider_name`:必填,路由 key(从 `--provider` flag 或 DB 默认 entry 来)
 - `convo_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
   `X-Chariot-Conversation` header 升级到顶层字段)
 - `agent_id`:0.9.0+ 多 AIAgent 实例路由;0.6.0 默认 `None`,字段先占位
@@ -15,6 +21,10 @@
 - `stream`:chariot 内核固定流式(`Provider.generate` 总是 `AsyncIterator`)
 - `service_tier`:Anthropic 计费层级,在 Provider options 里配
 - `anthropic_version` / `anthropic_beta`:HTTP header 级,Provider 内部处理
+- `model`(wire 字段):chariot IR 用 `provider_name` 替代;Anthropic Provider
+  自己在 build body 时从 `self.config.model` 写;0.7.0+ 加 per-call LLM id
+  覆盖时会重新引入 `model: str | None = None` 字段(默认 None = 用
+  entry.options.model)
 """
 
 from __future__ import annotations
@@ -73,22 +83,29 @@ class ToolSchema:
 
 @dataclass(frozen=True)
 class ChatRequest:
-    """AIAgent 主入口的输入 —— 跟 Claude Messages API request body 1:1。
+    """AIAgent 主入口的输入 —— 结构跟 Claude Messages API request body 对齐;
+    路由字段命名按 chariot 自己的语义(`provider_name` 而非 wire 字段名 `model`)。
 
-    14 字段平铺:12 个跟 Claude API 同名同义,2 个 chariot 扩展。
-    顺序按 Claude 官方 spec(model / messages / max_tokens / system / tools
-    / tool_choice / 各 sampling / metadata / thinking)+ chariot 扩展放最后。
+    14 字段平铺:11 个跟 Claude API 同名同义,3 个 chariot 扩展(provider_name /
+    convo_id / agent_id)。顺序按 Claude 官方 spec(messages / max_tokens /
+    system / tools / tool_choice / 各 sampling / metadata / thinking)+ chariot
+    扩展放最后(`provider_name` 必填字段排最前)。
 
-    `model` 字段语义在 chariot 层做了一层抽象:Claude API 里 `model` 是 LLM
-    模型 ID(如 `claude-sonnet-4-6`);chariot 这里 `model` 是 entry name
-    (用户在 `providers` 表里的命名,如 `claude` / `mock` / `gpt-4`),由 AIAgent
-    路由到对应 Provider 实例,Provider 内部把真实的 model ID 传给上游。
+    `provider_name` 字段是 chariot 的路由 key:对应 DB `providers` 表里的 entry
+    name(如 `claude` / `mock` / `ollama-qwen`),由 AIAgent 路由到对应
+    `BaseProvider` 实例。Provider 内部把 `entry.options.model`(真实 LLM id)
+    写到 wire body 的 `model` 字段。**`req.provider_name` ≠ wire `body.model`**。
+
+    命名约定:CLI flag 用短名 `--provider`(贴近用户)、IR / 内部参数传递用
+    `provider_name`(避免跟 wire `model` / Provider 实例 `provider` 歧义)。
 
     `messages` 是必填(Claude API 要求);其它字段都有合理默认。
     """
 
+    # ─── chariot 路由字段(必填) ───
+    provider_name: str  # entry name(chariot 内部当 Provider 路由 key)
+
     # ─── Claude Messages API 字段(顺序按官方 spec) ───
-    model: str  # entry name(chariot 内部当 Provider 路由)
     messages: list[Message]
     max_tokens: int = 4096
     system: str | list[SystemBlock] | None = None

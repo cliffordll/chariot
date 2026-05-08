@@ -48,7 +48,7 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
 def _make_ctx(agent: AIAgent, *, convo_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=agent,
-        model="claude-haiku-4-5",
+        provider_name="claude-haiku-4-5",
         convo_id=convo_id,
     )
 
@@ -89,7 +89,7 @@ _Capt = list[tuple[str, str]]
 async def test_slash_provider_no_arg_shows_current(
     agent: AIAgent, _capture_renderer_output: _Capt
 ) -> None:
-    """`/provider` 无参数:显示 ctx.model,不查 DB。"""
+    """`/provider` 无参数:显示 ctx.provider_name,不查 DB。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/provider")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
@@ -97,20 +97,18 @@ async def test_slash_provider_no_arg_shows_current(
     assert "claude-haiku-4-5" in outs[0][1]
 
 
-async def test_slash_provider_with_name_sets_ctx_model(agent: AIAgent) -> None:
-    """`/provider <name>` 切到指定 entry(写到 ctx.model)。"""
+async def test_slash_provider_with_name_sets_ctx_provider(agent: AIAgent) -> None:
+    """`/provider <name>` 本次会话切到 entry(写到 ctx.provider_name,不动 DB)。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/provider new-entry-id")
-    assert ctx.model == "new-entry-id"
+    assert ctx.provider_name == "new-entry-id"
+    # DB 默认未受影响
+    async with agent.session_maker() as session:
+        assert await ProviderRepo(session).get_default() is None
 
 
-async def test_slash_providers_lists_entries_with_current_marker(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
-    """`/providers` 走 ProviderRepo,带 ← current 标记。
-
-    fresh DB 默认 seed 1 条 mock entry;手动加一条 claude-haiku-4-5 当前 provider。
-    """
+async def test_slash_provider_use_persists_default_to_db(agent: AIAgent) -> None:
+    """`/provider use <name>` 设 DB 默认 + 同步本次 ctx 切到它。"""
     async with agent.session_maker() as session:
         await ProviderRepo(session).create(
             name="claude-haiku-4-5",
@@ -118,16 +116,57 @@ async def test_slash_providers_lists_entries_with_current_marker(
             options={},
             params={},
         )
+    ctx = _make_ctx(agent)  # provider_name=claude-haiku-4-5
+    ctx.set_provider("mock")  # 先切到本地 mock
+    await ChatRepl(ctx=ctx)._handle_slash("/provider use claude-haiku-4-5")
 
-    ctx = _make_ctx(agent)  # ctx.model = claude-haiku-4-5
+    assert ctx.provider_name == "claude-haiku-4-5"
+    async with agent.session_maker() as session:
+        default = await ProviderRepo(session).get_default()
+    assert default is not None and default.name == "claude-haiku-4-5"
+
+
+async def test_slash_provider_use_unknown_errors(
+    agent: AIAgent, _capture_renderer_output: _Capt
+) -> None:
+    """`/provider use <unknown>` 报 error;ctx 不变。"""
+    ctx = _make_ctx(agent)
+    original = ctx.provider_name
+    await ChatRepl(ctx=ctx)._handle_slash("/provider use ghost")
+    errs = [c for c in _capture_renderer_output if c[0] == "err"]
+    assert len(errs) == 1
+    assert ctx.provider_name == original
+
+
+async def test_slash_providers_lists_entries_with_current_and_default_markers(
+    agent: AIAgent, _capture_renderer_output: _Capt
+) -> None:
+    """`/providers` 走 ProviderRepo,带 default `*` + ← current 标记。
+
+    fresh DB 默认 seed 1 条 mock entry;手动加一条 claude-haiku-4-5 当前 provider 且设默认。
+    """
+    async with agent.session_maker() as session:
+        repo = ProviderRepo(session)
+        await repo.create(
+            name="claude-haiku-4-5",
+            type="anthropic",
+            options={},
+            params={},
+        )
+        await repo.set_default("claude-haiku-4-5")
+
+    ctx = _make_ctx(agent)  # ctx.provider_name = claude-haiku-4-5
     await ChatRepl(ctx=ctx)._handle_slash("/providers")
 
     tables = [c for c in _capture_renderer_output if c[0] == "table"]
     assert len(tables) == 1
     title, body = tables[0][1].split("::", 1)
     assert title == "entries"
-    assert "claude-haiku-4-5" in body and "← current" in body
+    assert "claude-haiku-4-5" in body
+    assert "← current" in body
     assert body.count("← current") == 1
+    # default 标记 `*` 也只一条
+    assert " * " in body or body.endswith(" *") or "* " in body
     # mock 也在表里(seeded)
     assert "mock" in body
 

@@ -15,6 +15,8 @@
   `provider_name`,`logs.model` rename → `provider`(0.6.0 抽象层已是
   BaseProvider,DB 层跟上;`ChatRequest.model` / options.model 仍叫 model
   对齐 Claude API)
+- v7(0.6.0):`providers` 加 `is_default` 列(同 commit 落 `ProviderRepo.get_default
+  / set_default / unset_default` + CLI `provider use` / `provider show` 命令)
 
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
@@ -70,6 +72,9 @@ class ProviderRow(Base):
       Anthropic SDK 透传字段,不在重命名范围
     - `params`:JSON,runtime sampling 默认值(temperature / top_p / max_tokens 等),
       0.3.1 加;客户端发请求时若 body 缺字段,前端从此处填(server 不主动注入)
+    - `is_default`(v7 起):0/1;`chariot chat` 不传 `--provider` 时走默认行
+      (是 `is_default=1` 那条)。约束:同时至多一行为 1(由 `ProviderRepo.set_default`
+      原子保证 —— 清所有 + 置选中)
     """
 
     __tablename__ = "providers"
@@ -79,6 +84,7 @@ class ProviderRow(Base):
     type: Mapped[str]
     options: Mapped[str]  # JSON-serialized dict
     params: Mapped[str]  # JSON-serialized dict;migration v3 列默认 '{}'
+    is_default: Mapped[int] = mapped_column(default=0)  # 0/1;v7 起 schema 落,逻辑后续 commit
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

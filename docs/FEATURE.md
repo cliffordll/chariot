@@ -436,6 +436,138 @@
   - `chariot status` 仍显示 "daemon pid" / "endpoint" 等老字段
   - Renderer 用旧 ChatEvent 命名(`text` / `tool_use_done` 等)
 
+### S.7.1 ⏳ 默认 provider 机制 + AnthropicProvider body.model 改写
+
+**目标**:让 `chariot chat` 不带 flag 也能跑(走 DB 默认 provider);顺手修
+`AnthropicProvider` 漏改 `body.model` 的 bug(0.6.0 重写时丢的 0.5.0 行为)。
+
+S.7 砍了 `--model "claude-haiku-4-5"` hardcoded 默认,但没提供替代,导致
+`chariot chat "hi"` 直接 die。S.7.1 把 S.7 留下的"运行链断点"补全。
+
+- **schema v7**(`chariot/database/migrations/007_provider_default.sql`):
+  `providers` 加 `is_default INTEGER NOT NULL DEFAULT 0`;约束:同时至多一行 = 1
+  (由 `ProviderRepo.set_default` 原子保证)
+- **`ProviderRepo` 加方法**:
+  - `get_default() -> ProviderEntry | None`
+  - `set_default(name)`(原子清所有 + 置选中;不存在 → `ProviderNotFound`)
+  - `unset_default()`(no-op 友好)
+- **CLI 加命令**(`chariot/cli/commands/provider.py`):
+  - `chariot provider use <name>`:设默认
+  - `chariot provider show [<name>]`:不带参数 = 当前默认;带参数 = 指定 entry
+    详情(`api_key` 打码 `(set, len=N)`,`api_key_env` 原值)
+  - `chariot provider list` 加 `default` 列(`*` 标记)
+- **CLI chat 改造**(`chariot/cli/commands/chat.py`):
+  - 砍 `--model`,改 `--provider <name>`
+  - 不传 `--provider` → 查 DB 默认 → 没默认 → die 提示
+  - 砍 `cli/context.py` 里 `DEFAULT_MODEL = "claude-haiku-4-5"` 常量
+- **`ChatContext.model` → `provider_name`** rename(对齐 v6 的"model → provider"
+  系列;`ChatRequest.model` 字段名沿用 Claude API 习惯不动,只是内容是
+  chariot 路由 key)
+- **REPL slash 加 `/provider use <name>`**:持久化到 DB;`/providers` 输出加
+  `default` 列
+- **status 改造**:从 "DEFAULT_MODEL 常量是不是 registered" 改为 "查 DB 默认行 +
+  是否在已加载 providers 字典里"
+- **AnthropicProvider bug 修复**:`_build_body` 从 `@classmethod` 改实例方法,
+  加 `body["model"] = self.config.model`(0.5.0 旧 `chariot/server/model/anthropic.py`
+  里有这行,0.6.0 重写丢了)。漏掉这步会让 `body.model` 透传 chariot 的 entry
+  name 给上游,Anthropic 报 `not_found_error: model 'xxx' not found`
+
+**验收**:
+
+- **单测**(`tests/server/test_provider_repo.py`,8 个新 case):
+  - 空表 → `get_default()` 返 None
+  - 表非空但无行标 1 → 返 None
+  - `set_default(b)` → `get_default()` 返 b
+  - 连续 `set_default(a)` → `set_default(b)` → 只有 b 是 default(原子切换)
+  - `set_default(a)` 重复调幂等(只一行 = 1)
+  - `set_default("ghost")` → `ProviderNotFound`,失败不误改其它行
+  - `unset_default` → `get_default()` 返 None
+  - `unset_default` 无默认时 no-op 不抛
+- **单测**(`tests/cli/test_repl_slash.py`,3 个新 case):
+  - `/provider <name>` 只改本地 ctx,DB 默认未受影响
+  - `/provider use <name>` 设 DB 默认 + 同步本地 ctx
+  - `/provider use <unknown>` 报 error,ctx 不变
+  - `/providers` 输出含 `*` default 标记 + ← current 标记(各只一次)
+- **单测**(`tests/cli/test_commands.py`):
+  - `chariot provider --help` 列出 list/show/use/probe/add/edit/rm/copy
+  - `chariot provider use`(不带参数)→ exit_code != 0
+  - `chariot chat --help` 含 `--provider`
+  - `chariot chat --model anything hi` → exit_code != 0(`--model` 已下线)
+- **单测**(`tests/providers/builtin/test_anthropic.py` 新 case):
+  - `_build_body` 把 `body["model"]` 改写成 `self.config.model`(回归)
+- **静态**:三件套全绿
+- **手测**:
+  - `chariot provider use <name>` → DB 反映;`status` 显示该 default
+  - `chariot chat "hi"`(已设默认)→ 跑通,body.model = entry.options.model
+  - `chariot chat "hi"`(未设默认 + 不传 flag)→ stderr 含提示
+  - `chariot provider show` → 显示当前默认;`provider show <name>` → 显示指定;
+    api_key 打码 `(set, len=N)`,不泄露内容
+- **不通过特征**:
+  - `_build_body` 没改 body.model → 上游 404 not_found_error
+  - `set_default` 不是原子(多行 = 1)
+  - `--model` flag 还在
+  - REPL `/provider <name>` 误改 DB(应只改本地)
+  - status 还引用 `DEFAULT_MODEL` 常量
+
+### S.7.2 ⏳ ChatRequest.model → provider_name(IR 字段命名跟 wire 解耦)
+
+**目标**:把 `ChatRequest.model` 重命名为 `provider_name`,跟 v6 rename 系列
+(model→provider 在 DB / Repo / CLI 层)在 IR 层收尾。同时把 wire 字段名 `model`
+彻底归到 Provider 内部职责(`_build_body` 时从 `self.config.model` 显式写)。
+
+**为什么不就叫 `provider`**:CLI flag 用短名 `--provider`(贴近用户),IR /
+内部参数传递用 `provider_name`(避免跟 wire `body.model`、`BaseProvider` 实例
+对象同名歧义);ChatContext / ChatRequest 等内部数据结构都用长名,看到字段名
+就知道"这是 provider 的 *名字*,不是 provider 实例本身,也不是 wire model id"。
+
+**原 0.6.0 设计**:`ChatRequest.model` 字段名沿用 Claude API,装的是 chariot
+路由用的 entry name。这个错位带来三个后果:
+
+1. AnthropicProvider 必须在 `_build_body` 里把 `body["model"] = self.config.model`
+   改写一次(0.6.0 重写时漏过,S.7.1 修复)
+2. 未来 `OpenAIProvider` 接入时这个字段名更尴尬 —— `ChatRequest` 是 chariot 自己
+   的 IR,不应跟某一家 API 字段名绑死
+3. 跟 v6 的 model→provider rename 不齐:DB 表 / `ProviderRepo` / `ProviderEntry` /
+   CLI `--provider` / `ChatContext.provider_name` 全部已经 rename,只剩 IR 这层
+   还叫 `model`
+
+**改动**:
+
+- `chariot/agent/chat_request.py`:`model: str` → `provider_name: str`(必填字段
+  排最前);docstring 说明命名约定 + wire `model` 由 Provider 内部写
+- `chariot/agent/run.py`:`req.model` → `req.provider_name`(路由查询);
+  `error_type="unknown_model"` → `"unknown_provider"`,文案 `unknown model entry`
+  → `unknown provider entry`
+- `chariot/agent/chat_event.py`:error_type 文档列表更新
+- `chariot/providers/builtin/anthropic.py`:
+  - `_CHARIOT_EXTENSION_FIELDS` 加 `"provider_name"`(从 dict 剔除,不进 wire body)
+  - `_build_body` 显式 `body["model"] = self.config.model`(沿用 S.7.1,docstring
+    更新)
+- `chariot/providers/prober.py`:`ChatRequest(model=entry.name, ...)` →
+  `ChatRequest(provider_name=entry.name, ...)`
+- `chariot/cli/context.py`:`_build_request` 用 `provider_name=self.provider_name`
+- `chariot/cli/commands/chat.py`:docstring `unknown_model` → `unknown_provider`
+
+**验收**:
+
+- **单测**(`tests/agent/test_chat_request.py`,新加 case):
+  - `ChatRequest` dataclass 字段集合不含 `model`,含 `provider_name`
+  - `dataclasses.asdict(req)` 字段集合 ⊇ Claude 结构字段,但**不**含 wire `model`
+- **回归**(`tests/providers/builtin/test_anthropic.py` 已有 case 改名):
+  - `_build_body` 把 `body["model"]` 从 `self.config.model` 写入(沿用 S.7.1)
+  - body 不含 `provider_name` / chariot entry name 字符串
+- **路由测试**(`tests/agent/test_run.py`):
+  - `req.provider_name="not_exists"` → `error_type="unknown_provider"`
+- **bulk rename** 影响所有 `tests/agent/` / `tests/providers/` / `tests/cli/`
+  里 `ChatRequest(model=...)` 写法
+- **静态 + 全套 pytest 全绿**
+- **手测**:`chariot chat --provider mock "hi"` 跑通;`--provider not_exists`
+  → stderr 含 `unknown_provider`
+- **不通过特征**:
+  - `chariot/` 下 `grep "req\.model\b"` 还有结果(必须全部改 `req.provider_name`)
+  - `ChatRequest(model=` 还在(应该全部 `ChatRequest(provider_name=`)
+  - error_type 仍叫 `unknown_model`
+
 ### S.8 ⏳ rpc/jsonrpc.py + sidecar 新建(stdio JSON-RPC)
 
 **目标**:JSON-RPC 框架放 `chariot/rpc/`(给后续 sidecar / acp / mcp 共享);

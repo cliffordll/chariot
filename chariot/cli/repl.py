@@ -5,13 +5,14 @@
 - `/` 开头分派 slash 命令,否则作为新一轮 user message
 - 每轮调 `ctx.run_turn()` 流式打印 assistant + meta 行
 
-slash 命令(0.6.0 沿用,0.6.0 起 model→provider rename)
+slash 命令(v6 起 model→provider rename;v7 起加默认 provider)
 - `/exit`、`/quit`             退出 REPL
 - `/reset`                     清空本地对话历史
 - `/help`                      列命令
 - `/provider`                  显示当前 provider(只读)
-- `/provider <name>`           切到指定 entry(本地状态;实际写到 ChatRequest.model)
-- `/providers`                 列出已注册 provider entries(name / type)
+- `/provider <name>`           本次会话切到指定 entry(本地状态,不动 DB 默认)
+- `/provider use <name>`       把 <name> 设为 DB 默认(等价 `chariot provider use`)
+- `/providers`                 列出已注册 provider entries(name / type / default 标记)
 - `/convo`                     显示当前会话(id / provider / 本地消息数)
 - `/convo new`                 生成新 ULID 并切到 stateful 模式
 - `/convo <ULID>`              接续指定会话
@@ -24,10 +25,10 @@ slash 命令(0.6.0 沿用,0.6.0 起 model→provider rename)
 单数命令只读 ctx / 不查 DB(`/provider` / `/convo`)或只展示 enabled
 子集(`/tool`),复数走 repo list 全量。
 
-**关于 `/provider` vs `chariot chat --model`**:CLI flag 保留 `--model` 跟 Claude
-API 的 `body.model` 字段名对齐;REPL slash 改 `/provider` 跟 chariot 内部
-`provider entry` 表 / `BaseProvider` 抽象一致(用户切的是哪个 entry,语义是
-"provider")。两者底下都写到 `ctx.model`,只是命名 surface 不同。
+**`/provider <name>` vs `/provider use <name>`**:前者只改本次 REPL 会话的
+provider(本地 ctx,退出失效);后者持久化到 DB(下次 `chariot chat` 不传
+`--provider` 时也走它)。CLI 顶层对应 `chariot chat --provider X`(本次)/
+`chariot provider use X`(持久)。
 
 输入交互
 --------
@@ -97,8 +98,9 @@ class ChatRepl:
         "  /exit, /quit             退出 REPL\n"
         "  /reset                   清空本地对话历史\n"
         "  /provider                显示当前 provider\n"
-        "  /provider <name>         切到指定 entry\n"
-        "  /providers               列已注册的 provider entries\n"
+        "  /provider <name>         本次会话切到指定 entry(不动 DB 默认)\n"
+        "  /provider use <name>     把 <name> 设为 DB 默认(持久)\n"
+        "  /providers               列已注册的 provider entries(带 default 标记)\n"
         "  /convo                   显示当前会话(id / provider / 本地消息数)\n"
         "  /convo new               生成新 ULID 并切到 stateful 模式\n"
         "  /convo <ULID>            接续指定会话\n"
@@ -115,7 +117,7 @@ class ChatRepl:
         Ctrl+C / EOF / `/exit` / `/quit` 退出。
         """
         Renderer.out(
-            f"chariot chat · provider={self.ctx.model}"
+            f"chariot chat · provider={self.ctx.provider_name}"
             + (f" · convo={self.ctx.convo_id}" if self.ctx.convo_id else "")
             + " · /help 查看命令",
         )
@@ -170,7 +172,7 @@ class ChatRepl:
         Renderer.stream_newline()
         self.ctx.append_assistant(result.text)
         Renderer.meta_line(
-            model=self.ctx.model,
+            provider=self.ctx.provider_name,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,
@@ -197,7 +199,7 @@ class ChatRepl:
             Renderer.out("history cleared")
             return False
         if cmd == "/provider":
-            self._slash_provider(arg)
+            await self._slash_provider(arg)
             return False
         if cmd == "/providers":
             await self._slash_providers_list(arg)
@@ -220,32 +222,67 @@ class ChatRepl:
 
     # ---------- /provider · /providers ----------
 
-    def _slash_provider(self, arg: str) -> None:
-        """`/provider` 显示当前 provider;`/provider <name>` 切到指定 entry(本地状态)。
+    async def _slash_provider(self, arg: str) -> None:
+        """- `/provider` 显示当前 provider
+        - `/provider <name>` 本次会话切到 <name>(只改本地 ctx,不动 DB 默认)
+        - `/provider use <name>` 把 <name> 设为 DB 默认(等价 `chariot provider use`)
 
-        实际写到 `ctx.model`(对应 ChatRequest.model 字段);命名上叫 provider
-        是对齐 chariot 的 `provider entry` 语义。
+        本地 ctx 写到 `ctx.provider_name`(对应 ChatRequest.model 字段)。
         """
         if not arg:
-            Renderer.out(f"provider: {self.ctx.model}")
+            Renderer.out(f"provider: {self.ctx.provider_name}")
             return
-        self.ctx.set_model(arg)
-        Renderer.out(f"provider → {self.ctx.model}")
+
+        # /provider use <name> —— 持久化到 DB 默认
+        head, _, tail = arg.partition(" ")
+        if head == "use":
+            target = tail.strip()
+            if not target:
+                Renderer.error_bubble("/provider use 需要 entry name 参数")
+                return
+            await self._slash_provider_use(target)
+            return
+
+        # /provider <name> —— 本地切换
+        self.ctx.set_provider(arg)
+        Renderer.out(f"provider → {self.ctx.provider_name} (this session)")
+
+    async def _slash_provider_use(self, name: str) -> None:
+        """把 <name> 设为 DB 默认 + 同步本地 ctx 切到它。"""
+        async with self.ctx.agent.session_maker() as session:
+            try:
+                await ProviderRepo(session).set_default(name)
+            except Exception as e:
+                Renderer.error_bubble(f"设置默认失败: {e}")
+                return
+        self.ctx.set_provider(name)
+        Renderer.out(f"default → {name} (persisted; this session also)")
 
     async def _slash_providers_list(self, arg: str) -> None:
-        """`/providers` — 列已注册的 provider entries(name / type)。"""
+        """`/providers` — 列已注册的 provider entries(name / type / default 标记)。"""
         if arg:
             Renderer.error_bubble(
-                "/providers 不接受参数;切 provider 用 `/provider <name>`",
+                "/providers 不接受参数;切 provider 用 `/provider <name>` 或 `/provider use <name>`",
             )
             return
         async with self.ctx.agent.session_maker() as session:
-            entries = await ProviderRepo(session).list_entries()
+            repo = ProviderRepo(session)
+            entries = await repo.list_entries()
+            default = await repo.get_default()
+        default_name = default.name if default is not None else None
         if not entries:
             Renderer.out("(没有 entry — `chariot provider add` 加一条)")
             return
-        rows = [(e.name, e.type, "← current" if e.name == self.ctx.model else "") for e in entries]
-        Renderer.table(["name", "type", ""], rows, title="entries")
+        rows = [
+            (
+                e.name,
+                e.type,
+                "*" if e.name == default_name else "",
+                "← current" if e.name == self.ctx.provider_name else "",
+            )
+            for e in entries
+        ]
+        Renderer.table(["name", "type", "default", ""], rows, title="entries")
 
     # ---------- /convo · /convos ----------
 
@@ -286,11 +323,11 @@ class ChatRepl:
     def _show_current_convo(self) -> None:
         """`/convo` 无参数:打印当前会话快照(只读 ctx)。"""
         if self.ctx.convo_id is None:
-            Renderer.out(f"convo: off (stateless) · provider={self.ctx.model}")
+            Renderer.out(f"convo: off (stateless) · provider={self.ctx.provider_name}")
             return
         Renderer.out(
             f"convo: {self.ctx.convo_id} · "
-            f"provider={self.ctx.model} · "
+            f"provider={self.ctx.provider_name} · "
             f"local msgs={len(self.ctx.messages)}",
         )
 

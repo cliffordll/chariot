@@ -129,7 +129,7 @@ class _StubTool(BaseTool):
 @pytest.fixture
 def req() -> ChatRequest:
     return ChatRequest(
-        model="scripted",
+        provider_name="scripted",
         messages=[Message(role="user", content="hi")],
     )
 

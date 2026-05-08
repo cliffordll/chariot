@@ -35,8 +35,6 @@ from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.run import AIAgent
 
-DEFAULT_MODEL: str = "claude-haiku-4-5"
-
 
 def _empty_messages() -> list[dict[str, Any]]:
     """messages 字段的 default_factory;helper 显式标注类型避 pyright Unknown 推断。
@@ -74,7 +72,9 @@ class ChatContext:
     """一次聊天会话的上下文:AIAgent 引用 + 会话配置 + 多轮历史。"""
 
     agent: AIAgent
-    model: str = DEFAULT_MODEL
+    # provider entry name(0.6.0 v6 起;v5 之前叫 model)。透传给 ChatRequest.model
+    # 字段(那个字段名沿用 Claude API 习惯,内容是 chariot 路由 key 即 entry name)。
+    provider_name: str = ""
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
     # 0.4.0:可选 convo id(ULID)。给了则 ChatRequest.convo_id 透传给 AIAgent,
@@ -97,11 +97,11 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(model / max_tokens / convo_id)。"""
+        """清空对话历史,保留会话配置(provider_name / max_tokens / convo_id)。"""
         self.messages.clear()
 
-    def set_model(self, model: str) -> None:
-        self.model = model
+    def set_provider(self, name: str) -> None:
+        self.provider_name = name
 
     # ---------- 核心:一轮请求 ----------
 
@@ -174,9 +174,11 @@ class ChatContext:
         """把对话历史组装成 ChatRequest。
 
         req.messages 取值取决于 stateful / stateless;详见模块级 docstring 契约段。
+        `ChatRequest.provider` 是 chariot 路由 key(entry name);wire 字段
+        `body.model` 由 AnthropicProvider 内部从 `self.config.model` 写。
         """
         return ChatRequest(
-            model=self.model,
+            provider_name=self.provider_name,
             messages=[self._to_message(m) for m in self._messages_to_send()],
             max_tokens=self.max_tokens,
             convo_id=self.convo_id,

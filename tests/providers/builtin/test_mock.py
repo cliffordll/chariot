@@ -24,7 +24,7 @@ def provider() -> MockProvider:
 @pytest.fixture
 def req() -> ChatRequest:
     return ChatRequest(
-        model="mock",
+        provider_name="mock",
         messages=[Message(role="user", content="hello world")],
     )
 
@@ -103,7 +103,7 @@ class TestGenerateEcho:
 
     async def test_echo_user_content(self, provider: MockProvider) -> None:
         req = ChatRequest(
-            model="mock",
+            provider_name="mock",
             messages=[
                 Message(role="user", content="first"),
                 Message(role="assistant", content="ack"),
@@ -124,7 +124,7 @@ class TestGenerateEcho:
     async def test_echo_empty_when_no_text(self, provider: MockProvider) -> None:
         """末轮 user content 是 image block 等非 text → echo 空字符串(不报错)。"""
         req = ChatRequest(
-            model="mock",
+            provider_name="mock",
             messages=[Message(role="user", content=[{"type": "image", "source": {}}])],
         )
         events = [ev async for ev in provider.generate(req)]

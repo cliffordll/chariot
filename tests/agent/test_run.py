@@ -1,7 +1,7 @@
 """AIAgent 单测。
 
 覆盖(对照 FEATURE.md S.6 验收清单):
-- 路由:`req.model='not_exists'` → 单 event error(error_type='unknown_model')
+- 路由:`req.provider_name='not_exists'` → 单 event error(error_type='unknown_provider')
 - default tools 注入:`req.tools is None` + 装载 N 个 tool → AgentLoop 拿到 N 个 schema
 - default tools:`req.tools=[]` → 关闭工具调用(透传 [],不替换)
 - default tools:`req.tools=[<显式>]` → 透传(不替换)
@@ -68,28 +68,28 @@ class _StubTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# 路由 / unknown model
+# 路由 / unknown provider
 # ---------------------------------------------------------------------------
 
 
 class TestRouting:
-    async def test_unknown_model_yields_error(self) -> None:
+    async def test_unknown_provider_yields_error(self) -> None:
         agent = AIAgent(providers={"mock": _CapturingProvider("mock")}, tools={})
         req = ChatRequest(
-            model="not_exists",
+            provider_name="not_exists",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run(req)]
         assert len(events) == 1
         assert events[0].kind == "error"
-        assert events[0].error_type == "unknown_model"
+        assert events[0].error_type == "unknown_provider"
 
-    async def test_routes_by_model_name(self) -> None:
+    async def test_routes_by_provider_name(self) -> None:
         p1 = _CapturingProvider("p1")
         p2 = _CapturingProvider("p2")
         agent = AIAgent(providers={"p1": p1, "p2": p2}, tools={})
         req = ChatRequest(
-            model="p2",
+            provider_name="p2",
             messages=[Message(role="user", content="hi")],
         )
         _ = [ev async for ev in agent.run(req)]
@@ -112,7 +112,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1"), "t2": _StubTool("t2")},
         )
         req = ChatRequest(
-            model="p",
+            provider_name="p",
             messages=[Message(role="user", content="hi")],
             tools=None,  # 触发 default 注入
         )
@@ -130,7 +130,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1")},
         )
         req = ChatRequest(
-            model="p",
+            provider_name="p",
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
@@ -148,7 +148,7 @@ class TestDefaultToolsInjection:
             ToolSchema(name="custom", description="custom", input_schema={"type": "object"}),
         ]
         req = ChatRequest(
-            model="p",
+            provider_name="p",
             messages=[Message(role="user", content="hi")],
             tools=list(explicit),  # 显式
         )
@@ -172,7 +172,7 @@ class TestStatelessPath:
         agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=sm_mock)
 
         req = ChatRequest(
-            model="p",
+            provider_name="p",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run(req)]
@@ -198,7 +198,7 @@ class TestStatefulPath:
             sessionmaker=None,  # 没装载,会 yield error 但 acquire 之前先报错
         )
         req = ChatRequest(
-            model="p",
+            provider_name="p",
             messages=[Message(role="user", content="hi")],
             convo_id="01H_TEST",
         )

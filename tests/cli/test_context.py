@@ -23,7 +23,7 @@ class _DummyAgent:
 def _make_ctx(*, convo_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=_DummyAgent(),  # type: ignore[arg-type]
-        model="claude-haiku-4-5",
+        provider_name="claude-haiku-4-5",
         convo_id=convo_id,
     )
 
@@ -108,11 +108,13 @@ def test_stateful_does_not_mutate_local_messages() -> None:
 # =====================================================================
 
 
-def test_request_includes_model_and_max_tokens() -> None:
+def test_request_includes_provider_and_max_tokens() -> None:
     ctx = _make_ctx()
     ctx.append_user("hi")
     req = ctx._build_request()
-    assert req.model == "claude-haiku-4-5"
+    # ChatRequest.provider_name 是 chariot 路由 key(entry name);wire body.model 由
+    # AnthropicProvider 内部从 self.config.model 写
+    assert req.provider_name == "claude-haiku-4-5"
     assert req.max_tokens == 1024  # ChatContext 默认值
     # convo_id 透传
     assert req.convo_id is None

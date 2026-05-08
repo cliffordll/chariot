@@ -155,17 +155,19 @@ class AIAgent:
     async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
-        路由:按 `req.model` 找 provider;缺失 → yield error event 退出。
+        路由:按 `req.provider_name`(entry name)找 Provider 实例;缺失 →
+        yield error event 退出。
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
         stateful(`req.convo_id` 非空)→ 在 convo lock 内开 session 跑;
         stateless → 直接跑 AgentLoop 不开 session。
         """
-        provider = self._providers.get(req.model)
+        provider = self._providers.get(req.provider_name)
         if provider is None:
             yield ChatEvent.error_event(
-                error_type="unknown_model",
+                error_type="unknown_provider",
                 error_message=(
-                    f"unknown model entry {req.model!r}; known: {sorted(self._providers.keys())}"
+                    f"unknown provider entry {req.provider_name!r}; "
+                    f"known: {sorted(self._providers.keys())}"
                 ),
             )
             return

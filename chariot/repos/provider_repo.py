@@ -23,7 +23,7 @@ import json
 from collections.abc import Sequence
 from typing import Any, ClassVar, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,6 +113,40 @@ class ProviderRepo:
             raise ProviderNotFound(f"未知 provider name: {name!r}")
         await self.session.delete(row)
         await self.session.commit()
+
+    # ---- 默认 provider(v7 起;`is_default` 列)----
+
+    async def get_default(self) -> ProviderEntry | None:
+        """返当前默认 provider entry;无默认时返 None。
+
+        约束:同一时间至多一行 `is_default=1`(由 `set_default` 原子保证)。
+        """
+        stmt = select(ProviderRow).where(ProviderRow.is_default == 1)
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return self._row_to_entry(row) if row is not None else None
+
+    async def set_default(self, name: str) -> None:
+        """把 `name` 设为默认 provider(原子:清所有 + 置选中行)。
+
+        `name` 不存在 → `ProviderNotFound`,事务回滚。重复调同一 name 幂等。
+        """
+        row = await self._find_row(name)
+        if row is None:
+            raise ProviderNotFound(f"未知 provider name: {name!r}")
+        await self.session.execute(
+            update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0)
+        )
+        row.is_default = 1
+        await self.session.commit()
+
+    async def unset_default(self) -> None:
+        """清掉当前默认(把所有行的 `is_default` 置 0)。无默认时也是 no-op。"""
+        await self.session.execute(
+            update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0)
+        )
+        await self.session.commit()
+
+    # ---- copy ----
 
     async def copy(self, name: str, *, as_name: str | None = None) -> ProviderEntry:
         """复制 entry。`as_name` 缺省 `<name>_copy`,碰撞自动加序号 `_copy_2 / _3 / ...`。

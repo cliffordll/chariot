@@ -182,7 +182,7 @@ class ChatEvent:
         - upstream_auth_failed / upstream_unreachable / upstream_server_error
         - upstream_stream_error(200 已发后中途 IO 错)
         - rate_limited
-        - unknown_model(AIAgent 路由层)
+        - unknown_provider(AIAgent 路由层;`req.provider` 在 providers dict 找不到)
         - agent_iter_exceeded(AgentLoop max_iter)
         - agent_timeout(AgentLoop 整体超时)
         - conversation_busy_local / conversation_busy_db(双层锁)

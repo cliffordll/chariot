@@ -1,14 +1,22 @@
-"""`chariot provider list / probe / add / edit / rm / copy` —— Provider entry CRUD。
+"""`chariot provider <subcmd>` —— Provider entry CRUD + 默认切换。
+
+子命令:list / show / use / probe / add / edit / rm / copy。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ProviderRepo + ProviderProber。
 0.6.0 起 `chariot model` rename 成 `chariot provider`(跟 ProviderRegistry /
-BaseProvider / `providers` 表对齐)。
+BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_default` 列)。
 
 二级子命令组(typer.Typer 嵌套):
 
 只读:
-- `chariot provider list`:列出 entries(name / type)+ 已注册 type
+- `chariot provider list`:列出 entries(name / type / default 标记)+ 已注册 type
+- `chariot provider show [<name>]`:不带参数 = 当前默认;带参数 = 指定 entry 详情
+  (api_key 本体打码,只显示来源标识)
 - `chariot provider probe <name>`:发 1 条最小请求验通断(**~1 token 费用**;mock 零费用)
+
+切换:
+- `chariot provider use <name>`:把 <name> 设为默认;`chariot chat` 不带 `--provider`
+  时走它
 
 CRUD:
 - `chariot provider add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
@@ -43,23 +51,112 @@ provider_app = typer.Typer(
 # ---------- list ----------
 
 
-@provider_app.command("list", help="列出 entries(name / type)")
+@provider_app.command("list", help="列出 entries(name / type / default 标记)")
 def list_cmd() -> None:
     asyncio.run(_list())
 
 
 async def _list() -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ProviderRepo(session).list_entries()
+        repo = ProviderRepo(session)
+        entries = await repo.list_entries()
+        default = await repo.get_default()
+    default_name = default.name if default is not None else None
 
     if not entries:
         Renderer.out("(DB 里没有 entry — `chariot provider add` 加一条)")
     else:
-        rows = [(e.name, e.type) for e in entries]
-        Renderer.table(["name", "type"], rows, title="entries")
+        rows = [(e.name, e.type, "*" if e.name == default_name else "") for e in entries]
+        Renderer.table(["name", "type", "default"], rows, title="entries")
 
     types = sorted(ProviderRegistry.known_types())
     Renderer.out(f"已注册 type:{', '.join(types)}")
+    if default_name is None and entries:
+        Renderer.out(
+            "(没有默认 provider — `chariot provider use <name>` 设一个)",
+        )
+
+
+# ---------- show ----------
+
+
+@provider_app.command("show", help="展示 entry 详情(不带参数 = 当前默认)")
+def show_cmd(
+    name: Annotated[
+        str | None,
+        typer.Argument(help="entry 名;省略 = 显示当前默认 provider"),
+    ] = None,
+) -> None:
+    asyncio.run(_show(name))
+
+
+async def _show(name: str | None) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = ProviderRepo(session)
+        if name is None:
+            entry = await repo.get_default()
+            if entry is None:
+                Renderer.die(
+                    "没有默认 provider — `chariot provider use <name>` 设一个,"
+                    "或 `chariot provider show <name>` 看具体 entry",
+                )
+                return
+            is_default = True
+        else:
+            entry = await repo.get_entry(name)
+            if entry is None:
+                Renderer.die(f"未知 entry: {name!r}(`chariot provider list` 看现有 id)")
+                return
+            default = await repo.get_default()
+            is_default = default is not None and default.name == entry.name
+
+    rows: list[tuple[str, str]] = [
+        ("name", entry.name),
+        ("type", entry.type),
+        ("default", "yes" if is_default else "no"),
+    ]
+    # options:api_key 单独打码,其余字段原样展示
+    for k, v in entry.options.items():
+        rows.append((f"options.{k}", _redact(k, v)))
+    for k, v in entry.params.items():
+        rows.append((f"params.{k}", str(v)))
+    Renderer.table(["field", "value"], rows, title=f"provider {entry.name}")
+
+
+def _redact(key: str, value: object) -> str:
+    """api_key 字段打码;其它字段原样 str。
+
+    inline `api_key` → `(set, len=N)`(透露长度,便于和 env 区分但不泄露内容);
+    `api_key_env` → 原值(env 变量名本身不敏感,知道它便于排查"读哪个 env")。
+    """
+    if key == "api_key":
+        if not isinstance(value, str) or not value:
+            return "(empty)"
+        return f"(set, len={len(value)})"
+    return str(value)
+
+
+# ---------- use ----------
+
+
+@provider_app.command(
+    "use",
+    help="把 <name> 设为默认 provider(`chariot chat` 不带 --provider 时用)",
+)
+def use_cmd(
+    name: Annotated[str, typer.Argument(help="要设为默认的 entry 名")],
+) -> None:
+    asyncio.run(_use(name))
+
+
+async def _use(name: str) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        try:
+            await ProviderRepo(session).set_default(name)
+        except ProviderNotFound as e:
+            Renderer.die(f"切换失败: {e}")
+            return
+    Renderer.out(f"default → {name}")
 
 
 # ---------- probe ----------

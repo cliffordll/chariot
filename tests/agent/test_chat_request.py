@@ -3,8 +3,9 @@
 覆盖:
 - frozen 不可变(改字段抛 FrozenInstanceError)
 - 字段默认值符合 DESIGN §3.1
-- 跟 Claude API 互操作:`ChatRequest(**claude_body)` 能构造
-- `dataclasses.asdict(req)` 字段集合 ⊇ Claude API 字段集合
+- 跟 Claude API 互操作:结构对齐(messages / max_tokens / system 等);
+  路由字段 chariot 用 `provider_name`,Claude wire 用 `model`(由 Provider 内部翻译)
+- `dataclasses.asdict(req)` 字段集合包 Claude 结构字段(不含 wire `model`)
 - 查询方法 `is_stateful` / `last_user_text` 行为
 """
 
@@ -63,11 +64,11 @@ class TestToolSchema:
 
 
 class TestChatRequestDefaults:
-    """14 字段默认值跟 DESIGN §3.1 一致。"""
+    """字段默认值跟 DESIGN §3.1 一致。"""
 
     def test_minimal_construct(self) -> None:
-        req = ChatRequest(model="claude", messages=[Message(role="user", content="hi")])
-        assert req.model == "claude"
+        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        assert req.provider_name == "claude"
         assert len(req.messages) == 1
         assert req.max_tokens == 4096
         assert req.system is None
@@ -83,39 +84,27 @@ class TestChatRequestDefaults:
         assert req.agent_id is None
 
     def test_frozen(self) -> None:
-        req = ChatRequest(model="claude", messages=[Message(role="user", content="hi")])
+        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
         with pytest.raises(dataclasses.FrozenInstanceError):
-            req.model = "gpt-4"  # type: ignore[misc]
+            req.provider_name = "gpt-4"  # type: ignore[misc]
 
 
 class TestClaudeApiInterop:
-    """ChatRequest 跟 Claude Messages API request body 1:1 平铺。"""
+    """ChatRequest 结构跟 Claude Messages API 1:1;路由字段 `provider_name` 是 chariot 自己的。"""
 
-    def test_construct_from_claude_body_dict(self) -> None:
-        """Claude API 用户能直接 `ChatRequest(**claude_body)`。"""
-        claude_body: dict[str, object] = {
-            "model": "claude-sonnet-4-6",
-            "messages": [Message(role="user", content="hi")],
-            "max_tokens": 1024,
-            "system": "You are helpful",
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "stop_sequences": ["END"],
-            "metadata": {"user_id": "u1"},
-        }
-        req = ChatRequest(**claude_body)  # type: ignore[arg-type]
-        assert req.model == "claude-sonnet-4-6"
-        assert req.max_tokens == 1024
-        assert req.system == "You are helpful"
-        assert req.temperature == 0.7
-        assert req.metadata == {"user_id": "u1"}
+    def test_no_wire_model_field(self) -> None:
+        """`ChatRequest` 没有 `model` 字段 —— wire body 里的 `model` 由
+        AnthropicProvider 内部从 `self.config.model` 写。"""
+        field_names = {f.name for f in dataclasses.fields(ChatRequest)}
+        assert "model" not in field_names
+        assert "provider_name" in field_names
 
-    def test_asdict_contains_all_claude_fields(self) -> None:
-        """`dataclasses.asdict(req)` 字段集合 ⊇ Claude API 字段集合。"""
-        req = ChatRequest(model="claude", messages=[Message(role="user", content="hi")])
+    def test_asdict_contains_claude_structural_fields(self) -> None:
+        """`dataclasses.asdict(req)` 字段集合 ⊇ Claude API 结构字段(messages /
+        max_tokens / system / tools / sampling 等);wire `model` 不在内。"""
+        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
         d = dataclasses.asdict(req)
-        claude_fields = {
-            "model",
+        claude_structural_fields = {
             "messages",
             "max_tokens",
             "system",
@@ -128,11 +117,15 @@ class TestClaudeApiInterop:
             "metadata",
             "thinking",
         }
-        assert claude_fields.issubset(d.keys())
+        assert claude_structural_fields.issubset(d.keys())
+        # wire `model` 不在 dataclass 里(由 Provider 内部写)
+        assert "model" not in d
+        # chariot 路由字段在
+        assert "provider_name" in d
 
     def test_chariot_extension_fields_present(self) -> None:
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[Message(role="user", content="hi")],
             convo_id="01H...",
             agent_id="agent_main",
@@ -145,19 +138,19 @@ class TestClaudeApiInterop:
 class TestChatRequestQueries:
     def test_is_stateful_true(self) -> None:
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[Message(role="user", content="hi")],
             convo_id="01H...",
         )
         assert req.is_stateful() is True
 
     def test_is_stateful_false(self) -> None:
-        req = ChatRequest(model="claude", messages=[Message(role="user", content="hi")])
+        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
         assert req.is_stateful() is False
 
     def test_last_user_text_string_content(self) -> None:
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[
                 Message(role="user", content="first"),
                 Message(role="assistant", content="hi"),
@@ -168,7 +161,7 @@ class TestChatRequestQueries:
 
     def test_last_user_text_block_content(self) -> None:
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[
                 Message(
                     role="user",
@@ -180,7 +173,7 @@ class TestChatRequestQueries:
 
     def test_last_user_text_no_text_block(self) -> None:
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[Message(role="user", content=[{"type": "image", "source": {}}])],
         )
         assert req.last_user_text() is None
@@ -188,7 +181,7 @@ class TestChatRequestQueries:
     def test_last_user_text_empty(self) -> None:
         """messages 全是 assistant → 没有 user 消息 → None。"""
         req = ChatRequest(
-            model="claude",
+            provider_name="claude",
             messages=[Message(role="assistant", content="hi")],
         )
         assert req.last_user_text() is None

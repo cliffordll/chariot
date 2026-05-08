@@ -113,7 +113,7 @@ def _make_provider(handler: Callable[[httpx.Request], httpx.Response]) -> Anthro
 
 def _make_req() -> ChatRequest:
     return ChatRequest(
-        model="anthropic",
+        provider_name="anthropic",
         messages=[Message(role="user", content="hi")],
     )
 
@@ -415,23 +415,28 @@ class TestFromOptions:
 
 
 class TestBuildBody:
+    @staticmethod
+    def _provider() -> AnthropicProvider:
+        """空 handler 的 provider 实例(只用 _build_body,不真发请求)。"""
+        return _make_provider(lambda _req: httpx.Response(200))
+
     def test_excludes_chariot_extension_fields(self) -> None:
         req = ChatRequest(
-            model="anthropic",
+            provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
             convo_id="01H...",
             agent_id="agent_main",
         )
-        body = AnthropicProvider._build_body(req)
+        body = self._provider()._build_body(req)
         assert "convo_id" not in body
         assert "agent_id" not in body
 
     def test_excludes_none_fields(self) -> None:
         req = ChatRequest(
-            model="anthropic",
+            provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
         )
-        body = AnthropicProvider._build_body(req)
+        body = self._provider()._build_body(req)
         # temperature / top_p / 等默认 None 字段应剔除
         assert "temperature" not in body
         assert "top_p" not in body
@@ -440,30 +445,46 @@ class TestBuildBody:
 
     def test_forces_stream_true(self) -> None:
         req = ChatRequest(
-            model="anthropic",
+            provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
         )
-        body = AnthropicProvider._build_body(req)
+        body = self._provider()._build_body(req)
         assert body["stream"] is True
 
     def test_keeps_messages_and_max_tokens(self) -> None:
         req = ChatRequest(
-            model="anthropic",
+            provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
             max_tokens=2048,
         )
-        body = AnthropicProvider._build_body(req)
+        body = self._provider()._build_body(req)
         assert body["max_tokens"] == 2048
         assert isinstance(body["messages"], list)
 
     def test_keeps_explicit_temperature(self) -> None:
         req = ChatRequest(
-            model="anthropic",
+            provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
             temperature=0.5,
         )
-        body = AnthropicProvider._build_body(req)
+        body = self._provider()._build_body(req)
         assert body["temperature"] == 0.5
+
+    def test_writes_body_model_from_config_model(self) -> None:
+        """body.model 必须从 self.config.model(LLM 真实 id)写入,跟
+        req.provider_name(chariot 路由的 entry name)无关。漏掉这步上游报
+        not_found_error。
+        """
+        req = ChatRequest(
+            provider_name="ollama-qwen",  # chariot entry name
+            messages=[Message(role="user", content="hi")],
+        )
+        # _make_provider 默认 config.model="claude-test"
+        body = self._provider()._build_body(req)
+        assert body["model"] == "claude-test"
+        # provider_name 不进 body
+        assert "provider_name" not in body
+        assert "ollama-qwen" not in str(body)
 
 
 # ---------------------------------------------------------------------------

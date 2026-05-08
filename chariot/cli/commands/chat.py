@@ -4,7 +4,8 @@
 `agent.run(req)`,不再起独立 server。
 
 flags:
-- `--model <id>`(默认 `claude-haiku-4-5`;纯 entry name,mock 不会真用)
+- `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认
+  (`chariot provider use <name>` 设置)。两者都没 → die 提示设默认或加 --provider
 - `--max-tokens N`(messages 协议的 max_tokens)
 - `--convo <id|new>`(0.4.0 + 0.6.0 rename):走 stateful path;`new` → CLI 生成 ULID 并打印;
   ULID 字面量 → 接续该会话;不传 → stateless(单轮 / 不持久化)
@@ -19,9 +20,11 @@ from typing import Annotated
 import typer
 from ulid import ULID
 
+from chariot.agent.run import AIAgent
 from chariot.cli._runtime import installed_runtime
-from chariot.cli.context import DEFAULT_MODEL, ChatContext
+from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
+from chariot.repos.provider_repo import ProviderRepo
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符。偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
@@ -32,10 +35,13 @@ def chat_cmd(
         str | None,
         typer.Argument(help="要发送的消息;省略进入 REPL"),
     ] = None,
-    model: Annotated[
-        str,
-        typer.Option("--model", help=f"模型 entry name;默认 {DEFAULT_MODEL}"),
-    ] = DEFAULT_MODEL,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help="本次会话用的 provider entry name;不传走 DB 默认",
+        ),
+    ] = None,
     max_tokens: Annotated[
         int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")
     ] = 1024,
@@ -55,7 +61,7 @@ def chat_cmd(
     asyncio.run(
         _run(
             text=text,
-            model=model,
+            provider=provider,
             max_tokens=max_tokens,
             convo_id=convo_id,
         )
@@ -85,19 +91,19 @@ def _resolve_convo_id(raw: str | None) -> str | None:
 async def _run(
     *,
     text: str | None,
-    model: str,
+    provider: str | None,
     max_tokens: int,
     convo_id: str | None,
 ) -> None:
     async with installed_runtime() as agent:
+        provider_name = await _resolve_provider(agent, provider)
         ctx = ChatContext(
             agent=agent,
-            model=model,
+            provider_name=provider_name,
             max_tokens=max_tokens,
             convo_id=convo_id,
         )
         if text is None or not text.strip():
-            # 惰性 import 避开模块加载时的环路风险
             from chariot.cli.repl import ChatRepl
 
             await ChatRepl(ctx=ctx).run()
@@ -106,6 +112,26 @@ async def _run(
         from chariot.cli.once import ChatOnce
 
         await ChatOnce(ctx=ctx).run(text)
+
+
+async def _resolve_provider(agent: AIAgent, override: str | None) -> str:
+    """优先级:CLI flag --provider > DB 默认。两者都没 → die 提示设默认。
+
+    返回 entry name(写到 ChatContext.provider_name)。不在这里校验 entry 在
+    DB 里存不存在 —— AIAgent.run 路由阶段会发 unknown_provider error,统一处理。
+    """
+    if override is not None and override.strip():
+        return override.strip()
+
+    async with agent.session_maker() as session:
+        default = await ProviderRepo(session).get_default()
+    if default is None:
+        Renderer.die(
+            "没有指定 provider:加 `--provider <name>`,或 `chariot provider use <name>` 设个默认",
+        )
+        # die 会 SystemExit,这里只是为了类型 narrow
+        raise SystemExit(1)  # pragma: no cover
+    return default.name
 
 
 def register(app: typer.Typer) -> None:

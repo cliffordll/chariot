@@ -111,16 +111,18 @@ SSE / JSON-RPC / 任何 wire format 都不在 AIAgent 内核可见范围。
 
 ### 3.1 `ChatRequest`(`chariot/agent/chat_request.py`)
 
-**设计依据**:跟 Claude Messages API 的 request body schema **1:1 平铺对应**。
-理由跟 ChatEvent 一致——降低学习成本,AnthropicProvider 实现极简(几乎是
-`dataclasses.asdict(req) → httpx.post(json=...)`)。Claude API 用户能直接
-`ChatRequest(**claude_body)` 把现有 Claude 调用代码搬过来。
+**设计依据**:**结构**跟 Claude Messages API 的 request body 1:1 对应(messages
+content 形态 / tool_use / tool_result / role 词表 / sampling 字段命名),
+理由跟 ChatEvent 一致——降低学习成本,AnthropicProvider 实现尽量简单。
+**唯一命名偏离**:chariot 路由用的字段叫 `provider_name`,而不是 wire 字段名
+`model`(避免一个名字承担两种语义)。
 
 ```python
 @dataclass(frozen=True)
 class ChatRequest:
+    # ─── chariot 路由字段(必填) ───
+    provider_name: str                            # entry name(chariot 内部当 Provider 路由 key)
     # ─── Claude Messages API 字段(顺序按官方 spec) ───
-    model: str                                    # entry name(chariot 内部当 Provider 路由)
     messages: list[Message]
     max_tokens: int = 4096
     system: str | list[SystemBlock] | None = None
@@ -134,7 +136,7 @@ class ChatRequest:
     metadata: dict | None = None                  # {"user_id": "..."}
     thinking: dict | None = None                  # extended thinking 配置(Claude 4+)
     # ─── chariot 扩展字段(顶层放,跟 Claude 字段不冲突) ───
-    convo_id: str | None = None            # None = stateless;ULID = stateful
+    convo_id: str | None = None                   # None = stateless;ULID = stateful
     agent_id: str | None = None                   # 0.9.0+ 多 AIAgent 实例;0.6.0 默认 None
 ```
 
@@ -162,11 +164,18 @@ class ToolSchema:
 `ContentBlock` 是 union,涵盖 Claude 协议的全部 block 类型(text / image /
 tool_use / tool_result / thinking / document 等),由 `type` 字段区分。
 
-**关于 `model` 字段语义**:Claude API 里 `model` 是 LLM 模型 ID(如
-`claude-sonnet-4-6`);chariot 这里 `model` 是 entry name(用户在 `models` 表
-里的命名,如 `claude` / `mock` / `gpt-4`),由 AIAgent 根据 entry name 路由到
-对应 Provider 实例,Provider 内部把真实的 model ID 传给上游 API。
-**字段名跟 Claude 一致,语义在 chariot 层做了一层抽象**(更适合多 Provider 场景)。
+**关于 `provider_name` vs wire `model`**:Claude API wire 字段叫 `model`,装的是
+LLM 真实 id(如 `claude-sonnet-4-6`);chariot 在 IR 这层把路由 key 单独命名为
+`provider_name`,装 entry name(用户在 `providers` 表里的命名,如 `claude` /
+`mock` / `ollama-qwen`)。AIAgent 用 `req.provider_name` 路由到对应 Provider
+实例,Provider 内部把 `entry.options.model`(LLM 真实 id)写到 wire body 的
+`model` 字段。**`req.provider_name` 跟 wire `body.model` 是两个 concept,不是
+同一个字段的两种叫法**;0.7.0+ 加 per-call LLM id 覆盖时会重新引入
+`ChatRequest.model: str | None = None` 字段(默认 None = 用 entry.options.model)。
+
+**命名约定**:CLI flag 用短名 `--provider`(贴近用户);IR / 内部参数传递用
+`provider_name`(避免跟 wire `model` 字段、`BaseProvider` 实例对象同名歧义)。
+ChatContext / ChatRequest 等内部数据结构都用 `provider_name`。
 
 **不引入的 Claude 字段**:
 - `stream`:chariot 内核固定流式(`Provider.generate` 总是 `AsyncIterator`),
@@ -182,7 +191,8 @@ tool_use / tool_result / thinking / document 等),由 `type` 字段区分。
 - `agent_id`:0.9.0+ 多 AIAgent 实例路由;0.6.0 默认 `None`,字段先占位
 
 **OpenAIProvider 怎么对接 ChatRequest**(0.7.0,作为非 Claude Provider 的范例):
-- `model` → OpenAI 也叫 `model`,直接传
+- `provider_name` → 跟 AnthropicProvider 一样,只是路由 key,不进 wire body;
+  body.model 由 OpenAIProvider 自己从 `self.config.model` 写
 - `messages` → OpenAI 形态略不同(content 是字符串而非 block 数组),Provider 内部翻译
 - `max_tokens` / `temperature` / `top_p` → OpenAI 同名,直接传
 - `top_k` → OpenAI 不支持,Provider 忽略(或严格模式报错)
@@ -391,6 +401,11 @@ class BaseProvider(ABC):
 ### 5.1 `AnthropicProvider`(`chariot/providers/builtin/anthropic.py`)
 
 - 用 httpx 调上游 `/v1/messages`,**body 构造而非透传**(从 `ChatRequest` 拼请求)
+- **`body["model"] = self.config.model`** 显式写入(LLM 真实 id,从
+  `entry.options.model` 来):`ChatRequest` 没有 `model` 字段,只有
+  `provider_name`(chariot 路由 key,如 `"ollama-qwen"`),wire body 字段名仍叫
+  `model`(Anthropic API 要求),值由 Provider 内部从 `self.config.model` 写。
+  S.7.1 修复 0.6.0 重写时漏掉这步导致的上游 `not_found_error`
 - 流式:消费上游 SSE 字节,解析成 `ChatEvent` yield。**chariot 不再做"字节级透传"**,
   解析后再发(代价:多一次反序列化;收益:协议解耦)
 - SSE 解析复用 `chariot/providers/_sse.py`(共享 utility,后续 OpenAIProvider 也用)
@@ -697,8 +712,16 @@ async def handle_user_message(self, chat_id, text):
 
 ### 7.1 表 schema
 
-`conversations` / `messages` / `tools` / `models` / `logs` 不变(沿用 0.4.0 + 0.5.0),
-0.6.0 不加表。**0.7.0 加 `skills` / `memory_facts`**(届时 migration v6/v7)。
+0.6.0 沿用 0.4.0 + 0.5.0 的五张表,但表名 / 列名做了 v5/v6/v7 的 rename + 一列
+增量(详见 `chariot/database/models.py` 模块 docstring + `migrations/00[5-7]_*.sql`):
+
+| migration | 改动 | 动机 |
+|---|---|---|
+| v5 (005) | `conversations` → `convos`,`messages.conversation_id` → `convo_id` | 跨层缩写统一(详 §7.1 后续段落) |
+| v6 (006) | `models` → `providers`,`messages.model_name` → `provider_name`,`logs.model` → `provider` | 0.6.0 抽象层是 BaseProvider,DB 层跟上(`ChatRequest.model` / `options.model` 仍叫 model 对齐 Claude API) |
+| v7 (007) | `providers` 加 `is_default INTEGER NOT NULL DEFAULT 0` | 默认 provider 机制(`chariot chat` 不传 `--provider` 走默认行;同时至多一行 = 1) |
+
+**0.7.0 加 `skills` / `memory_facts`**(届时 migration v8/v9)。
 
 #### `messages.content` 选 Claude 形态(决策依据)
 
@@ -772,13 +795,14 @@ tool_result / image / thinking),跟 §3.1 `ChatRequest.messages` / §3.2
 ```
 cli/
 ├── __main__.py
+├── _runtime.py              ── installed_runtime(): AIAgent.from_db + dispose
 ├── commands/                ── 命令注册层
 │   ├── chat.py              ── delegate 到 cli/repl.py / batch.py / once.py
-│   ├── conversation.py      ── 调 ConvoRepo
+│   ├── convo.py             ── 调 ConvoRepo(v5 起;原 conversation.py)
 │   ├── logs.py              ── 调 LogRepo
-│   ├── model.py             ── 调 ModelRepo + ProviderProber
+│   ├── provider.py          ── 调 ProviderRepo + ProviderProber(v6 起;原 model.py)
 │   ├── tool.py              ── 调 ToolRepo
-│   ├── status.py            ── 显示 DB 路径 / provider 数 / tool 数 / 版本
+│   ├── status.py            ── 显示 DB 路径 / 默认 provider / providers / tools / 版本
 │   └── stats.py             ── logs 表统计(请求数 / 错误率)
 ├── context.py               ── ChatContext(持 AIAgent + 三种模式共享状态)
 ├── render.py                ── ChatEvent → 终端渲染(text / tool_use / tool_result)
@@ -795,6 +819,17 @@ cli/
 - Renderer 直接消费 `ChatEvent`(`content_block_delta(text_delta)` → stream_token,
   `content_block_stop` 对应 tool_use block → tool_use_line,`tool_result` →
   tool_result_line,`message_stop` → newline)
+
+**S.7.1 加的 provider 切换 / 展示**:
+- `chariot provider use <name>` —— 持久化默认 provider 到 DB(`is_default=1`);
+  `chariot chat` 不传 `--provider` 时走默认行
+- `chariot provider show [<name>]` —— 不带参数 = 当前默认;带参数 = 指定 entry
+  详情(`api_key` 打码 `(set, len=N)` 不泄露内容,`api_key_env` 原值)
+- `chariot provider list` 加 `default` 列(`*` 标记)
+- `chariot chat --provider <name>` —— 本次会话覆盖默认(不动 DB);砍掉 0.5.0
+  的 `--model` flag(语义跟 LLM model id 撞名 → 改名 `--provider`)
+- REPL `/provider <name>` 仍是本地切换;新增 `/provider use <name>` 持久化
+- **优先级**:CLI flag `--provider` > DB 默认(`is_default=1`)> die 提示
 
 ### 8.2 Sidecar surface(`chariot/sidecar/`)
 
