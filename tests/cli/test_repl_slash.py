@@ -35,14 +35,16 @@ from chariot.repos.tool_repo import ToolRepo
 
 @pytest_asyncio.fixture
 async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
-    """每个 test 一个全新 DB + 全新 AIAgent;退出释放连接池避免文件锁残留。"""
+    """每个 test 一个全新 DB + 全新 AIAgent;退出释放连接池避免文件锁残留。
+
+    0.6.5 起 AIAgent 撤了单例,直接调 from_db 拿实例;teardown 清 DB engine。
+    """
     db_path = tmp_path / "chariot.db"
     inst = await AIAgent.from_db(db_path)
     try:
         yield inst
     finally:
         await dispose_db()
-        AIAgent.uninstall()
 
 
 def _make_ctx(agent: AIAgent, *, convo_id: str | None = None) -> ChatContext:

@@ -25,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, Self
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
@@ -42,12 +42,17 @@ if TYPE_CHECKING:
 
 
 class AIAgent:
-    """0.6.0 内核入口。每个 surface 进程构造一个实例。
+    """0.6.0 内核入口。每个 surface 进程可有 N 个实例(0.6.5 起 per-session)。
 
     使用方式::
 
-        # 生产路径(CLI / sidecar / Gateway 进程启动时)
-        agent = await AIAgent.from_db(db_path)
+        # 生产路径(CLI / sidecar / Gateway 通过 AgentRegistry 拿)
+        from chariot.agent.registry import AgentRegistry
+        agent = await AgentRegistry.acquire(
+            session_key="...",
+            db_path=Path("~/.chariot/chariot.db"),
+            provider_overrides={"claude": {"base_url": X, "api_key": Y}} or None,
+        )
         async for event in agent.run(req):
             # 消费 ChatEvent
 
@@ -57,10 +62,12 @@ class AIAgent:
             tools={},
             sessionmaker=test_sm,
         )
-    """
 
-    # 单例(每进程一个);`from_db` 装载完写入,`uninstall` 清空
-    _current: ClassVar[AIAgent | None] = None
+    0.6.5 起:
+    - 撤 `_current` ClassVar 单例 / `current()` / `uninstall()`(改 AgentRegistry per-session)
+    - 撤 `patch_provider_options`(S.7.3 临时方案;改 from_db 时 provider_overrides 一次性 merge)
+    - 加 `from_db(db_path, *, provider_overrides=None)` 参数
+    """
 
     def __init__(
         self,
@@ -73,19 +80,31 @@ class AIAgent:
         self._tools = dict(tools)
         self._sessionmaker = sessionmaker
 
-    # ---- 装载 / 单例 ----
+    # ---- 装载 ----
 
     @classmethod
-    async def from_db(cls, db_path: Path) -> Self:
+    async def from_db(
+        cls,
+        db_path: Path,
+        *,
+        provider_overrides: dict[str, dict[str, str]] | None = None,
+    ) -> Self:
         """从 ~/.chariot/chariot.db 装载 ProviderEntry / ToolEntry,构造所有
-        Provider / Tool 实例,返就绪 AIAgent 并设为 `_current` 单例。
+        Provider / Tool 实例,返就绪 AIAgent。
+
+        `provider_overrides`(0.6.5 起):per-session 注入到 entry.options 的 patch
+        dict,形如 `{"claude": {"base_url": X, "api_key": Y}}`。merge 进 entry.options
+        后传给 `ProviderRegistry.build`,Provider 内部从 merged options 算 ClientSpec
+        命中或新建 client(共享 ClientCache)。CLI 一次性进程也走这条路径,只是
+        session_key 固定 `"process"`。
 
         首次启动表为空 → 自动 seed:`providers` 插一条 mock entry,`tools` 插
         4 条 disabled fixture(read_file / list_dir / shell_exec / http_get)。
         seeded 工具默认 disabled,所以新装的 AIAgent 无 tool;mock provider
         已可用。
 
-        每个 surface 进程启动时调一次。
+        典型由 `AgentRegistry.acquire` 调用;直接调也 OK(测试或 single-session
+        场景)。
         """
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.database.session import init_db
@@ -101,28 +120,19 @@ class AIAgent:
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
 
+        overrides = provider_overrides or {}
         providers: dict[str, BaseProvider] = {
-            entry.name: ProviderRegistry.build(entry.type, entry.options) for entry in cfg.providers
+            entry.name: ProviderRegistry.build(
+                entry.type,
+                {**entry.options, **overrides.get(entry.name, {})},
+            )
+            for entry in cfg.providers
         }
         tools: dict[str, BaseTool] = {
             entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
         }
 
-        instance = cls(providers=providers, tools=tools, sessionmaker=sm)
-        cls._current = instance
-        return instance
-
-    @classmethod
-    def current(cls) -> AIAgent:
-        """获取当前进程单例;未装载抛 RuntimeError。"""
-        if cls._current is None:
-            raise RuntimeError("AIAgent 未装载;先调 AIAgent.from_db(db_path)")
-        return cls._current
-
-    @classmethod
-    def uninstall(cls) -> None:
-        """清空单例(测试 / shutdown 用)。"""
-        cls._current = None
+        return cls(providers=providers, tools=tools, sessionmaker=sm)
 
     # ---- 资源访问(供 surface 直调 repo) ----
 
@@ -149,46 +159,6 @@ class AIAgent:
     def tools(self) -> dict[str, BaseTool]:
         """已装载的 tool 字典(只读视图;surface 仅用于 status / 列表展示)。"""
         return dict(self._tools)
-
-    # ---- per-call provider 覆盖(CLI flag 用) ----
-
-    async def patch_provider_options(
-        self,
-        provider_name: str,
-        *,
-        options_overrides: dict[str, str],
-    ) -> None:
-        """对指定 provider entry 临时合并 options 重建实例(本进程生效)。
-
-        典型场景:CLI `chariot chat --model X --api-key Y` 把 X / Y 注入到
-        DB entry 的 options 后重建 Provider。`options_overrides` 浅 merge 到
-        `entry.options`,覆盖同名字段;空 dict 直接 no-op。
-
-        失败处理:
-        - `provider_name` 不在已装载 providers → 静默 no-op(让后续 AIAgent.run
-          路由阶段统一发 unknown_provider error,文案一致)
-        - DB 里 entry 不存在(理论上不应发生,因为它能装载就说明在过)→ no-op
-        - `Provider.from_options(merged)` 抛 ConfigError(覆盖值非法)→ 透传
-          给 caller,CLI 侧 die 提示
-        """
-        if not options_overrides:
-            return
-        if provider_name not in self._providers:
-            return
-
-        # 惰性 import 避循环依赖;CLI 侧调用频率低,单次 import 开销可忽略
-        from chariot.providers.registry import ProviderRegistry
-        from chariot.repos.provider_repo import ProviderRepo
-
-        async with self.session_maker() as session:
-            entry = await ProviderRepo(session).get_entry(provider_name)
-        if entry is None:
-            return
-
-        merged_options = {**entry.options, **options_overrides}
-        # ConfigError 由 caller 处理(CLI 应翻译成 die 提示)
-        new_provider = ProviderRegistry.build(entry.type, merged_options)
-        self._providers[provider_name] = new_provider
 
     # ---- 主入口 ----
 

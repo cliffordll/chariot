@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -209,50 +210,26 @@ class TestStatefulPath:
 
 
 # ---------------------------------------------------------------------------
-# 单例 / current()
+# from_db `provider_overrides` 参数(0.6.5 起 per-session override)
 # ---------------------------------------------------------------------------
 
 
-class TestSingletonLifecycle:
-    def setup_method(self) -> None:
-        AIAgent.uninstall()
+class TestFromDbProviderOverrides:
+    """`AIAgent.from_db(db_path, provider_overrides=...)` 行为。
 
-    def teardown_method(self) -> None:
-        AIAgent.uninstall()
-
-    def test_current_unloaded_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="AIAgent 未装载"):
-            AIAgent.current()
-
-    def test_uninstall_clears(self) -> None:
-        AIAgent._current = AIAgent(providers={}, tools={})
-        assert AIAgent.current() is not None
-        AIAgent.uninstall()
-        with pytest.raises(RuntimeError):
-            AIAgent.current()
-
-
-# ---------------------------------------------------------------------------
-# patch_provider_options(S.7.3 CLI per-call override 用)
-# ---------------------------------------------------------------------------
-
-
-class TestPatchProviderOptions:
-    """`agent.patch_provider_options(name, options_overrides=...)` 行为。
-
-    用真 DB(tmp_path)+ MockProvider 验证:CLI 注入 options 后 Provider 实例
-    被重建,新实例的 config / 属性反映合并后的 options。
+    0.6.5 起替换 0.6.0 的 `patch_provider_options` 临时方案:overrides 在装载时
+    一次性 merge 进 entry.options;Provider 实例从 merged 算 ClientSpec,
+    后续 generate 时从 ClientCache 拿(共享 / 自动复用)。
     """
 
-    @pytest.fixture
-    async def agent_with_anthropic(
+    @pytest.fixture(autouse=True)
+    async def _seed_anthropic_entry(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> AsyncIterator[AIAgent]:
-        """tmp DB 装一个 anthropic entry + 跑 from_db。"""
+    ) -> AsyncIterator[Path]:
+        """tmp DB 装一个 anthropic entry,yield db_path。"""
         from chariot.database.session import dispose_db
         from chariot.repos.provider_repo import ProviderRepo
 
-        # 防止从 host env 漏 api key 进 from_options
         monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
@@ -268,52 +245,52 @@ class TestPatchProviderOptions:
                     "base_url": "https://old.api",
                 },
             )
-        # 重新装载才能让新加的 entry 进 _providers 字典
         await dispose_db()
-        AIAgent.uninstall()
-        agent = await AIAgent.from_db(db_path)
         try:
-            yield agent
+            yield db_path
         finally:
             await dispose_db()
-            AIAgent.uninstall()
 
-    async def test_no_op_when_overrides_empty(self, agent_with_anthropic: AIAgent) -> None:
-        """空 patch dict → 直接 no-op(不重建 Provider)。"""
-        before = agent_with_anthropic.providers["claude"]
-        await agent_with_anthropic.patch_provider_options("claude", options_overrides={})
-        assert agent_with_anthropic.providers["claude"] is before
+    async def test_no_overrides_uses_db_options(self, _seed_anthropic_entry: Path) -> None:
+        """provider_overrides=None → entry.options 原样进 Provider。"""
+        agent = await AIAgent.from_db(_seed_anthropic_entry)
+        provider = agent.providers["claude"]
+        assert provider.config.model == "claude-old"
+        assert provider._spec.base_url == "https://old.api"  # type: ignore[attr-defined]
 
-    async def test_unknown_provider_silent_no_op(self, agent_with_anthropic: AIAgent) -> None:
-        """不在 _providers 字典里的 name → 静默 no-op(让 AIAgent.run 路由发 unknown_provider)。"""
-        await agent_with_anthropic.patch_provider_options("ghost", options_overrides={"model": "x"})
-        # 没有抛错;ghost 不被加入 providers 字典
-        assert "ghost" not in agent_with_anthropic.providers
-
-    async def test_model_override_rebuilds_provider(self, agent_with_anthropic: AIAgent) -> None:
-        before = agent_with_anthropic.providers["claude"]
-        await agent_with_anthropic.patch_provider_options(
-            "claude", options_overrides={"model": "claude-new"}
+    async def test_model_override_at_from_db(self, _seed_anthropic_entry: Path) -> None:
+        """`provider_overrides={"claude": {"model": ...}}` → Provider.config.model 反映新值。"""
+        agent = await AIAgent.from_db(
+            _seed_anthropic_entry,
+            provider_overrides={"claude": {"model": "claude-new"}},
         )
-        after = agent_with_anthropic.providers["claude"]
-        assert after is not before
-        assert after.config.model == "claude-new"
+        assert agent.providers["claude"].config.model == "claude-new"
 
-    async def test_base_url_override(self, agent_with_anthropic: AIAgent) -> None:
-        await agent_with_anthropic.patch_provider_options(
-            "claude", options_overrides={"base_url": "https://override.api"}
+    async def test_base_url_override_at_from_db(self, _seed_anthropic_entry: Path) -> None:
+        """`provider_overrides[name][base_url]` → ClientSpec.base_url 反映。"""
+        agent = await AIAgent.from_db(
+            _seed_anthropic_entry,
+            provider_overrides={"claude": {"base_url": "https://override.api"}},
         )
-        # AnthropicProvider._base_url 是私有,但测试场景容许 introspect
-        provider = agent_with_anthropic.providers["claude"]
-        assert provider._base_url == "https://override.api"  # type: ignore[attr-defined]
+        provider = agent.providers["claude"]
+        assert provider._spec.base_url == "https://override.api"  # type: ignore[attr-defined]
 
-    async def test_invalid_override_raises_config_error(
-        self, agent_with_anthropic: AIAgent
+    async def test_overrides_keyed_by_other_provider_ignored(
+        self, _seed_anthropic_entry: Path
     ) -> None:
-        """空串 base_url → ConfigError 透传给 caller(CLI 翻译成 die)。"""
+        """overrides keyed 到不存在的 entry → 被忽略,不影响现有 entry。"""
+        agent = await AIAgent.from_db(
+            _seed_anthropic_entry,
+            provider_overrides={"ghost": {"model": "x"}},
+        )
+        assert agent.providers["claude"].config.model == "claude-old"
+
+    async def test_invalid_override_raises_config_error(self, _seed_anthropic_entry: Path) -> None:
+        """空串 base_url 进 patch → ConfigError(from_options 校验阶段)。"""
         from chariot.agent.exceptions import ConfigError
 
         with pytest.raises(ConfigError, match="base_url"):
-            await agent_with_anthropic.patch_provider_options(
-                "claude", options_overrides={"base_url": ""}
+            await AIAgent.from_db(
+                _seed_anthropic_entry,
+                provider_overrides={"claude": {"base_url": ""}},
             )

@@ -105,7 +105,19 @@ class DBState:
 
     @classmethod
     async def install(cls, db_path: Path = DEFAULT_DB_PATH) -> async_sessionmaker[AsyncSession]:
-        """建目录 + engine + 跑 migrations + 绑 session_maker;返回 session_maker。"""
+        """建目录 + engine + 跑 migrations + 绑 session_maker;返回 session_maker。
+
+        幂等(0.6.5 起):若已 install 同一 db_path,直接返已有 sessionmaker;
+        若 db_path 切换(测试场景),先 dispose 老 engine 再装新的。这让多个
+        AIAgent 实例(per-session 缓存)共享同一进程的 engine + 连接池。
+        """
+        if cls.engine is not None and cls.session_maker is not None:
+            existing_url = str(cls.engine.url)
+            new_url = _db_url(db_path)
+            if existing_url == new_url:
+                return cls.session_maker
+            await cls.dispose()  # db_path 切换 → 释放老 engine
+
         db_path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_async_engine(_db_url(db_path))
         await _maybe_run_migrations(engine)
