@@ -144,6 +144,13 @@ class TestAdvisoryLockBasic:
             async with repo.with_advisory_lock("conv_b"):
                 raise _BoomError("simulated failure inside critical section")
 
+    async def test_append_message_assigns_ulid_id(self, session_a: AsyncSession) -> None:
+        repo = ConvoRepo(session_a)
+        await repo.create("conv_msg")
+        msg = await repo.append_message("conv_msg", role="user", content="hi")
+        assert isinstance(msg.id, str)
+        assert len(msg.id) == 26
+
 
 # ---------------------------------------------------------------------------
 # 跨 connection(模拟跨进程)串行 + 超时

@@ -48,6 +48,10 @@ def test_root_help() -> None:
         "provider",
         "tool",
         "convo",
+        "memory",
+        "eval",
+        "skill",
+        "checkpoint",
     ):
         assert sub in out, f"--help 输出里缺少子命令 {sub!r}"
 
@@ -62,6 +66,10 @@ def test_root_help() -> None:
         "provider",
         "tool",
         "convo",
+        "memory",
+        "eval",
+        "skill",
+        "checkpoint",
     ],
 )
 @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -77,6 +85,14 @@ def test_tool_subcommand_group_has_list_enable_disable_config() -> None:
     out = _plain(result.output)
     for sub in ("list", "enable", "disable", "config"):
         assert sub in out, f"`chariot tool --help` 缺少子命令 {sub!r}"
+
+
+@pytest.mark.parametrize("sub", ["memory", "eval", "skill", "checkpoint"])
+def test_phase4_subcommand_groups_have_list(sub: str) -> None:
+    result = runner.invoke(app, [sub, "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "list" in out, f"`chariot {sub} --help` 缺少 list 子命令"
 
 
 def test_convo_subcommand_group_has_list_show_rm_rename() -> None:

@@ -17,11 +17,15 @@
   对齐 Claude API)
 - v7(0.6.0):`providers` 加 `is_default` 列(同 commit 落 `ProviderRepo.get_default
   / set_default / unset_default` + CLI `provider use` / `provider show` 命令)
+- v8(0.6.5+):平台基础设施最小落点 —— `memories / eval_runs / eval_cases /
+  audit_events / checkpoint_records / skills`
+- v9(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
 
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
-- `ProviderRow.id` / `MessageRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
-- `ConvoRow.id` 是 26 字符 ULID 字符串(client 或 server 生成,校验在 controller 层)
+- `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
+- `ConvoRow.id` / `MessageRow.id` 是 26 字符 ULID 字符串(历史迁移前的旧
+  message 行会保留 legacy 文本 id)
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
+
+from ulid import ULID
 
 from sqlalchemy import Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -43,6 +49,11 @@ def _new_id() -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _new_ulid() -> str:
+    """26 字符 ULID 字面量。"""
+    return str(ULID())
 
 
 class Base(DeclarativeBase):
@@ -125,7 +136,7 @@ class MessageRow(Base):
 
     __tablename__ = "messages"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     convo_id: Mapped[str] = mapped_column(index=True)
     seq: Mapped[int]
     role: Mapped[str]  # 'user' | 'assistant'
@@ -149,5 +160,86 @@ class ToolRow(Base):
     type: Mapped[str]
     enabled: Mapped[int]  # 0/1;SQLite 无 BOOL 类型,统一用 int
     options: Mapped[str]  # JSON-serialized dict;migration v4 列默认 '{}'
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class MemoryRow(Base):
+    """`memories` 表:v8 起的长期记忆最小物理基础。"""
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    kind: Mapped[str] = mapped_column(index=True)
+    text: Mapped[str]
+    meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class EvalRunRow(Base):
+    """`eval_runs` 表:v8 起的评估运行记录最小基础。"""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str | None] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(index=True)
+    summary: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class EvalCaseRow(Base):
+    """`eval_cases` 表:v8 起的评估样例最小基础。"""
+
+    __tablename__ = "eval_cases"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    suite: Mapped[str | None] = mapped_column(default=None, index=True)
+    name: Mapped[str]
+    input_payload: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    expected: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class AuditEventRow(Base):
+    """`audit_events` 表:v8 起的审计事件最小基础。"""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    event_type: Mapped[str] = mapped_column(index=True)
+    status: Mapped[str | None] = mapped_column(default=None, index=True)
+    payload: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class CheckpointRow(Base):
+    """`checkpoint_records` 表:v8 起的 checkpoint 最小基础。"""
+
+    __tablename__ = "checkpoint_records"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str] = mapped_column(index=True)
+    kind: Mapped[str] = mapped_column(index=True)
+    target: Mapped[str | None] = mapped_column(default=None)
+    payload: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class SkillRow(Base):
+    """`skills` 表:v8 起的 skill 注册最小基础。"""
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(default=None)
+    content: Mapped[str] = mapped_column(default="")
+    enabled: Mapped[int] = mapped_column(default=1)
+    meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)

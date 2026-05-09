@@ -8,6 +8,7 @@
 - `chariot stats [period]`
 - `chariot chat [text]` —— 一次性 / REPL,直接构造 AIAgent
 - `chariot provider ...` / `tool ...` / `convo ...`
+- `chariot memory ...` / `eval ...` / `skill ...` / `checkpoint ...`
 """
 
 from __future__ import annotations
@@ -20,13 +21,25 @@ from chariot.cli.commands import (
     chat as chat_mod,
 )
 from chariot.cli.commands import (
+    checkpoint as checkpoint_mod,
+)
+from chariot.cli.commands import (
     convo as convo_mod,
+)
+from chariot.cli.commands import (
+    evals as eval_mod,
 )
 from chariot.cli.commands import (
     logs as logs_mod,
 )
 from chariot.cli.commands import (
+    memory as memory_mod,
+)
+from chariot.cli.commands import (
     provider as provider_mod,
+)
+from chariot.cli.commands import (
+    skill as skill_mod,
 )
 from chariot.cli.commands import (
     stats as stats_mod,
@@ -71,6 +84,10 @@ for mod in (
     provider_mod,
     tool_mod,
     convo_mod,
+    memory_mod,
+    eval_mod,
+    skill_mod,
+    checkpoint_mod,
 ):
     mod.register(app)
 
