@@ -104,9 +104,11 @@ async def test_slash_provider_with_name_sets_ctx_provider(agent: AIAgent) -> Non
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/provider new-entry-id")
     assert ctx.provider_name == "new-entry-id"
-    # DB 默认未受影响
+    # 首启默认 provider 还是 mock
     async with agent.session_maker() as session:
-        assert await ProviderRepo(session).get_default() is None
+        default = await ProviderRepo(session).get_default()
+        assert default is not None
+        assert default.name == "mock"
 
 
 async def test_slash_provider_use_persists_default_to_db(agent: AIAgent) -> None:

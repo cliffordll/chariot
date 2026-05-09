@@ -6,7 +6,7 @@ import asyncio
 
 import typer
 
-from chariot.checkpoints.repo import CheckpointRepo
+from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 

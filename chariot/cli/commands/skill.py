@@ -8,7 +8,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.skills.repo import SkillRepo
+from chariot.repos.skill_repo import SkillRepo
 
 skill_app = typer.Typer(
     name="skill",

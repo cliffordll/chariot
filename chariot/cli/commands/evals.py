@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from importlib import import_module
 
 import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-
-EvalRepo = import_module("chariot.eval.repo").EvalRepo
+from chariot.repos.eval_repo import EvalRepo
 
 eval_app = typer.Typer(
     name="eval",

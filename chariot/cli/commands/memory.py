@@ -8,7 +8,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.memory.repo import MemoryRepo
+from chariot.repos.memory_repo import MemoryRepo
 
 memory_app = typer.Typer(
     name="memory",

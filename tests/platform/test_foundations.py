@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from importlib import import_module
 from pathlib import Path
 
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.audit.repo import AuditRepo
-from chariot.checkpoints.repo import CheckpointRepo
+from chariot.repos.audit_repo import AuditRepo
+from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.database.session import dispose_db, init_db
-from chariot.memory.repo import MemoryRepo
-from chariot.skills.repo import SkillRepo
-
-EvalRepo = import_module("chariot.eval.repo").EvalRepo
+from chariot.repos.eval_repo import EvalRepo
+from chariot.repos.memory_repo import MemoryRepo
+from chariot.repos.skill_repo import SkillRepo
 
 
 @pytest_asyncio.fixture
