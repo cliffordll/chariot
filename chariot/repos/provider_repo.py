@@ -183,6 +183,7 @@ class ProviderRepo:
                 type=self._SEED_TYPE,
                 options=json.dumps(self._SEED_OPTIONS),
                 params=json.dumps(self._SEED_PARAMS),
+                is_default=1,
             ),
         )
         await self.session.commit()

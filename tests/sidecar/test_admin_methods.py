@@ -6,7 +6,7 @@
 
 覆盖 14 个 method 各自的 happy path + 关键边界:
 
-- list_convos / get_convo / rename_convo / delete_convo
+- list_conversations / get_conversation / rename_conversation / delete_conversation
 - list_tools / enable_tool / disable_tool / config_tool
 - list_providers / add_provider / update_provider / delete_provider / probe_provider
 - list_logs
@@ -28,7 +28,7 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.convo_repo import ConvoRepo
+from chariot.repos.conversation_repo import ConversationRepo
 from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
@@ -111,67 +111,67 @@ def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
 
 
 # ---------------------------------------------------------------------------
-# convo methods
+# conversation methods
 # ---------------------------------------------------------------------------
 
 
-class TestConvoMethods:
-    async def test_list_convos_empty_initial(self, server: JsonRpcServer) -> None:
-        line = await _call(server, "list_convos")
-        assert line["result"] == {"convos": []}
+class TestConversationMethods:
+    async def test_list_conversations_empty_initial(self, server: JsonRpcServer) -> None:
+        line = await _call(server, "list_conversations")
+        assert line["result"] == {"conversations": []}
 
-    async def test_list_convos_returns_seeded(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        """先用 repo 直接插入 2 个 convo,再走 RPC list 验证。"""
+    async def test_list_conversations_returns_seeded(self, server: JsonRpcServer, agent: AIAgent) -> None:
+        """先用 repo 直接插入 2 个 conversation,再走 RPC list 验证。"""
         async with agent.session_maker() as session:
-            repo = ConvoRepo(session)
+            repo = ConversationRepo(session)
             await repo.create("01H_TEST_A", title="first")
             await repo.create("01H_TEST_B", title="second")
 
-        line = await _call(server, "list_convos")
-        ids = sorted(c["id"] for c in line["result"]["convos"])
+        line = await _call(server, "list_conversations")
+        ids = sorted(c["id"] for c in line["result"]["conversations"])
         assert ids == ["01H_TEST_A", "01H_TEST_B"]
 
-    async def test_get_convo_returns_messages(self, server: JsonRpcServer, agent: AIAgent) -> None:
+    async def test_get_conversation_returns_messages(self, server: JsonRpcServer, agent: AIAgent) -> None:
         async with agent.session_maker() as session:
-            repo = ConvoRepo(session)
+            repo = ConversationRepo(session)
             await repo.create("01H_C", title="t")
             await repo.append_message("01H_C", role="user", content="hi")
 
-        line = await _call(server, "get_convo", {"convo_id": "01H_C"})
+        line = await _call(server, "get_conversation", {"conversation_id": "01H_C"})
         result = line["result"]
-        assert result["convo"]["id"] == "01H_C"
+        assert result["conversation"]["id"] == "01H_C"
         assert len(result["messages"]) == 1
         assert result["messages"][0]["role"] == "user"
 
-    async def test_get_convo_not_found_returns_err_not_found(self, server: JsonRpcServer) -> None:
-        line = await _call(server, "get_convo", {"convo_id": "ghost"})
+    async def test_get_conversation_not_found_returns_err_not_found(self, server: JsonRpcServer) -> None:
+        line = await _call(server, "get_conversation", {"conversation_id": "ghost"})
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
-    async def test_rename_convo(self, server: JsonRpcServer, agent: AIAgent) -> None:
+    async def test_rename_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
         async with agent.session_maker() as session:
-            await ConvoRepo(session).create("01H_R", title="old")
+            await ConversationRepo(session).create("01H_R", title="old")
 
-        line = await _call(server, "rename_convo", {"convo_id": "01H_R", "title": "new"})
-        assert line["result"]["convo"]["title"] == "new"
+        line = await _call(server, "rename_conversation", {"conversation_id": "01H_R", "title": "new"})
+        assert line["result"]["conversation"]["title"] == "new"
 
-    async def test_rename_convo_not_found(self, server: JsonRpcServer) -> None:
-        line = await _call(server, "rename_convo", {"convo_id": "ghost", "title": "x"})
+    async def test_rename_conversation_not_found(self, server: JsonRpcServer) -> None:
+        line = await _call(server, "rename_conversation", {"conversation_id": "ghost", "title": "x"})
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
-    async def test_delete_convo(self, server: JsonRpcServer, agent: AIAgent) -> None:
+    async def test_delete_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
         async with agent.session_maker() as session:
-            await ConvoRepo(session).create("01H_D", title="t")
+            await ConversationRepo(session).create("01H_D", title="t")
 
-        line = await _call(server, "delete_convo", {"convo_id": "01H_D"})
+        line = await _call(server, "delete_conversation", {"conversation_id": "01H_D"})
         assert line["result"] == {"deleted": "01H_D"}
 
         # 再次 get 应该 not found
-        line2 = await _call(server, "get_convo", {"convo_id": "01H_D"})
+        line2 = await _call(server, "get_conversation", {"conversation_id": "01H_D"})
         assert line2["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
-    async def test_convo_id_required(self, server: JsonRpcServer) -> None:
-        """params 缺 convo_id → ERR_INVALID_PARAMS。"""
-        line = await _call(server, "get_convo", {})
+    async def test_conversation_id_required(self, server: JsonRpcServer) -> None:
+        """params 缺 conversation_id → ERR_INVALID_PARAMS。"""
+        line = await _call(server, "get_conversation", {})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
 
@@ -225,8 +225,8 @@ class TestProviderMethods:
         assert len(providers) == 1
         assert providers[0]["name"] == "mock"
         assert providers[0]["type"] == "mock"
-        # seed_if_empty 只插入 entry,不设默认(is_default=0)。是 CLI/UI 操作显式 set
-        assert providers[0]["default"] is False
+        # seed_if_empty 首启直接把 mock 设成默认 provider
+        assert providers[0]["default"] is True
 
     async def test_add_provider(self, server: JsonRpcServer) -> None:
         line = await _call(
@@ -358,6 +358,10 @@ class TestRegistration:
         """register_methods 应该注册 15 个 method 名。"""
         expected = {
             "chat",
+            "list_conversations",
+            "get_conversation",
+            "rename_conversation",
+            "delete_conversation",
             "list_convos",
             "get_convo",
             "rename_convo",
