@@ -28,6 +28,7 @@ from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
 from chariot.agent.convo_lock import ConvoLockManager
 from chariot.agent.exceptions import ConvoLockTimeout
 from chariot.agent.loop import AgentLoop
+from chariot.agent.provider_contract import normalize_request
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -184,7 +185,7 @@ class AIAgent:
             )
             return
 
-        effective_req = self._inject_default_tools(req)
+        effective_req = self._normalize_request(req, provider)
 
         if req.is_stateful():
             async for event in self._run_stateful_chat(effective_req, provider):
@@ -288,6 +289,12 @@ class AIAgent:
         return [Message(role=row["role"], content=row["content"]) for row in rows]
 
     # ---- default tools 注入 ----
+
+    def _normalize_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+        """Apply agent-side defaults, then trim fields unsupported by the provider."""
+
+        req_with_tools = self._inject_default_tools(req)
+        return normalize_request(req_with_tools, provider.capabilities)
 
     def _inject_default_tools(self, req: ChatRequest) -> ChatRequest:
         """req.tools 是 None → 挂当前装载的所有 tool schema;

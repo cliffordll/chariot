@@ -37,7 +37,7 @@ from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.agent.exceptions import ConfigError, ProviderError
 from chariot.providers._sse import SseParser
-from chariot.providers.base import BaseProvider, BaseProviderConfig
+from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 from chariot.providers.clients import ClientCache, ClientSpec
 
 
@@ -55,6 +55,7 @@ class AnthropicProvider(BaseProvider):
     """
 
     _DEFAULT_BASE_URL: ClassVar[str] = "https://api.anthropic.com"
+    capabilities = BaseProviderCapabilities()
     _DEFAULT_API_KEY_ENV: ClassVar[str] = "ANTHROPIC_API_KEY"
     _BASE_URL_ENV: ClassVar[str] = "ANTHROPIC_BASE_URL"  # Anthropic SDK 标准 env
     _ANTHROPIC_VERSION: ClassVar[str] = "2023-06-01"

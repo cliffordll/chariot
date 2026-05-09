@@ -338,3 +338,22 @@ class TestProviderError:
         assert ev.error_type == "upstream_auth_failed"
         assert ev.error_message is not None
         assert "401" in ev.error_message
+
+
+class TestProviderContractValidation:
+    async def test_invalid_event_sequence_yields_contract_error(
+        self, req: ChatRequest
+    ) -> None:
+        loop = _make_loop(
+            [[
+                ChatEvent.message_start(message_id="msg_bad", model="scripted-1"),
+                ChatEvent.text_delta("oops", index=0),
+            ]]
+        )
+
+        events = [ev async for ev in loop.stream_chat(req)]
+
+        assert [ev.kind for ev in events] == ["message_start", "error"]
+        assert events[-1].error_type == "invalid_provider_event"
+        assert events[-1].error_message is not None
+        assert "content_block_delta" in events[-1].error_message

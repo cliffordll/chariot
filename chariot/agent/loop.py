@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, cast
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.exceptions import ProviderError
+from chariot.agent.provider_contract import ProviderContractError, ProviderEventValidator
 
 if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
@@ -80,9 +81,11 @@ class AgentLoop:
             tool_use_inputs: dict[int, str] = {}  # index → 累计的 input_json 字符串
             stop_reason: str | None = None
             saw_error = False
+            validator = ProviderEventValidator()
 
             try:
                 async for event in self._provider.generate(current_req):
+                    validator.accept(event)
                     yield event
                     self._buffer_event(assistant_blocks, tool_use_inputs, event)
                     if event.kind == "message_delta":
@@ -90,6 +93,13 @@ class AgentLoop:
                     if event.kind == "error":
                         saw_error = True
                         return
+                validator.ensure_complete()
+            except ProviderContractError as e:
+                yield ChatEvent.error_event(
+                    error_type="invalid_provider_event",
+                    error_message=str(e),
+                )
+                return
             except ProviderError as e:
                 # 200 前抛的 ProviderError(契约见 DESIGN §6.4.2):转 error event
                 # yield 给 surface,流终结。200 后的错由 Provider 自己 yield error

@@ -22,7 +22,7 @@ import pytest
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
 from chariot.agent.run import AIAgent
-from chariot.providers.base import BaseProvider, BaseProviderConfig
+from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 from chariot.tools.base import BaseTool
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,15 @@ class _CapturingProvider(BaseProvider):
         yield ChatEvent.block_stop(index=0)
         yield ChatEvent.message_delta_done(stop_reason="end_turn")
         yield ChatEvent.message_done()
+
+
+class _LimitedProvider(_CapturingProvider):
+    capabilities = BaseProviderCapabilities(
+        supports_system=False,
+        supports_tools=False,
+        supports_tool_choice=False,
+        supports_thinking=False,
+    )
 
 
 class _StubTool(BaseTool):
@@ -158,6 +167,31 @@ class TestDefaultToolsInjection:
         assert provider.last_req.tools is not None
         assert len(provider.last_req.tools) == 1
         assert provider.last_req.tools[0].name == "custom"
+
+
+class TestRequestNormalization:
+    async def test_strips_fields_unsupported_by_provider(self) -> None:
+        provider = _LimitedProvider("p")
+        agent = AIAgent(
+            providers={"p": provider},
+            tools={"t1": _StubTool("t1")},
+        )
+        req = ChatRequest(
+            provider_name="p",
+            messages=[Message(role="user", content="hi")],
+            system="system prompt",
+            tools=[ToolSchema(name="custom", description="custom", input_schema={"type": "object"})],
+            tool_choice={"type": "tool", "name": "custom"},
+            thinking={"type": "enabled"},
+        )
+
+        _ = [ev async for ev in agent.run_chat(req)]
+
+        assert provider.last_req is not None
+        assert provider.last_req.system is None
+        assert provider.last_req.tools is None
+        assert provider.last_req.tool_choice is None
+        assert provider.last_req.thinking is None
 
 
 # ---------------------------------------------------------------------------

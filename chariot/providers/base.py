@@ -38,6 +38,16 @@ class BaseProviderConfig:
     model: str
 
 
+@dataclass(frozen=True)
+class BaseProviderCapabilities:
+    """Provider ability flags used by AIAgent request normalization."""
+
+    supports_system: bool = True
+    supports_tools: bool = True
+    supports_tool_choice: bool = True
+    supports_thinking: bool = True
+
+
 class BaseProvider(ABC):
     """Provider 抽象基类。
 
@@ -70,6 +80,7 @@ class BaseProvider(ABC):
     """
 
     config: BaseProviderConfig
+    capabilities: BaseProviderCapabilities = BaseProviderCapabilities()
 
     @classmethod
     @abstractmethod
