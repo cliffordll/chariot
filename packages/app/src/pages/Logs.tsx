@@ -10,23 +10,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api, type LogOut } from "@/lib/api";
+import { api, type LogEntry } from "@/lib/api";
 
 const PAGE_SIZE = 50;
 
 export default function Logs() {
-  const [items, setItems] = useState<LogOut[] | null>(null);
+  const [items, setItems] = useState<LogEntry[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
 
   const load = useCallback(async (opts: { offset: number }) => {
     setLoadErr(null);
     try {
-      const list = await api.listLogs({
+      const { logs } = await api.listLogs({
         limit: PAGE_SIZE,
         offset: opts.offset,
       });
-      setItems(list);
+      setItems(logs);
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
       setItems([]);
@@ -69,7 +69,7 @@ export default function Logs() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-44">created_at</TableHead>
-                <TableHead>model</TableHead>
+                <TableHead>provider</TableHead>
                 <TableHead className="w-24">status</TableHead>
                 <TableHead className="w-20 text-right">latency</TableHead>
                 <TableHead className="w-24 text-right">in→out</TableHead>
@@ -83,7 +83,7 @@ export default function Logs() {
                     {formatDate(entry.created_at)}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
-                    {entry.model ?? "-"}
+                    {entry.provider ?? "-"}
                   </TableCell>
                   <TableCell>{statusBadge(entry.status)}</TableCell>
                   <TableCell className="text-right font-mono text-xs">

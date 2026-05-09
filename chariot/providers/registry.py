@@ -1,15 +1,12 @@
-"""Provider 注册表(0.6.0+)。
-
-替代 0.5.0 `chariot/server/model/registry.py` 的 `ModelRegistry`。
+"""Provider 注册表。
 
 注册表是**类承载的单例**(ClassVar 字典挂在类上),不是模块级可变变量
 (CLAUDE.md ⭐ 规则 2)。`register` / `build` / `known_types` 都是
 classmethod。
 
-`build(type_name, options)` 接两个原始参数,**不依赖 `ModelEntry`** —— 让
-`chariot/providers/` 不反向 import `chariot/server/config.py`(过渡期保留
-解耦)/ 0.6.0 S.4 后的 `chariot/agent/config.py`。AIAgent 装载时拆 ModelEntry:
-`registry.build(entry.type, entry.options)`。
+`build(type_name, options)` 接两个原始参数,**不依赖 `ProviderEntry`** ——
+让 `chariot/providers/` 不反向 import `chariot/agent/config.py`,保持单向解耦。
+AIAgent 装载时拆 `ProviderEntry`:`registry.build(entry.type, entry.options)`。
 """
 
 from __future__ import annotations

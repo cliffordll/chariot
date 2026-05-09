@@ -1,21 +1,21 @@
 """ConvoLockManager — 同 convo_id 的并发写串行化。
 
-**双层锁(0.6.0+)**:
+**双层锁**:
 
 - **进程内**:`asyncio.Lock` per convo_id —— 同进程内同 convo 串行
 - **跨进程**:SQLite `BEGIN IMMEDIATE` 短事务
   (`ConvoRepo.with_advisory_lock`) —— 多进程同 convo 串行写
 
-旧 0.5.0 只有进程内锁(单 server 进程模式);0.6.0 库化后多 surface 进程
-(CLI + Gateway + sidecar)可能同时写同 convo,加 SQLite 层保护。
+库化后多 surface 进程(CLI + Gateway + sidecar)可能同时写同 convo,
+靠 SQLite 层保护跨进程互斥。
 
 设计取舍
 --------
 - **进程内 in-memory `asyncio.Lock`**:async 协程在事件循环里串行,asyncio.Lock
   足够。timeout 走 `asyncio.wait_for`,超时 → `ConvoLockTimeout(layer="local")`
-  (0.6.0+)/ `ServiceError(503)`(0.5.0 兼容,过渡期)
-- **DB-level lock(SQLite BEGIN IMMEDIATE)**:多进程并发触发;0.6.0 新增。
-  实现见 `ConvoRepo.with_advisory_lock`(短事务 + busy_timeout 重试)
+- **DB-level lock(SQLite BEGIN IMMEDIATE)**:多进程并发触发;实现见
+  `ConvoRepo.with_advisory_lock`(短事务 + busy_timeout 重试),超时 →
+  `ConvoLockTimeout(layer="db")`
 
 封装
 ----
@@ -32,7 +32,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, ClassVar
 
-from chariot.server.service.exceptions import ServiceError
+from chariot.agent.exceptions import ConvoLockTimeout
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,18 +45,17 @@ class ConvoLockManager:
 
     用法::
 
-        # 单进程模式(0.5.0 行为,过渡期 server/ 调用)
+        # 单层模式(进程内锁,无跨进程保护)
         async with ConvoLockManager.acquire(convo_id):
             # critical section
 
-        # 双层模式(0.6.0+,AIAgent / AgentLoop 调用)
+        # 双层模式(AIAgent / AgentLoop 调用)
         async with ConvoLockManager.acquire(convo_id, db_session=session):
             # critical section(进程内锁 + DB advisory 都持有)
 
     错误形态:
-    - 进程内锁超时 → `ServiceError(503, "convo_busy")`(0.5.0 行为,
-      过渡期保留;controller 层期望此异常)
-    - DB 锁超时 → `ConvoLockTimeout(layer="db")`(0.6.0 新)
+    - 进程内锁超时 → `ConvoLockTimeout(layer="local")`
+    - DB 锁超时   → `ConvoLockTimeout(layer="db")`
     """
 
     _locks: ClassVar[dict[str, asyncio.Lock]] = {}
@@ -72,8 +71,8 @@ class ConvoLockManager:
     ) -> AsyncGenerator[None]:
         """获取 convo_id 对应锁;async with 块结束时自动释放。
 
-        - `db_session=None`:仅进程内锁(0.5.0 行为)
-        - `db_session` 非空:进程内 + SQLite advisory 双层(0.6.0+ 行为)
+        - `db_session=None`:仅进程内锁
+        - `db_session` 非空:进程内 + SQLite advisory 双层
         """
         if timeout_s is None:
             timeout_s = cls._read_timeout_env()
@@ -88,10 +87,9 @@ class ConvoLockManager:
         try:
             await asyncio.wait_for(lock.acquire(), timeout=timeout_s)
         except TimeoutError as e:
-            raise ServiceError(
-                status=503,
-                code="convo_busy",
-                message=(f"convo {convo_id} 锁等待超时({timeout_s}s),另一个客户端正在写,稍后重试"),
+            raise ConvoLockTimeout(
+                f"convo {convo_id} 锁等待超时({timeout_s}s),另一个客户端正在写,稍后重试",
+                layer="local",
             ) from e
 
         try:

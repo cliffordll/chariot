@@ -1,98 +1,80 @@
 /**
- * chariot server admin API 薄封装。
+ * Chariot 前端 API 层(0.6.5 S.10 起 · stdio JSON-RPC)。
  *
- * - 浏览器 / vite dev:相对路径 `/admin/*` + vite.config proxy 转到 server
- * - Tauri 壳内:webview origin 是 `https://tauri.localhost`,与 server 的
- *   `http://127.0.0.1:<port>` 跨 origin → 启动时 invoke `get_server_url`
- *   拿 base URL,之后所有 fetch 都 prepend
- * - 类型手写,对齐 `chariot/server/controller/*.py` 的 Pydantic schema
+ * 跟 0.5.0 的差异:
+ * - 撤所有 `fetch("/admin/...")` HTTP 调用 + endpoint.json 解析
+ * - 改走 Tauri `invoke("rpc", { method, params })` → Rust JsonRpcClient → sidecar
+ * - 类型对齐 `chariot/sidecar/methods/*.py` 各 method 的 wire payload(不再对齐
+ *   旧 `chariot/server/controller/*.py` Pydantic schema)
+ * - 字段命名 0.6.0 rename:
+ *   - `Conversation` → `Convo`,接口的 `conversations` → `convos`
+ *   - `Model` 概念整体 rename `Provider`(`listModels` → `listProviders` 等)
+ *   - `LogOut.model` → `LogEntry.provider`
+ *   - `Message.model_name` → `provider_name`
  *
- * 0.3.1 路由模型重构:active 概念删除;client 在 body.model 写 entry name
- * 直接路由,server 不再持有 active 状态。
+ * RPC method 名(对齐 sidecar `register_methods`,详 `chariot/sidecar/methods/__init__.py`):
+ *   chat / list_convos / get_convo / rename_convo / delete_convo /
+ *   list_tools / enable_tool / disable_tool / config_tool /
+ *   list_providers / add_provider / edit_provider / delete_provider / probe_provider /
+ *   list_logs
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-export interface StatusResponse {
-  version: string;
-  uptime_ms: number;
-  /** 0.3.1 起返已注册 entries 数量(active 退役)。 */
-  entries_count: number;
-  /** 0.4.0 加。Agent 当前 enabled tools 数(Agent.tools 字典 len)。 */
-  tools_enabled: number;
-  /** 0.4.0 加。DB 里 conversations 总数。 */
-  conversations_count: number;
-  /** 客户端抵达 server 的 base URL(含 scheme + host + port)。 */
-  url: string;
+// ============================================================
+// RPC 通用层
+// ============================================================
+
+/** RPC 协议错误(对应 Rust `RpcError`)。 */
+export class RpcError extends Error {
+  /** JSON-RPC 错误码;具体值见 `chariot.rpc.jsonrpc.JsonRpcServer.ERR_*`。 */
+  code: number;
+
+  constructor(code: number, message: string) {
+    super(`rpc ${code}: ${message}`);
+    this.name = "RpcError";
+    this.code = code;
+  }
 }
 
-/** `GET /admin/logs` 单条。对齐 `chariot.server.controller.logs.LogOut`。 */
-export interface LogOut {
-  id: string;
-  created_at: string;
-  model: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  latency_ms: number | null;
-  status: string;
-  error: string | null;
+/**
+ * Tauri `invoke("rpc", ...)` 薄封装。
+ *
+ * `params` 推 sidecar 时序列化为 JSON object;返 server response.result。
+ * RpcError 走 Tauri error 通道传上来,这里 unwrap 成 `RpcError` 实例 throw。
+ */
+export async function rpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  try {
+    return await invoke<T>("rpc", { method, params });
+  } catch (e) {
+    // Tauri 把 RpcError(serde Serialize)序成 `{ Server: { code, message } }` 形态
+    if (typeof e === "object" && e !== null && "Server" in e) {
+      const inner = (e as { Server: { code: number; message: string } }).Server;
+      throw new RpcError(inner.code, inner.message);
+    }
+    if (typeof e === "object" && e !== null && "SidecarExited" in e) {
+      const reason = (e as { SidecarExited: string }).SidecarExited;
+      throw new RpcError(-1, `sidecar exited: ${reason}`);
+    }
+    if (typeof e === "string") throw new Error(e);
+    throw e;
+  }
 }
 
-export interface ListLogsParams {
-  limit?: number;
-  offset?: number;
-  /** polling 游标:只取 `created_at > since` 的记录(ISO 8601)。 */
-  since?: string;
-}
+// ============================================================
+// 类型(对齐 chariot/sidecar/methods/* 的 wire payload)
+// ============================================================
 
-/** `GET /admin/models` 响应。对齐 `chariot.server.controller.models.ModelsListResponse`。 */
-export interface ModelsListResponse {
-  /** entry name 列表(0.2.x 兼容字段)。 */
-  available: string[];
-  /** ModelRegistry 已注册的 type key 列表(mock / anthropic / ...)。 */
-  types: string[];
-  /** 完整 entries(name / type / options / params)。 */
-  entries: ModelEntry[];
-}
-
-/** 探针失败时的错误结构。对齐 `chariot.server.service.model_prober.ProbeError`。 */
-export interface ProbeError {
-  /** "config_error" | "upstream_auth_failed" | "upstream_unreachable" | "upstream_timeout" | "upstream_server_error" | ... */
-  code: string;
-  message: string;
-}
-
-/** `POST /admin/models/{name}/probe` 响应。对齐 `chariot.server.service.model_prober.ProbeResult`。 */
-export interface ProbeResult {
-  ok: boolean;
-  latency_ms: number;
-  error: ProbeError | null;
-}
-
-/** `models` 表 CRUD 接口的 entry payload(对齐 `EntryResponse`)。 */
-export interface ModelEntry {
-  name: string;
-  type: string;
-  /** 按 type schema 形态的 dict;build Model 实例所需(model / api_key / ...)。 */
-  options: Record<string, unknown>;
-  /** 0.3.1 加。runtime 默认 sampling 参数(temperature / top_p / max_tokens 等);前端切到该 entry 时填充 Chat 高级参数面板。 */
-  params: Record<string, unknown>;
-}
-
-// =====================================================================
-// 0.4.0:Conversation + Tool
-// =====================================================================
-
-/** 对齐 `chariot.server.controller.conversations.ConversationOut`。 */
-export interface Conversation {
+/** 对齐 `chariot.sidecar.methods.convo._ConvoMethods._serialize`。 */
+export interface Convo {
   id: string;
   title: string | null;
-  /** 派生:最后一轮 assistant 用的 model entry name。 */
+  /** 派生:最后一轮 assistant 用的 provider entry name。 */
   last_model: string | null;
-  message_count: number;
   /** ISO 8601 datetime。 */
   created_at: string;
   updated_at: string;
+  message_count: number;
 }
 
 /** Anthropic content block(text / tool_use / tool_result / 其它);content
@@ -108,228 +90,415 @@ export type AnthropicBlock =
     }
   | { type: string; [key: string]: unknown };
 
-/** 对齐 `chariot.server.controller.conversations.MessageOut`。 */
+/** convo 内一条消息(`get_convo` 返的 `messages[]`,Anthropic 协议形态)。
+ *
+ *  0.5.0 时 Message 还含 `seq` / `created_at` / `model_name`,0.6.5 sidecar
+ *  返的 `messages[]` 只有 `{role, content}`。这里把老字段标 optional,老 page
+ *  仍能 read(undefined),0.7.0+ 加回完整字段时再变 required。
+ */
 export interface Message {
-  seq: number;
   role: "user" | "assistant";
   content: string | AnthropicBlock[];
-  /** 仅 role='assistant' 行非空,记本轮用的 entry name。 */
-  model_name: string | null;
-  created_at: string;
+  /** 0.5.0 字段:`messages.seq`(单调 0 起);0.6.5 sidecar 不返。 */
+  seq?: number;
+  /** 0.5.0 字段:ISO datetime;0.6.5 sidecar 不返。 */
+  created_at?: string;
+  /** 0.5.0 字段(老命名 model_name);0.6.5 sidecar 不返。仅 role='assistant' 行非空。 */
+  model_name?: string | null;
+  /** 0.6.0 重命名 `model_name` → `provider_name`;同样 0.6.5 sidecar 不返。 */
+  provider_name?: string | null;
 }
 
-/** `GET /admin/conversations`。 */
-export interface ConversationsListResponse {
-  items: Conversation[];
-  limit: number;
-  offset: number;
-}
-
-/** `GET /admin/conversations/{id}`。 */
-export interface ConversationDetail {
-  conversation: Conversation;
-  messages: Message[];
-}
-
-/** 对齐 `chariot.server.controller.tools.ToolOut`。 */
+/** 对齐 `chariot.sidecar.methods.tool._ToolMethods._serialize`。 */
 export interface Tool {
   name: string;
   type: string;
   enabled: boolean;
   options: Record<string, unknown>;
-  /** anthropic tool definition JSON;options 不合法时为 null。 */
-  schema_: Record<string, unknown> | null;
+  /** 0.5.0 字段:Anthropic tool definition JSON。0.6.5 sidecar 不返(0.7.0+ 加),
+   *  老 page 仍读这字段,这里固定 undefined / null,UI 显示"schema not available"。 */
+  schema_?: Record<string, unknown> | null;
 }
 
-/** `GET /admin/tools`。 */
-export interface ToolsListResponse {
-  /** ToolRegistry.known_types()。 */
-  types: string[];
-  entries: Tool[];
+/** 对齐 `chariot.sidecar.methods.provider._ProviderMethods._serialize`(加 default 字段)。 */
+export interface Provider {
+  name: string;
+  type: string;
+  options: Record<string, unknown>;
+  params: Record<string, unknown>;
+  /** 仅 `list_providers` 返的列表项有此字段(单个 entry 的 `_serialize` 不带)。 */
+  default?: boolean;
 }
 
-export class ApiError extends Error {
-  status: number;
-  body: string;
-
-  constructor(status: number, body: string) {
-    super(`HTTP ${status}: ${body.slice(0, 200)}`);
-    this.name = "ApiError";
-    this.status = status;
-    this.body = body;
-  }
+/** 探针失败时的错误结构。 */
+export interface ProbeError {
+  code: string;
+  message: string;
 }
 
-/** Tauri 壳内 true / vite dev 浏览器 false。 */
-function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+/** 对齐 `probe_provider` 返。 */
+export interface ProbeResult {
+  ok: boolean;
+  latency_ms: number;
+  error: ProbeError | null;
 }
 
-let basePromise: Promise<string> | null = null;
-
-/** 解析 server base URL。Tauri 内 invoke `get_server_url`;浏览器返 ""(走 vite proxy)。
- *  失败(endpoint.json 未写)会抛,调用方照常展示错误。 */
-export async function apiBase(): Promise<string> {
-  if (!inTauri()) return "";
-  if (!basePromise) {
-    basePromise = invoke<string>("get_server_url")
-      .then((url) => url.replace(/\/$/, ""))
-      .catch((e) => {
-        basePromise = null; // 失败不缓存,允许重试
-        throw e;
-      });
-  }
-  return basePromise;
+/** 对齐 `chariot.sidecar.methods.log._LogMethods._serialize`。 */
+export interface LogEntry {
+  id: string;
+  provider: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number | null;
+  status: string;
+  error: string | null;
+  created_at: string;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = await apiBase();
-  const resp = await fetch(base + path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new ApiError(resp.status, text);
-  }
-  if (resp.status === 204) return undefined as T;
-  return (await resp.json()) as T;
+/** `list_logs` 参数(0.6.5 sidecar);limit 默认 100,上限 1000。 */
+export interface ListLogsParams {
+  limit?: number;
+  offset?: number;
+  /** ISO 8601 datetime,严格大于(polling 游标)。 */
+  since?: string;
+  until?: string;
 }
 
-export const api = {
-  ping(): Promise<{ ok: boolean }> {
-    return request("/admin/ping");
-  },
-  status(): Promise<StatusResponse> {
-    return request("/admin/status");
-  },
-  listLogs(params: ListLogsParams = {}): Promise<LogOut[]> {
-    const q = new URLSearchParams();
-    if (params.limit !== undefined) q.set("limit", String(params.limit));
-    if (params.offset !== undefined) q.set("offset", String(params.offset));
-    if (params.since) q.set("since", params.since);
-    const qs = q.toString();
-    return request(`/admin/logs${qs ? "?" + qs : ""}`);
-  },
-  listModels(): Promise<ModelsListResponse> {
-    return request("/admin/models");
-  },
-  /**
-   * 对指定 model 跑一次探针。**真打上游一次,消耗 ~1 token 费用**(MockModel 零费用)。
-   * name 不存在 → 404 ApiError;其它情况服务端一律包成 ProbeResult,error=null 表示通。
-   */
-  probeModel(name: string): Promise<ProbeResult> {
-    return request(`/admin/models/${encodeURIComponent(name)}/probe`, {
-      method: "POST",
-    });
+// ============================================================
+// API surface
+// ============================================================
+
+/**
+ * `api.X(...)` 形态保留(给 page 层调用),内部走 RPC。
+ *
+ * **这一层就是 RPC 命名翻译 + 强类型** — 0.6.5 sidecar method 名是 snake_case
+ * (`list_convos` / `add_provider`),前端按 camelCase 暴露(`listConvos` /
+ * `addProvider`)。
+ */
+const apiCore = {
+  // ---------- convos ----------
+
+  listConvos(): Promise<{ convos: Convo[] }> {
+    return rpc("list_convos");
   },
 
-  // ---------- entries CRUD(0.3.0)----------
+  getConvo(convo_id: string): Promise<{ convo: Convo; messages: Message[] }> {
+    return rpc("get_convo", { convo_id });
+  },
 
-  /**
-   * 新建 entry。错误:`name_exists` 409 / `unknown_type` 400 / `bad_request` 400。
-   */
-  createModel(req: {
+  renameConvo(convo_id: string, title: string | null): Promise<{ convo: Convo }> {
+    return rpc("rename_convo", { convo_id, title });
+  },
+
+  deleteConvo(convo_id: string): Promise<{ deleted: string }> {
+    return rpc("delete_convo", { convo_id });
+  },
+
+  // ---------- tools ----------
+
+  listTools(): Promise<{ tools: Tool[] }> {
+    return rpc("list_tools");
+  },
+
+  enableTool(name: string): Promise<{ tool: Tool }> {
+    return rpc("enable_tool", { name });
+  },
+
+  disableTool(name: string): Promise<{ tool: Tool }> {
+    return rpc("disable_tool", { name });
+  },
+
+  configTool(name: string, options: Record<string, unknown>): Promise<{ tool: Tool }> {
+    return rpc("config_tool", { name, options });
+  },
+
+  // ---------- providers ----------
+
+  listProviders(): Promise<{ providers: Provider[] }> {
+    return rpc("list_providers");
+  },
+
+  addProvider(req: {
     name: string;
     type: string;
     options: Record<string, unknown>;
     params?: Record<string, unknown>;
-  }): Promise<ModelEntry> {
-    return request("/admin/models/entries", {
-      method: "POST",
-      body: JSON.stringify(req),
-    });
+  }): Promise<{ provider: Provider }> {
+    return rpc("add_provider", { ...req });
   },
 
-  /**
-   * 编辑 entry。改 options 后 server 立即 rebuild 该 entry 的 Model 实例;改 params
-   * 不触发 rebuild(params 只读暴露给前端用,不影响 build)。
-   * 错误:`model_not_found` 404 / `unknown_type` 400 / `rebuild_failed` 502。
-   */
-  updateModel(
+  editProvider(
     name: string,
     req: {
       type?: string;
       options?: Record<string, unknown>;
       params?: Record<string, unknown>;
     },
-  ): Promise<ModelEntry> {
-    return request(`/admin/models/entries/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify(req),
-    });
+  ): Promise<{ provider: Provider }> {
+    return rpc("edit_provider", { name, ...req });
+  },
+
+  deleteProvider(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_provider", { name });
   },
 
   /**
-   * 删 entry。0.3.1 起 active 概念删除,任意 entry 都能删。`model_not_found` 404。
+   * 对指定 provider 跑一次探针。**真打上游一次**(MockProvider 零费用)。
+   * name 不存在 → ERR_NOT_FOUND;其它情况一律包成 ProbeResult,error=null 表示通。
    */
-  deleteModel(name: string): Promise<void> {
-    return request(`/admin/models/entries/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
+  probeProvider(name: string): Promise<ProbeResult> {
+    return rpc("probe_provider", { name });
   },
 
-  /**
-   * 复制 entry。`as` 缺省 `<name>_copy`,碰撞自动 `_copy_2 / _3`。
-   * 错误:`model_not_found` 404(src 不存在)/ `name_exists` 409(指定 as 冲突)。
-   */
-  duplicateModel(name: string, as_?: string): Promise<ModelEntry> {
-    return request(`/admin/models/entries/${encodeURIComponent(name)}/duplicate`, {
-      method: "POST",
-      body: JSON.stringify(as_ !== undefined ? { as: as_ } : {}),
-    });
+  // ---------- logs ----------
+
+  listLogs(params: ListLogsParams = {}): Promise<{ logs: LogEntry[] }> {
+    return rpc("list_logs", { ...params });
   },
+} as const;
 
-  // ---------- conversations(0.4.0)----------
+// ============================================================
+// Transition aliases(0.6.5 S.10 → S.12 之间保留;S.12 page 全切完后清)
+// ============================================================
+//
+// 0.5.0 page 大量用 listModels / listConversations / createConversation 等老
+// 命名;S.10 引 sidecar 后 RPC method 名跟着 0.6.0 rename 改。为避免一次性
+// 把 5 个 page 全改完,这里加薄 alias 层 — 老函数名内部走新 RPC。
+//
+// 已知不完美:
+// - sidecar 没有 `status` / `ping` method,这俩返 hardcoded stub(prod 真信号
+//   靠 sidecar_exited Tauri event,见 ServerStatusBanner)
+// - sidecar 没有 `create_convo` method,客户端生成 ULID 当 convo_id;首次 chat
+//   时 sidecar 自动 create
+// - sidecar 没有 `duplicate_provider`,这里用 listProviders + addProvider 客户端
+//   合成
+// - sidecar 没有 listConvos pagination,返全量,limit/offset 客户端切
 
-  listConversations(params: { limit?: number; offset?: number } = {}): Promise<ConversationsListResponse> {
-    const q = new URLSearchParams();
-    if (params.limit !== undefined) q.set("limit", String(params.limit));
-    if (params.offset !== undefined) q.set("offset", String(params.offset));
-    const qs = q.toString();
-    return request(`/admin/conversations${qs ? "?" + qs : ""}`);
-  },
+export type Conversation = Convo;
 
-  getConversation(id: string): Promise<ConversationDetail> {
-    return request(`/admin/conversations/${encodeURIComponent(id)}`);
-  },
+export interface ConversationsListResponse {
+  items: Convo[];
+  limit: number;
+  offset: number;
+}
 
-  /** 显式创建。`id` 不传 → server 生成 ULID;传了必须合法 ULID(server 会校验)。 */
-  createConversation(req: { id?: string; title?: string | null } = {}): Promise<Conversation> {
-    return request("/admin/conversations", {
-      method: "POST",
-      body: JSON.stringify(req),
-    });
-  },
+/** 0.5.0 Conversation 详情形态;0.6.5 sidecar 返 `{convo, messages}`。 */
+export interface ConversationDetail {
+  conversation: Convo;
+  /** Stub 字段:provider_name / seq / created_at 0.6.5 sidecar 不返,这里固定 null/0/"" */
+  messages: Array<Message & { provider_name: string | null; seq: number; created_at: string }>;
+}
 
-  deleteConversation(id: string): Promise<void> {
-    return request(`/admin/conversations/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-  },
+export type ModelEntry = Provider;
+/** 跟 `ModelEntry` 等价,新代码用这个名字(Provider 概念已经替代 Model)。 */
+export type ProviderEntry = Provider;
 
-  /** 改 title;`title=null` 把标题清空。 */
-  updateConversationTitle(id: string, title: string | null): Promise<Conversation> {
-    return request(`/admin/conversations/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ title }),
-    });
-  },
+export interface ModelsListResponse {
+  /** entry name 列表(0.2.x 兼容字段)。 */
+  available: string[];
+  /** ProviderRegistry 已注册的 type key 列表(mock / anthropic / ...);sidecar 暂不返,固定空数组。 */
+  types: string[];
+  entries: Provider[];
+}
+/** 跟 `ModelsListResponse` 等价,新代码用这个名字。 */
+export type ProvidersListResponse = ModelsListResponse;
 
-  // ---------- tools(0.4.0)----------
+export interface ToolsListResponse {
+  /** ToolRegistry.known_types();sidecar 暂不返,固定空数组。 */
+  types: string[];
+  entries: Tool[];
+}
 
-  listTools(): Promise<ToolsListResponse> {
-    return request("/admin/tools");
-  },
+export type LogOut = LogEntry;
 
-  /** 改 enabled / options。两者都 None → no-op(server 仍触发 Agent rebuild)。 */
-  updateTool(
+/** 老 ApiError(0.5.0 HTTP 错);S.10 起统一 RpcError(老 page `instanceof ApiError` 仍工作)。 */
+export const ApiError = RpcError;
+export type ApiError = RpcError;
+
+export interface StatusResponse {
+  version: string;
+  uptime_ms: number;
+  entries_count: number;
+  tools_enabled: number;
+  conversations_count: number;
+  url: string;
+}
+
+// ---- 兼容方法挂在 api 上 ----
+// 不能用 const enum 扩展,改用 Object.assign / 直接挂
+
+interface ApiCompat {
+  listConversations: (params?: { limit?: number; offset?: number }) => Promise<ConversationsListResponse>;
+  getConversation: (id: string) => Promise<ConversationDetail>;
+  createConversation: (req?: { id?: string; title?: string | null }) => Promise<Convo>;
+  deleteConversation: (id: string) => Promise<void>;
+  updateConversationTitle: (id: string, title: string | null) => Promise<Convo>;
+  listModels: () => Promise<ModelsListResponse>;
+  probeModel: (name: string) => Promise<ProbeResult>;
+  createModel: (req: {
+    name: string;
+    type: string;
+    options: Record<string, unknown>;
+    params?: Record<string, unknown>;
+  }) => Promise<Provider>;
+  updateModel: (
     name: string,
-    req: { enabled?: boolean; options?: Record<string, unknown> },
-  ): Promise<Tool> {
-    return request(`/admin/tools/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify(req),
+    req: { type?: string; options?: Record<string, unknown>; params?: Record<string, unknown> },
+  ) => Promise<Provider>;
+  deleteModel: (name: string) => Promise<void>;
+  duplicateModel: (name: string, as_?: string) => Promise<Provider>;
+  updateTool: (name: string, req: { enabled?: boolean; options?: Record<string, unknown> }) => Promise<Tool>;
+  status: () => Promise<StatusResponse>;
+  ping: () => Promise<{ ok: true }>;
+}
+
+const apiCompat: ApiCompat = {
+  async listConversations(params = {}) {
+    const { convos } = await apiCore.listConvos();
+    const offset = params.offset ?? 0;
+    const limit = params.limit ?? convos.length;
+    return { items: convos.slice(offset, offset + limit), limit, offset };
+  },
+
+  async getConversation(id) {
+    const { convo, messages } = await apiCore.getConvo(id);
+    return {
+      conversation: convo,
+      messages: messages.map((m) => ({ ...m, provider_name: null, seq: 0, created_at: "" })),
+    };
+  },
+
+  async createConversation(req = {}) {
+    // sidecar 不暴露 create_convo;客户端生成 ULID,首次 chat 时自动创建
+    const id = req.id ?? generateUlid();
+    const now = new Date().toISOString();
+    return {
+      id,
+      title: req.title ?? null,
+      last_model: null,
+      message_count: 0,
+      created_at: now,
+      updated_at: now,
+    };
+  },
+
+  async deleteConversation(id) {
+    await apiCore.deleteConvo(id);
+  },
+
+  async updateConversationTitle(id, title) {
+    const { convo } = await apiCore.renameConvo(id, title);
+    return convo;
+  },
+
+  async listModels() {
+    const { providers } = await apiCore.listProviders();
+    return {
+      available: providers.map((p) => p.name),
+      types: [],
+      entries: providers,
+    };
+  },
+
+  probeModel(name) {
+    return apiCore.probeProvider(name);
+  },
+
+  async createModel(req) {
+    const { provider } = await apiCore.addProvider(req);
+    return provider;
+  },
+
+  async updateModel(name, req) {
+    const { provider } = await apiCore.editProvider(name, req);
+    return provider;
+  },
+
+  async deleteModel(name) {
+    await apiCore.deleteProvider(name);
+  },
+
+  async duplicateModel(name, as_) {
+    // sidecar 不暴露 duplicate_provider;客户端 list + add 合成
+    const { providers } = await apiCore.listProviders();
+    const src = providers.find((p) => p.name === name);
+    if (!src) throw new RpcError(-32001, `provider ${name} not found`);
+    const newName = (as_ ?? `${name}_copy`).trim();
+    const { provider } = await apiCore.addProvider({
+      name: newName,
+      type: src.type,
+      options: src.options,
+      params: src.params,
     });
+    return provider;
+  },
+
+  async updateTool(name, req) {
+    let last: Tool | null = null;
+    if (req.enabled !== undefined) {
+      const { tool } = req.enabled ? await apiCore.enableTool(name) : await apiCore.disableTool(name);
+      last = tool;
+    }
+    if (req.options !== undefined) {
+      const { tool } = await apiCore.configTool(name, req.options);
+      last = tool;
+    }
+    if (last === null) {
+      // 都没改:返当前状态(由 listTools 找一遍)。极少出现。
+      const { tools } = await apiCore.listTools();
+      const found = tools.find((t) => t.name === name);
+      if (!found) throw new RpcError(-32001, `tool ${name} not found`);
+      last = found;
+    }
+    return last;
+  },
+
+  async status() {
+    // sidecar 没 status method;返尽力而为的 stub(版本号客户端没法拿,占位)
+    const [{ providers }, { tools }, { convos }] = await Promise.all([
+      api.listProviders(),
+      api.listTools(),
+      api.listConvos(),
+    ]);
+    return {
+      version: "0.6.5",
+      uptime_ms: 0,
+      entries_count: providers.length,
+      tools_enabled: tools.filter((t) => t.enabled).length,
+      conversations_count: convos.length,
+      url: "stdio://sidecar",
+    };
+  },
+
+  async ping() {
+    // 通过 listTools 试探一次 RPC 通道(成功 = sidecar 在跑);失败由 caller catch
+    await apiCore.listTools();
+    return { ok: true };
   },
 };
+
+// 合并 core + compat 暴露给 page 层。运行时是单一对象,类型是两个的交集。
+export const api: typeof apiCore & ApiCompat = { ...apiCore, ...apiCompat };
+
+/**
+ * 客户端 ULID 生成 — 26 字符 Crockford-Base32(time + random)。
+ *
+ * 0.6.5 S.10 起 sidecar 不暴露 `create_convo`,新建 convo 走"客户端生成 id +
+ * 首次 chat 自动 ensure_exists"。简化版实现,不必跟服务端 ULID 严格一致,
+ * 只要符合正则 `^[0-9A-Z]{26}$`(server 端校验)即可。
+ */
+function generateUlid(): string {
+  const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford(去掉 I L O U)
+  const time = Date.now();
+  let timePart = "";
+  let t = time;
+  for (let i = 0; i < 10; i++) {
+    timePart = ALPHABET[t % 32] + timePart;
+    t = Math.floor(t / 32);
+  }
+  let randPart = "";
+  for (let i = 0; i < 16; i++) {
+    randPart += ALPHABET[Math.floor(Math.random() * 32)];
+  }
+  return timePart + randPart;
+}

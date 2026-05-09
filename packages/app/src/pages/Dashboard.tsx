@@ -129,11 +129,13 @@ export default function Dashboard() {
       {state.kind === "err" && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6">
           <div className="mb-2 flex items-center gap-2">
-            <Badge variant="destructive">server unreachable</Badge>
+            <Badge variant="destructive">sidecar unreachable</Badge>
           </div>
           <p className="mb-3 text-sm text-muted-foreground">
-            先跑 <code className="rounded bg-muted px-1.5 py-0.5">chariot start</code>,或设置{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5">VITE_API_URL</code> 环境变量后重启 vite。
+            sidecar 子进程未启动或已退出。Tauri 桌面端正常情况下会自动 spawn{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5">chariot-sidecar</code>;
+            纯浏览器调试(<code className="rounded bg-muted px-1.5 py-0.5">vite dev</code>)
+            下没有 sidecar,Dashboard 数据访问层会失败。
           </p>
           <p className="text-xs text-muted-foreground">{state.message}</p>
         </div>
@@ -160,7 +162,7 @@ export default function Dashboard() {
               }
             />
             <Stat
-              label="server url"
+              label="sidecar"
               value={
                 <code className="break-all font-mono text-sm">
                   {state.status.url || "(unknown)"}
@@ -171,22 +173,22 @@ export default function Dashboard() {
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <Link
-              to="/models"
+              to="/providers"
               className="text-muted-foreground underline-offset-2 hover:underline"
             >
-              模型管理 →
+              Providers →
             </Link>
             <Link
               to="/tools"
               className="text-muted-foreground underline-offset-2 hover:underline"
             >
-              工具管理 →
+              Tools →
             </Link>
             <Link
               to="/chat"
               className="text-muted-foreground underline-offset-2 hover:underline"
             >
-              对话 →
+              Chat →
             </Link>
           </div>
         </>

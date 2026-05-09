@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
+from chariot.agent.exceptions import ProviderError
 
 if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
@@ -80,14 +81,21 @@ class AgentLoop:
             stop_reason: str | None = None
             saw_error = False
 
-            async for event in self._provider.generate(current_req):
-                yield event
-                self._buffer_event(assistant_blocks, tool_use_inputs, event)
-                if event.kind == "message_delta":
-                    stop_reason = self._extract_stop_reason(event.delta)
-                if event.kind == "error":
-                    saw_error = True
-                    return
+            try:
+                async for event in self._provider.generate(current_req):
+                    yield event
+                    self._buffer_event(assistant_blocks, tool_use_inputs, event)
+                    if event.kind == "message_delta":
+                        stop_reason = self._extract_stop_reason(event.delta)
+                    if event.kind == "error":
+                        saw_error = True
+                        return
+            except ProviderError as e:
+                # 200 前抛的 ProviderError(契约见 DESIGN §6.4.2):转 error event
+                # yield 给 surface,流终结。200 后的错由 Provider 自己 yield error
+                # event(走上面 saw_error 分支),不会到这。
+                yield ChatEvent.error_event(error_type=e.code, error_message=e.message)
+                return
 
             if saw_error:
                 return  # provider 已 yield error,流终结

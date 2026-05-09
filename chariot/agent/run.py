@@ -1,19 +1,15 @@
-"""AIAgent — 0.6.0 内核主入口。
-
-替代 0.5.0 `chariot/server/agent.py` 的 `Agent` 类(`Agent` → `AIAgent`,
-明确"AI 主体" vs 一般意义"代理 / 客户端")。
+"""AIAgent — 内核主入口。
 
 职责:
-1. 持有 `name → BaseProvider` 实例字典(从 DB models 表装载)
+1. 持有 `name → BaseProvider` 实例字典(从 DB providers 表装载)
 2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
 3. `run(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
 
-差异(vs 0.5.0 Agent):
-- 输入:`ChatRequest`(typed,跟 Claude API 1:1)而非 raw bytes
-- 输出:`AsyncIterator[ChatEvent]`(协议无关)而非 fastapi `Response`
-- **撤 fast / slow path 二分**:0.6.0 全部走 streaming AgentLoop
+接口契约:
+- 输入:`ChatRequest`(typed,跟 Claude API 1:1)
+- 输出:`AsyncIterator[ChatEvent]`(协议无关,纯流式)
 - 错误传播:全部转 `ChatEvent(kind="error", error_type=...)` yield 给 surface
-  (上层 server / sidecar / CLI 各自映射成自己的错误形态)
+  (CLI / sidecar / Gateway 各自映射成自己的错误形态)
 
 详见 `docs/DESIGN.md` §6.1。
 

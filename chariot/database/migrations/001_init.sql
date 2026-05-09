@@ -1,5 +1,5 @@
 -- Chariot schema v1 · 初始化
--- 和 chariot/server/database/models.py 的 ORM 声明保持字段对齐
+-- 和 chariot/database/models.py 的 ORM 声明保持字段对齐
 -- 执行时机:DB 文件首次创建 / PRAGMA user_version = 0 时由 session.init_db() 调用
 --
 -- v0 架构:server 自己就是智能体 (agent),没有上游代理概念。只有一张 `logs` 表,

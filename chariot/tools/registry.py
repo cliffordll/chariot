@@ -7,7 +7,7 @@
 使用
 ----
 1. 在 tool 类上实现 `create(entry) -> Self` classmethod
-2. 在 `chariot/server/tool/__init__.py` 显式注册:
+2. 在 `chariot/tools/__init__.py` 显式注册:
 
    ```python
    ToolRegistry.register("read_file", ReadFileTool)
@@ -57,7 +57,7 @@ class ToolRegistry:
 
         - type 重复 → `ValueError`
         - `tool_cls` 静态保证是 `type[BaseTool]`,`create` 必有
-        - 调用时机:`chariot/server/tool/__init__.py` 模块加载阶段集中调用
+        - 调用时机:`chariot/tools/__init__.py` 模块加载阶段集中调用
         """
         if type_name in cls._builders:
             raise ValueError(f"重复注册 tool type: {type_name!r}")

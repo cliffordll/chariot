@@ -2,20 +2,20 @@
 
 用法
 ----
-默认打两个 exe:
+默认打 sidecar + cli:
     uv run --group build python scripts/build.py
 
 只打其一:
-    uv run --group build python scripts/build.py --target server
+    uv run --group build python scripts/build.py --target sidecar
     uv run --group build python scripts/build.py --target cli
 
 打完自动同步 sidecar 到 Tauri(packages/desktop/tauri/binaries/):
-    uv run --group build python scripts/build.py --target server --sync-sidecar
+    uv run --group build python scripts/build.py --target sidecar --sync-sidecar
 
 产物
 ----
-    dist/chariot-server.exe
-    dist/chariot.exe
+    dist/chariot-sidecar.exe   (Tauri sidecar,stdio JSON-RPC)
+    dist/chariot.exe           (CLI)
 
 中间产物落在 `build/work/<spec-name>/`(.gitignore 已覆盖),不污染 spec 源目录。
 """
@@ -35,9 +35,12 @@ _WORK_DIR = _BUILD_DIR / "work"
 
 _TARGETS: dict[str, tuple[str, str]] = {
     # key → (spec 文件名, 最终 exe 名 · 用于打印和产物校验)
-    "server": ("chariot-server.spec", "chariot-server.exe"),
+    "sidecar": ("chariot-sidecar.spec", "chariot-sidecar.exe"),
     "cli": ("chariot.spec", "chariot.exe"),
 }
+
+# `--target all` 默认打哪几个
+_DEFAULT_TARGETS: tuple[str, ...] = ("sidecar", "cli")
 
 
 def _run_pyinstaller(spec_name: str) -> None:
@@ -74,7 +77,7 @@ def _report(exe_name: str) -> None:
 
 
 def _sync_sidecar() -> None:
-    """调 packages/desktop/scripts/sync-sidecar.mjs 同步 server.exe 到 Tauri 期待位置。"""
+    """调 packages/desktop/scripts/sync-sidecar.mjs 同步 sidecar.exe 到 Tauri 期待位置。"""
     script = _REPO_ROOT / "packages" / "desktop" / "scripts" / "sync-sidecar.mjs"
     if not script.exists():
         raise RuntimeError(f"sync-sidecar 脚本不存在:{script}")
@@ -93,20 +96,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="PyInstaller 打包驱动")
     parser.add_argument(
         "--target",
-        choices=["server", "cli", "all"],
+        choices=["sidecar", "cli", "all"],
         default="all",
-        help="打哪个;默认全打",
+        help="打哪个;all = sidecar + cli",
     )
     parser.add_argument(
         "--sync-sidecar",
         action="store_true",
-        help="打完后把 dist/chariot-server.exe 同步到 packages/desktop/tauri/binaries/",
+        help="打完后把 dist/chariot-sidecar.exe 同步到 packages/desktop/tauri/binaries/",
     )
     args = parser.parse_args()
 
-    targets: list[str] = ["server", "cli"] if args.target == "all" else [args.target]
+    targets: list[str] = list(_DEFAULT_TARGETS) if args.target == "all" else [args.target]
 
-    # 只清要重打的 exe,不动另一个 target(`--target cli` 不应波及 server.exe)
+    # 只清要重打的 exe,不动另一个 target
     for t in targets:
         stale = _DIST_DIR / _TARGETS[t][1]
         if stale.exists():
@@ -121,9 +124,9 @@ def main() -> int:
         _report(_TARGETS[t][1])
 
     if args.sync_sidecar:
-        if "server" not in targets:
+        if "sidecar" not in targets:
             print(
-                "[build] --sync-sidecar 被忽略(未打 server target)",
+                "[build] --sync-sidecar 被忽略(未打 sidecar target)",
                 file=sys.stderr,
             )
         else:

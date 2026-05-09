@@ -4,12 +4,10 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-import { chariotProxy } from "./vite-plugin-chariot-proxy";
-
-// /admin + /v1 的转发交给 `chariotProxy` 插件(per-request 动态读 endpoint.json);
-// 不用 server.proxy,避免 vite 启动时固化 target 后 server 换端口就 502。
+// 0.6.5 起前端走 Tauri.invoke / event.listen,不再有 HTTP 转发。Vite 仅用于
+// 给 Tauri devURL 或纯 UI 调试服务静态资源 + HMR。
 export default defineConfig(() => ({
-  plugins: [react(), tailwindcss(), chariotProxy()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

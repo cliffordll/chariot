@@ -1,11 +1,8 @@
 """ProviderProber —— 对配置 entry 跑一次最小请求,判断该 provider 是否真能工作。
 
-替代 0.5.0 `chariot/server/service/model_prober.py` 的 `ModelProber`。差异:
-
-- 输入:`ProviderEntry`(沿用 0.5.0 数据形态)
-- 接口:`BaseProvider.generate` 流式,**不再用 0.5.0 的 `Model.respond(body, stream=False)`**
-  非流式接口
-- 错误体系:0.6.0 用 `ProviderError`(非 fastapi),0.5.0 是 `ServiceError`
+- 输入:`ProviderEntry`
+- 接口:`BaseProvider.generate` 流式
+- 错误体系:`ProviderError`(库化后协议无关)
 
 工作机制
 --------
@@ -29,9 +26,8 @@ MockProvider 走纯本地路径,probe 不发 HTTP、零费用。
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import ClassVar
-
-from pydantic import BaseModel
 
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.config import ProviderEntry
@@ -40,7 +36,8 @@ from chariot.providers.base import BaseProvider
 from chariot.providers.registry import ProviderRegistry
 
 
-class ProbeError(BaseModel):
+@dataclass(frozen=True, slots=True)
+class ProbeError:
     """探针失败时的错误结构。
 
     `code` 透传:
@@ -54,7 +51,8 @@ class ProbeError(BaseModel):
     message: str
 
 
-class ProbeResult(BaseModel):
+@dataclass(frozen=True, slots=True)
+class ProbeResult:
     """探针结果。`ok=True` 时 error=None;`ok=False` 时 error 必给。"""
 
     ok: bool

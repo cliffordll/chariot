@@ -1,39 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
-
-import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
-
-const POLL_INTERVAL_MS = 10_000;
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 /**
- * 全局 server 心跳:每 10s ping 一次 `/admin/ping`,失败时顶部横条提示 + 手动 Retry。
- * 用户可见的行为:
- * - 断连:红色横条滑出(顶部)
- * - 恢复:自动隐藏(不打扰)
- * - Retry:立刻再试一次 ping,不等轮询
+ * sidecar 健康提示横条(0.6.5 S.10 起)。
+ *
+ * 0.5.0 时是 polling `/admin/ping` 检测 server;0.6.5 改成监听 Tauri
+ * `sidecar_exited` event(Rust JsonRpcClient 在 sidecar 进程终止时 emit)。
+ * 正常运行时不轮询,sidecar 死了才显示横条 — 用户重启 app 让 Tauri 重新
+ * spawn sidecar(0.7.0+ 加自动重 spawn)。
  */
 export function ServerStatusBanner() {
   const [down, setDown] = useState(false);
-  const [checking, setChecking] = useState(false);
-
-  const check = useCallback(async () => {
-    setChecking(true);
-    try {
-      const { ok } = await api.ping();
-      setDown(!ok);
-    } catch {
-      setDown(true);
-    } finally {
-      setChecking(false);
-    }
-  }, []);
+  const [reason, setReason] = useState<string>("");
 
   useEffect(() => {
-    // 立即 ping 一次;之后走轮询
-    void check();
-    const id = setInterval(() => void check(), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [check]);
+    let unlisten: (() => void) | null = null;
+    void (async () => {
+      unlisten = await listen<string>("sidecar_exited", (e) => {
+        setDown(true);
+        setReason(typeof e.payload === "string" ? e.payload : "(unknown reason)");
+      });
+    })();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   if (!down) return null;
 
@@ -41,18 +32,8 @@ export function ServerStatusBanner() {
     <div className="sticky top-0 z-50 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
       <div className="mx-auto flex max-w-screen-lg items-center justify-between gap-3">
         <span>
-          <strong>Chariot server 失联。</strong> 前端暂时无法拉取数据;确认 server 仍在运行,或
-          <code className="mx-1 rounded bg-muted px-1 text-xs">chariot start</code>
-          重新拉起。
+          <strong>Chariot sidecar 已退出</strong>({reason})。重启 app 恢复服务。
         </span>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void check()}
-          disabled={checking}
-        >
-          {checking ? "Retrying…" : "Retry"}
-        </Button>
       </div>
     </div>
   );

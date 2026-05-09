@@ -1,14 +1,12 @@
 /**
- * Chat 页核心:历史消息 → Anthropic Messages 请求体 → 一轮流式调用。
+ * Chat 页核心:历史消息 → 一次 chat RPC → typed StreamEvent 回流(0.6.5 S.10 起)。
  *
- * 0.2.0 起 chariot 单协议化(只接 `/v1/messages`),client 不再持 `fmt`;
- * 历史只存纯文本 `{role, content}[]`,server 端 `Agent` 决定用哪个 Model 实现。
+ * 跟 0.5.0 SSE 路径的差异:
+ * - 不再调 `/v1/messages` HTTP,改 RPC `chat(provider_name, messages, ...)`
+ * - SSE 解析逻辑住 `streams.ts` 的 `runChatTurn`,这层只组 ChatRequest 调它
  */
 
-import { apiBase } from "@/lib/api";
-import { ChatStream, type StreamEvent } from "@/lib/streams";
-
-const MESSAGES_PATH = "/v1/messages";
+import { runChatTurn, type ChatRequest, type StreamEvent } from "@/lib/streams";
 
 export interface ChatTurnMsg {
   role: "user" | "assistant";
@@ -16,8 +14,14 @@ export interface ChatTurnMsg {
 }
 
 export interface ChatTurnOpts {
-  /** 仅用于 `body.model` 字段(server 会按 active config 改写;影响 `logs.model` 显示)。 */
-  model: string;
+  /** Provider entry name(对齐 sidecar `chat.provider_name`)。 */
+  provider: string;
+  /** 可选 LLM model id 覆盖(per-call,详见 chat_request.py model 字段)。 */
+  model?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.base_url。空字符串 / null = 不覆盖。 */
+  baseUrl?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.api_key。空字符串 / null = 不覆盖。 */
+  apiKey?: string | null;
   maxTokens: number;
   /**
    * Anthropic 采样参数。两者默认 1.0(等同不调);只在 ≠ 1 时才发到 body,以遵循
@@ -25,14 +29,9 @@ export interface ChatTurnOpts {
    */
   temperature?: number;
   topP?: number;
-  /** 0.4.0 加。非空时通过 `X-Chariot-Conversation` header 带去,server 据此追加 messages。 */
-  conversationId?: string | null;
+  /** 0.4.0 加。stateful 多轮 convo id;非空时 sidecar 接续历史。 */
+  convoId?: string | null;
   signal: AbortSignal;
-  /**
-   * 0.5.0:typed StreamEvent 回调(text / tool_use / tool_result / turn_complete /
-   * stream_done)。caller 用 ev.kind 分派;text 用于逐 token 累积,tool_use /
-   * tool_result 用于渐进 append blocks 卡片。
-   */
   onEvent: (ev: StreamEvent) => void;
 }
 
@@ -45,90 +44,65 @@ export interface ChatTurnResult {
 }
 
 export class ChatError extends Error {
-  status: number;
-  body: string;
-  constructor(status: number, body: string) {
-    const preview = body.slice(0, 200).replace(/\s+/g, " ");
-    super(`HTTP ${status}: ${preview}`);
+  constructor(message: string) {
+    super(message);
     this.name = "ChatError";
-    this.status = status;
-    this.body = body;
   }
 }
 
-export async function runTurn(
-  messages: ChatTurnMsg[],
-  opts: ChatTurnOpts,
-): Promise<ChatTurnResult> {
-  const body: Record<string, unknown> = {
-    model: opts.model,
-    max_tokens: opts.maxTokens,
-    stream: true,
+export async function runTurn(messages: ChatTurnMsg[], opts: ChatTurnOpts): Promise<ChatTurnResult> {
+  const req: ChatRequest = {
+    provider_name: opts.provider,
     messages,
+    max_tokens: opts.maxTokens,
   };
+  if (opts.model) req.model = opts.model;
+  if (opts.baseUrl) req.base_url = opts.baseUrl;
+  if (opts.apiKey) req.api_key = opts.apiKey;
+  if (opts.convoId) req.convo_id = opts.convoId;
   if (opts.temperature !== undefined && opts.temperature !== 1) {
-    body.temperature = opts.temperature;
+    req.temperature = opts.temperature;
   }
   if (opts.topP !== undefined && opts.topP !== 1) {
-    body.top_p = opts.topP;
+    req.top_p = opts.topP;
   }
 
-  const base = await apiBase();
   const t0 = performance.now();
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (opts.conversationId) {
-    headers["x-chariot-conversation"] = opts.conversationId;
-  }
-  let resp: Response;
-  try {
-    resp = await fetch(base + MESSAGES_PATH, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    });
-  } catch (e) {
-    if (opts.signal.aborted) {
-      return { text: "", inputTokens: 0, outputTokens: 0, latencyMs: 0, aborted: true };
-    }
-    throw e;
-  }
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new ChatError(resp.status, text);
-  }
-
-  const stream = new ChatStream();
   // 跨 turn 跟踪:current_turn_text 累积当前 assistant turn 文本;
   // turn_complete(role=assistant)snapshot 到 lastAssistantText,被下一轮覆盖,
   // 流尾留下的就是最终轮的 final 文本(返回给 caller 作 ChatTurnResult.text)。
   let currentTurnText = "";
   let lastAssistantText = "";
-  let aborted = false;
-  try {
-    for await (const ev of stream.events(resp, opts.signal)) {
-      opts.onEvent(ev);
-      if (ev.kind === "text") {
-        currentTurnText += ev.text;
-      } else if (ev.kind === "turn_complete" && ev.role === "assistant") {
-        lastAssistantText = currentTurnText;
-        currentTurnText = "";
-      }
+
+  const handleEvent = (ev: StreamEvent) => {
+    opts.onEvent(ev);
+    if (ev.kind === "text") {
+      currentTurnText += ev.text;
+    } else if (ev.kind === "turn_complete" && ev.role === "assistant") {
+      lastAssistantText = currentTurnText;
+      currentTurnText = "";
     }
+  };
+
+  try {
+    const result = await runChatTurn(req, opts.signal, handleEvent);
+    return {
+      text: lastAssistantText,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      latencyMs: Math.round(performance.now() - t0),
+      aborted: result.aborted,
+    };
   } catch (e) {
     if (opts.signal.aborted) {
-      aborted = true;
-    } else {
-      throw e;
+      return {
+        text: lastAssistantText,
+        inputTokens: 0,
+        outputTokens: 0,
+        latencyMs: Math.round(performance.now() - t0),
+        aborted: true,
+      };
     }
+    throw new ChatError(e instanceof Error ? e.message : String(e));
   }
-
-  return {
-    text: lastAssistantText,
-    inputTokens: stream.inputTokens,
-    outputTokens: stream.outputTokens,
-    latencyMs: Math.round(performance.now() - t0),
-    aborted,
-  };
 }

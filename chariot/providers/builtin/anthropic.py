@@ -1,17 +1,13 @@
 """AnthropicProvider —— 走 Anthropic Messages API,产 Claude 形态 ChatEvent。
 
-替代 0.5.0 `chariot/server/model/anthropic.py` 的 `AnthropicModel`。差异:
-
-- **不再透传字节**:body 从 `ChatRequest` 用 `dataclasses.asdict()` 拼装
-  (跟 Claude API 1:1,所以几乎是直接 dump);响应 SSE 帧解析后 yield 出
-  `ChatEvent`(typed),不返 `StreamingResponse`
-- **错误处理改 `ProviderError`**(去 fastapi 依赖):
+- body 从 `ChatRequest` 用 `dataclasses.asdict()` 拼装(跟 Claude API 1:1,
+  几乎是直接 dump);响应 SSE 帧解析后 yield 出 `ChatEvent`(typed)
+- 错误处理走 `ProviderError`:
   - 200 前的错 → `raise ProviderError(code="upstream_*", ...)`
   - 200 后的错 → yield `ChatEvent(kind="error", error_type="upstream_stream_error")`
-    + return(沿用 0.1.0"200 已发后断 TCP 不伪造事件"契约,只是表达从"断 TCP"
-    升级为"显式 error event")
+    + return(协议契约:200 已发后不抛,显式 error event)
 
-错误码映射(沿用 0.5.0):
+错误码映射:
 - 401 / 403 → `upstream_auth_failed`
 - 5xx → `upstream_server_error`
 - httpx 网络异常(超时 / 连接拒绝)→ `upstream_unreachable`

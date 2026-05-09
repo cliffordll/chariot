@@ -29,21 +29,21 @@
 # 克隆后首次,装前端依赖
 bun install
 
-# 同步 server sidecar(Python 打出来的 exe 就位到 Tauri binaries/)
-uv run --group build python scripts/build.py --target server --sync-sidecar
+# 同步 sidecar(Python 打出来的 exe 就位到 Tauri binaries/)
+uv run --group build python scripts/build.py --target sidecar --sync-sidecar
 
 # 等效展开(build.py 的 --sync-sidecar 就是这两步的糖):
-uv run --group build python scripts/build.py --target server
+uv run --group build python scripts/build.py --target sidecar
 bun run --filter=@chariot/desktop sync-sidecar
 ```
 
-`--sync-sidecar` 做的事:把 `dist/chariot-server.exe` 拷贝到
-`packages/desktop/tauri/binaries/chariot-server-<target-triple>.exe`
-(例:`chariot-server-x86_64-pc-windows-msvc.exe`)。这是 Tauri 2 sidecar
+`--sync-sidecar` 做的事:把 `dist/chariot-sidecar.exe` 拷贝到
+`packages/desktop/tauri/binaries/chariot-sidecar-<target-triple>.exe`
+(例:`chariot-sidecar-x86_64-pc-windows-msvc.exe`)。这是 Tauri 2 sidecar
 的**命名约定**,缺了 Tauri 启动时 spawn 就报 "找不到 sidecar"。
 
-> ⚠️ **server 代码改了就重跑 `--sync-sidecar`**:否则窗口跑起来用的是旧的 server
-> 版本。前端 / Rust 改动不受影响。
+> ⚠️ **Python 代码改了就重跑 `--sync-sidecar`**:否则窗口跑起来用的是旧的
+> sidecar。前端 / Rust 改动不受影响(自动重编)。
 
 ---
 
@@ -59,17 +59,17 @@ bun run tauri dev
 1. `beforeDevCommand` 起 vite dev server 在 `http://localhost:5173`
 2. Rust 侧 `cargo build` 编译 app(**首次 1-3 分钟**,后续增量秒级)
 3. 弹窗口加载 `http://localhost:5173`
-4. Tauri setup 里 spawn sidecar `chariot-server.exe` → 写
-   `~/.chariot/endpoint.json` → 前端 fetch `/admin/*` 走 vite proxy
-   到 server
+4. Tauri setup 里 spawn sidecar `chariot-sidecar.exe`(stdio JSON-RPC),
+   前端通过 `Tauri.invoke("rpc", ...)` 调 sidecar method;sidecar 推送的
+   stream 通过 `event.listen("rpc_notify", ...)` 接收
 
 **热更新**:
 
 - 前端改代码:Vite HMR 自动刷新窗口,无需手动
 - Rust 改代码:Tauri 自动重编 + 重启 app
-- Server Python 改代码:需 `Ctrl+C` 停 `tauri dev` → 重跑 `--sync-sidecar`
-  → `bun run tauri dev`;或临时不走 sidecar 改用 `uv run python -m
-  chariot.server`(端口会不同,但 endpoint.json 机制兼容)
+- Python sidecar 改代码:需 `Ctrl+C` 停 `tauri dev` → 重跑 `--sync-sidecar`
+  → `bun run tauri dev`;或临时手测 sidecar 用
+  `python -m chariot.sidecar`(stdio 直跑)
 
 ---
 
@@ -99,7 +99,7 @@ bun run tauri -- build --no-bundle --debug   # debug 模式,exe 约 150 MB,编�
 - 前端静态资源 (HTML/CSS/JS)**内嵌进 exe**,不需单独目录
 - 图标、部分 manifest 也在 exe 里
 
-**注意**:sidecar(`chariot-server.exe`)**不**内嵌,需要单独带。见 §5 分发。
+**注意**:sidecar(`chariot-sidecar.exe`)**不**内嵌,需要单独带。见 §5 分发。
 
 ### 为什么不直接 `cargo build`
 
@@ -134,12 +134,12 @@ cargo build --release
 ```
 my-chariot/
 ├── chariot-desktop.exe   # 主程序
-└── chariot-server.exe    # sidecar(release build 时 Tauri 会自动从 binaries/<name>-<triple>.exe
+└── chariot-sidecar.exe    # sidecar(release build 时 Tauri 会自动从 binaries/<name>-<triple>.exe
                           #         拷到主 exe 同目录,并去掉 triple 后缀)
 ```
 
 > ⚠️ **同目录是硬约束**。Tauri 2 的 `ShellExt::sidecar()` 在 release 模式下
-> 只在主 exe 同目录找 `chariot-server.exe`。只移动 `chariot-desktop.exe`
+> 只在主 exe 同目录找 `chariot-sidecar.exe`。只移动 `chariot-desktop.exe`
 > 不带 sidecar → setup hook 报 "找不到 sidecar" 返 Err → 主进程立即退出,
 > UI 都来不及画 → 表现为**双击秒闪退,无任何提示**。
 
@@ -148,8 +148,8 @@ my-chariot/
 **用户第一次跑需要同意 SmartScreen**(没 Authenticode 签名):点 "More info" →
 "Run anyway"。想彻底去掉这个提示得走 §8.3 的完整签名 release 流程。
 
-**数据落点**:`~/.chariot/chariot.db` + `~/.chariot/endpoint.json`
-(全平台一致)。
+**数据落点**:`~/.chariot/chariot.db`(全平台一致;sidecar 直接 in-process 用,
+不需要握手文件)。
 
 ---
 
@@ -158,13 +158,13 @@ my-chariot/
 | 症状 | 原因 | 解决 |
 |---|---|---|
 | 窗口白屏 + 控制台报 `port 5173 refused` | `tauri dev` 里 vite 还没起好 | 等 ~2s / 重跑;首次编译 Rust 慢,vite 提前准备好 |
-| 所有 API 红条 `server unreachable` | sidecar 没起 / 版本旧 | 重跑 `--sync-sidecar` 再 `tauri dev` |
-| "找不到 chariot-server sidecar" | `binaries/` 里没 exe 或命名不对 | 必须是 `chariot-server-<target-triple>.exe`,`--sync-sidecar` 会自动命对 |
+| 所有 API 报"sidecar exited" 或 RPC pending 永不返 | sidecar 没起 / 版本旧 / 主动崩了 | 重跑 `--sync-sidecar` 再 `tauri dev`;查 sidecar stderr |
+| "找不到 chariot-sidecar sidecar" | `binaries/` 里没 exe 或命名不对 | 必须是 `chariot-sidecar-<target-triple>.exe`,`--sync-sidecar` 会自动命对 |
 | `tauri build` 报 `tauri-build-*.../permission denied` | 窗口仍开着占用 `target/` 文件 | 先关所有跑着的桌面端 + `bun run tauri dev` 再 build |
 | SmartScreen 警告 | exe 没 Authenticode 签名 | "More info → Run anyway" 或走完整签名(FEATURE §8.3) |
-| 关掉 app 后 `chariot-server.exe` 残留 | `--parent-pid` watcher 5s 内自退 | `tasklist \| findstr chariot-server` 等一会再看;5s 后仍在算 bug |
+| 关掉 app 后 `chariot-sidecar.exe` 残留 | Tauri 主进程关 stdin → sidecar 自然退;若仍残留属 bug | `tasklist \| findstr chariot-sidecar` 等一会再看 |
 | debug / release exe 体积差很大 | debug 带全部符号,release 开 strip | 分发用 release;debug 自测快但别发给别人 |
-| 双击 exe 秒闪退,无任何 UI | 主 exe 被单独移走,sidecar `chariot-server.exe` 不在同目录 | release/ 里两个 exe 一起拷;见 §5 |
+| 双击 exe 秒闪退,无任何 UI | 主 exe 被单独移走,sidecar `chariot-sidecar.exe` 不在同目录 | release/ 里两个 exe 一起拷;见 §5 |
 | `bun run tauri build ...` 报 `Missing entrypoints` | bun 把 `build` 当成内置 `bun build` 子命令 | 改成 `bun run tauri -- build ...`(`--` 把后续参数透传给 tauri CLI) |
 | 双击 exe 没反应 / 看不到新窗口 | 已有一个实例在跑(可能缩去托盘),`tauri-plugin-single-instance` 会拒掉第二份并把已有窗口顶到前台 | 去托盘点 Show / 任务栏找已有窗口;真要彻底退出走托盘 Exit |
 

@@ -21,7 +21,7 @@ from typing import Literal
 from chariot.database.session import get_session_maker
 from chariot.repos.log_repo import LogRepo
 
-_log = logging.getLogger("chariot.server.log_writer")
+_log = logging.getLogger("chariot.repos.log_writer")
 
 LogStatus = Literal["ok", "error", "timeout"]
 

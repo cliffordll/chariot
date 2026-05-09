@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Step 1:Python CLI / server exe(PyInstaller)
+  # Step 1:Python CLI / sidecar exe(PyInstaller)
   python-exe:
     runs-on: windows-latest
     steps:
@@ -43,17 +43,17 @@ jobs:
           name: chariot-python-exes
           path: |
             dist/chariot.exe
-            dist/chariot-server.exe
-            packages/desktop/tauri/binaries/chariot-server-*.exe
+            dist/chariot-sidecar.exe
+            packages/desktop/tauri/binaries/chariot-sidecar-*.exe
           if-no-files-found: error
           retention-days: 30
 
-      - name: Attach CLI / server exe to Release
+      - name: Attach CLI / sidecar exe to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/chariot.exe
-            dist/chariot-server.exe
+            dist/chariot-sidecar.exe
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
@@ -82,7 +82,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Download PyInstaller sidecar
-        # 把上一 job 打好的 chariot-server-*.exe 放到 Tauri binaries/
+        # 把上一 job 打好的 chariot-sidecar-*.exe 放到 Tauri binaries/
         uses: actions/download-artifact@v4
         with:
           name: chariot-python-exes
@@ -90,7 +90,7 @@ jobs:
       - name: Place sidecar
         run: |
           mkdir -p packages/desktop/tauri/binaries
-          cp _dl/packages/desktop/tauri/binaries/chariot-server-*.exe packages/desktop/tauri/binaries/
+          cp _dl/packages/desktop/tauri/binaries/chariot-sidecar-*.exe packages/desktop/tauri/binaries/
         shell: bash
 
       - name: Build Tauri installer
@@ -112,7 +112,7 @@ jobs:
           projectPath: packages/desktop/tauri
           tagName: ${{ github.ref_name }}
           releaseName: "Chariot ${{ github.ref_name }}"
-          releaseBody: "自动发布;安装包见下方 assets。Python CLI / server exe 在 python-exe job 的 release 里。"
+          releaseBody: "自动发布;安装包见下方 assets。Python CLI / sidecar exe 在 python-exe job 的 release 里。"
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: true # 生成 latest.json 供 tauri-plugin-updater 用

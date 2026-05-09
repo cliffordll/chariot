@@ -14,7 +14,7 @@ Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,放进
     ToolRegistry.register("shell_exec", ShellExecTool)
     ToolRegistry.register("http_get", HttpGetTool)
 
-加新工具:写一个新文件 `chariot/server/tool/<name>.py` + 在本文件加一行
+加新工具:写一个新文件 `chariot/tools/builtin/<name>.py` + 在本文件加一行
 `ToolRegistry.register("type_name", NewTool)`。
 """
 

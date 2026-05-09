@@ -1,7 +1,5 @@
 # PyInstaller spec — chariot.exe(CLI 单文件,控制台)
-# hidden imports / datas 与 chariot-server.spec 保持同构(CLI 也要能 in-process
-# import SDK + DB + httpx;spawn 时只调外部 server exe,但 `chariot logs` 等命令
-# 直接走 HTTP + Pydantic schema,依赖面一致)。
+# CLI 0.6.5+ 是纯库模式:in-process AIAgent + DB + httpx,无 fastapi / uvicorn 依赖。
 
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
@@ -13,18 +11,12 @@ _HIDDEN = [
     "aiosqlite.cursor",
     "sqlalchemy.dialects.sqlite.aiosqlite",
     "greenlet",
-    "uvicorn.loops.asyncio",
-    "uvicorn.protocols.http.auto",
-    "uvicorn.protocols.http.h11_impl",
-    "uvicorn.lifespan.on",
-    "uvicorn.logging",
-    "h11",
     "anyio._backends._asyncio",
     "sniffio._impl",
 ]
 
 _DATAS = [
-    ("../chariot/server/database/migrations", "chariot/server/database/migrations"),
+    ("../chariot/database/migrations", "chariot/database/migrations"),
 ]
 _DATAS += collect_data_files("certifi")
 _DATAS += copy_metadata("certifi")
