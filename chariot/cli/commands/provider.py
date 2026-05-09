@@ -19,13 +19,14 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
   时走它
 
 CRUD:
-- `chariot provider add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
-- `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`:改 entry
-- `chariot provider delete <name>`:删 entry
-- `chariot provider rm <name>`:删 entry 别名(兼容)
-- `chariot provider copy <name> [--as new-name]`:复制(碰撞自动 _copy_N)
+- `chariot provider add --name X --type Y -o k=v -o k=v ... [-p k=v]`: ?? entry
+  ?: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY`
+- `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`: ?? entry
+- `chariot provider delete <name>`: ?? entry
+- `chariot provider rm <name>`: ?? entry ??(??)
+- `chariot provider copy <name> [--as new-name]`: ??(???? _copy_N)
 
-`-o key=value` / `-p key=value` 都可重复;value 全部按字符串处理。
+`-o key=value` / `-p key=value` ????;value ?????????
 """
 
 from __future__ import annotations
@@ -219,18 +220,52 @@ async def _probe(
 
 
 def _parse_kv(items: list[str], *, label: str) -> dict[str, Any]:
-    """`-x key=value` 重复 → dict;value 拆第一个 `=` 后保留(支持值含 `=`)。"""
+    """`-x key=value` ?? ? dict;value ???? `=` ???(???? `=`)?"""
     result: dict[str, Any] = {}
     for raw in items:
-        if "=" not in raw:
-            Renderer.die(f"{label} 必须是 key=value 形式: {raw!r}")
+        raw_text = raw.strip()
+        if _looks_like_json(raw_text):
+            Renderer.die(_kv_error_message(label, raw, json_like=True))
             return {}
-        k, _, v = raw.partition("=")
-        if not k:
-            Renderer.die(f"{label} key 不能为空: {raw!r}")
-            return {}
-        result[k] = v
+
+        parts = [raw]
+        if "=" not in raw and "," in raw:
+            parts = [part.strip() for part in raw.split(",") if part.strip()]
+
+        for part in parts:
+            if "=" in part:
+                k, _, v = part.partition("=")
+            elif ":" in part:
+                k, _, v = part.partition(":")
+            else:
+                Renderer.die(_kv_error_message(label, raw))
+                return {}
+            k = k.strip()
+            if not k or not _is_valid_kv_key(k):
+                Renderer.die(_kv_error_message(label, raw))
+                return {}
+            result[k] = v.strip()
     return result
+
+
+def _looks_like_json(raw: str) -> bool:
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
+
+
+def _is_valid_kv_key(key: str) -> bool:
+    return all(ch.isalnum() or ch in {"_", ".", "-"} for ch in key)
+
+
+def _kv_error_message(label: str, raw: str, *, json_like: bool = False) -> str:
+    base = (
+        f"{label} must be key=value, or comma-separated key:value pairs: {raw!r}\n"
+        f"template: chariot provider add --name NAME --type TYPE "
+        f"{label} key=value {label} key=value ...\n"
+        f"compat: {label} key:value,key:value,..."
+    )
+    if json_like:
+        return base + "\nnote: do not pass a whole JSON blob to provider add"
+    return base
 
 
 # ---------- add ----------
@@ -245,7 +280,7 @@ def add_cmd(
         typer.Option(
             "-o",
             "--option",
-            help="options key=value;可重复(build Provider 所需,如 model / api_key)",
+            help="options key=value;可重复(兼容 key:value,key:value 逗号形式)",
         ),
     ] = None,
     params: Annotated[
@@ -294,7 +329,7 @@ def update_cmd(
         typer.Option(
             "-o",
             "--option",
-            help="options key=value;可重复(整体替换 options,非 merge)",
+            help="options key=value;???(?: -o model=qwen2.5:1.5b -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY)",
         ),
     ] = None,
     params: Annotated[

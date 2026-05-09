@@ -476,11 +476,11 @@ class TestBuildBody:
         req = ChatRequest(
             provider_name="anthropic",
             messages=[Message(role="user", content="hi")],
-            convo_id="01H...",
+            conversation_id="01H...",
             agent_id="agent_main",
         )
         body = self._provider()._build_body(req)
-        assert "convo_id" not in body
+        assert "conversation_id" not in body
         assert "agent_id" not in body
 
     def test_excludes_none_fields(self) -> None:
