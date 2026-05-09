@@ -20,6 +20,7 @@ import pytest
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
+from chariot.agent.exceptions import ProviderError
 from chariot.agent.loop import AgentLoop
 from chariot.providers.base import BaseProvider, BaseProviderConfig
 from chariot.tools.base import BaseTool
@@ -302,3 +303,38 @@ class TestProviderError:
         kinds = [ev.kind for ev in events]
         # 末尾是 error,不是 stream_done(AgentLoop 不补)
         assert kinds == ["message_start", "error"]
+
+    async def test_provider_raises_before_stream_yields_error_event(self, req: ChatRequest) -> None:
+        """provider 在 200 前 raise ProviderError(upstream_auth_failed / 网络断等)
+        → AgentLoop 转 ChatEvent(kind=error) yield,**不**让异常 leak 到 surface。
+
+        契约见 DESIGN §6.4.2:200 前 raise / 200 后 yield 两条路径都要终结成
+        ChatEvent error。否则 sidecar / CLI / Gateway 会拿到原生异常,RPC 框架
+        兜底转 ERR_INTERNAL,丢失 error_type 信息。
+        """
+
+        class _RaisingProvider(BaseProvider):
+            def __init__(self) -> None:
+                self.config = BaseProviderConfig(name="raising", model="scripted-1")
+
+            @classmethod
+            def create(cls, options: dict[str, Any]) -> _RaisingProvider:
+                return cls()
+
+            async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+                raise ProviderError("upstream_auth_failed", "401 from upstream")
+                yield  # pragma: no cover — make this an async generator
+
+        loop = AgentLoop(
+            provider=_RaisingProvider(),
+            tools={},
+            repo=None,
+            convo_id=None,
+        )
+        events = [ev async for ev in loop.run(req)]
+        assert len(events) == 1
+        ev = events[0]
+        assert ev.kind == "error"
+        assert ev.error_type == "upstream_auth_failed"
+        assert ev.error_message is not None
+        assert "401" in ev.error_message
