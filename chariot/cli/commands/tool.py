@@ -106,11 +106,30 @@ def _parse_kv(items: list[str]) -> dict[str, Any]:
         if not k:
             Renderer.die(f"-o key 不能为空: {raw!r}")
             return {}
-        try:
-            result[k] = json.loads(v)
-        except json.JSONDecodeError:
-            result[k] = v
+        result[k] = _parse_option_value(v)
     return result
+
+
+def _parse_option_value(raw: str) -> Any:
+    """Parse JSON first, then accept a simple bareword array fallback.
+
+    PowerShell users often end up sending `[example.com]` after quote stripping.
+    Treat that as `["example.com"]` instead of a plain string.
+    """
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    text = raw.strip()
+    if text.startswith("[") and text.endswith("]"):
+        inner = text[1:-1].strip()
+        if not inner:
+            return []
+        return [part.strip().strip("'\"") for part in inner.split(",") if part.strip()]
+
+    return raw
 
 
 @tool_app.command("config", help="覆写 options(整体替换,非 merge);value 试 JSON 解析")

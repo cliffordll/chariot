@@ -370,7 +370,10 @@ uv run chariot tool disable read_file
 
 ```powershell
 uv run chariot tool enable http_get
-uv run chariot tool config http_get -o "allowed_domains=[\"example.com\"]"
+uv run chariot tool config http_get -o 'allowed_domains=["example.com"]'
+uv run chariot tool config http_get -o "allowed_domains=[example.com]"
+uv run chariot tool config http_get -o 'allowed_domains=[example.com]'
+uv run chariot tool config http_get -o "allowed_domains=[\"example.com\"]" 这种不行
 uv run chariot chat --convo new "请请求 https://example.com"
 uv run chariot tool disable http_get
 ```
