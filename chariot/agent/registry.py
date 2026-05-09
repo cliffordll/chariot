@@ -11,7 +11,7 @@
 Surface 各自决定 session_key 语义:
 - CLI:`"process"`(单一 session,整个进程一份 AIAgent)
 - sidecar(S.8):JSON-RPC 拿到的 session_id
-- Gateway(0.8.0):`f"{user_id}:{convo_id}"` 之类
+- Gateway(0.8.0):`f"{user_id}:{conversation_id}"` 之类
 
 并发安全:
 - 全局 asyncio.Lock 包查 / 建 / 缓存写。临界区只有 dict op + 一次

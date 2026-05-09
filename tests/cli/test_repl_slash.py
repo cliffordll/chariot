@@ -1,4 +1,4 @@
-"""ChatRepl slash 命令测试(0.6.0 库化版)。
+﻿"""ChatRepl slash 命令测试(0.6.0 库化版)。
 
 slash 命令分单 / 复数:**单数 = 显示当前状态(只读)**,**复数 = 列全部(走 repo)**。
 覆盖 /model · /models · /convo · /convos · /tool · /tools。
@@ -24,7 +24,7 @@ from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
 from chariot.cli.repl import ChatRepl
 from chariot.database.session import dispose_db
-from chariot.repos.convo_repo import ConvoRepo
+from chariot.repos.conversation_repo import ConversationRepo
 from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.tool_repo import ToolRepo
 
@@ -47,11 +47,11 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
         await dispose_db()
 
 
-def _make_ctx(agent: AIAgent, *, convo_id: str | None = None) -> ChatContext:
+def _make_ctx(agent: AIAgent, *, conversation_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=agent,
         provider_name="claude-haiku-4-5",
-        convo_id=convo_id,
+        conversation_id=conversation_id,
     )
 
 
@@ -195,10 +195,10 @@ CONVO = "01ABCDEF0123456789ABCDEFGH"
 async def test_slash_convo_no_arg_shows_current_with_id(
     agent: AIAgent, _capture_renderer_output: _Capt
 ) -> None:
-    """有 convo_id 时,`/convo` 显示 id + model + 本地消息数,不查 DB。"""
-    ctx = _make_ctx(agent, convo_id=CONVO)
+    """有 conversation_id 时,`/convo` 显示 id + model + 本地消息数,不查 DB。"""
+    ctx = _make_ctx(agent, conversation_id=CONVO)
     ctx.append_user("hi")
-    await ChatRepl(ctx=ctx)._handle_slash("/convo")
+    await ChatRepl(ctx=ctx)._handle_slash("/conversation")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
     assert len(outs) == 1
     msg = outs[0][1]
@@ -210,9 +210,9 @@ async def test_slash_convo_no_arg_shows_current_with_id(
 async def test_slash_convo_no_arg_stateless_shows_off(
     agent: AIAgent, _capture_renderer_output: _Capt
 ) -> None:
-    """stateless(convo_id=None)时 `/convo` 显示 off。"""
+    """stateless(conversation_id=None)时 `/convo` 显示 off。"""
     ctx = _make_ctx(agent)
-    await ChatRepl(ctx=ctx)._handle_slash("/convo")
+    await ChatRepl(ctx=ctx)._handle_slash("/conversation")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
     assert len(outs) == 1
     msg = outs[0][1].lower()
@@ -222,15 +222,15 @@ async def test_slash_convo_no_arg_stateless_shows_off(
 async def test_slash_convos_lists_with_current_marker(
     agent: AIAgent, _capture_renderer_output: _Capt
 ) -> None:
-    """`/convos` 走 ConvoRepo,当前会话行带 ← current。"""
+    """`/convos` 走 ConversationRepo,当前会话行带 ← current。"""
     other_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
     async with agent.session_maker() as session:
-        repo = ConvoRepo(session)
+        repo = ConversationRepo(session)
         await repo.create(CONVO, title="t1")
         await repo.create(other_id, title="t2")
 
-    ctx = _make_ctx(agent, convo_id=CONVO)
-    await ChatRepl(ctx=ctx)._handle_slash("/convos")
+    ctx = _make_ctx(agent, conversation_id=CONVO)
+    await ChatRepl(ctx=ctx)._handle_slash("/conversations")
     tables = [c for c in _capture_renderer_output if c[0] == "table"]
     assert len(tables) == 1
     body = tables[0][1].split("::", 1)[1]
@@ -245,10 +245,10 @@ async def test_slash_convos_empty_db_shows_hint(
 ) -> None:
     """空 DB → `/convos` 提示用 `/convo new` 开一个。"""
     ctx = _make_ctx(agent)
-    await ChatRepl(ctx=ctx)._handle_slash("/convos")
+    await ChatRepl(ctx=ctx)._handle_slash("/conversations")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
     assert len(outs) == 1
-    assert "/convo new" in outs[0][1]
+    assert "/conversation new" in outs[0][1]
 
 
 async def test_slash_convos_with_arg_errors(
@@ -259,15 +259,15 @@ async def test_slash_convos_with_arg_errors(
     await ChatRepl(ctx=ctx)._handle_slash("/convos new")
     errs = [c for c in _capture_renderer_output if c[0] == "err"]
     assert len(errs) == 1
-    assert "/convo" in errs[0][1]
+    assert "/conversation" in errs[0][1]
 
 
 async def test_slash_convo_new_generates_ulid(agent: AIAgent) -> None:
     ctx = _make_ctx(agent)
     ctx.append_user("旧消息")  # 切会话前留一条历史
-    await ChatRepl(ctx=ctx)._handle_slash("/convo new")
-    assert ctx.convo_id is not None
-    assert len(ctx.convo_id) == 26
+    await ChatRepl(ctx=ctx)._handle_slash("/conversation new")
+    assert ctx.conversation_id is not None
+    assert len(ctx.conversation_id) == 26
     # 切会话清空本地 messages
     assert ctx.messages == []
 
@@ -277,15 +277,15 @@ async def test_slash_convo_with_ulid_sets_and_clears(agent: AIAgent) -> None:
     ctx = _make_ctx(agent)
     ctx.append_user("旧消息")
     await ChatRepl(ctx=ctx)._handle_slash(f"/convo {ulid}")
-    assert ctx.convo_id == ulid
+    assert ctx.conversation_id == ulid
     assert ctx.messages == []
 
 
 async def test_slash_convo_off_clears_id_and_messages(agent: AIAgent) -> None:
-    ctx = _make_ctx(agent, convo_id=CONVO)
+    ctx = _make_ctx(agent, conversation_id=CONVO)
     ctx.append_user("hi")
     await ChatRepl(ctx=ctx)._handle_slash("/convo off")
-    assert ctx.convo_id is None
+    assert ctx.conversation_id is None
     assert ctx.messages == []
 
 
@@ -294,10 +294,28 @@ async def test_slash_convo_invalid_value_errors(
 ) -> None:
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/convo foo")
-    assert ctx.convo_id is None
+    assert ctx.conversation_id is None
     errs = [c for c in _capture_renderer_output if c[0] == "err"]
     assert len(errs) == 1
     assert "ULID" in errs[0][1]
+
+
+async def test_slash_help_shows_conversation_aliases(
+    agent: AIAgent, _capture_renderer_output: _Capt
+) -> None:
+    ctx = _make_ctx(agent)
+    await ChatRepl(ctx=ctx)._handle_slash("/help")
+    outs = [c for c in _capture_renderer_output if c[0] == "out"]
+    assert len(outs) == 1
+    msg = outs[0][1]
+    assert "/conversation, /convo" in msg
+    assert "/conversations, /convos" in msg
+    assert "/conversation new" in msg
+    assert "/convo new" in msg
+    assert "/conversation <ULID>" in msg
+    assert "/convo <ULID>" in msg
+    assert "/conversation off" in msg
+    assert "/convo off" in msg
 
 
 # ==========================================================

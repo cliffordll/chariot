@@ -74,7 +74,7 @@
 #### 3.1.3 阶段范围
 
 - `provider` / `model` 概念收口。
-- `convo` / `conversation` 概念收口。
+- `conversation` / `conversation` 概念收口。
 - `edit_*` / `update_*` 动词收口。
 - 顶层 `run` 命名收口。
 
@@ -97,7 +97,7 @@
 #### 3.1.5 交付结果
 
 - 主循环相关高频入口命名清楚。
-- `provider` / `convo` 主术语稳定。
+- `provider` / `conversation` 主术语稳定。
 - 后续 Phase 不再被历史主名拖住。
 
 #### 3.1.6 手动验收 demo
@@ -196,17 +196,17 @@ uv run chariot chat "hello"
 2. 新建并继续一轮 stateful chat：
 
 ```powershell
-uv run chariot chat --convo new "first turn"
-uv run chariot convo list
-uv run chariot chat --convo <ULID> "second turn"
-uv run chariot convo show <ULID>
+uv run chariot chat --conversation new "first turn"
+uv run chariot conversation list
+uv run chariot chat --conversation <ULID> "second turn"
+uv run chariot conversation show <ULID>
 ```
 
 3. 启用一个工具并验证 tool loop 基本路径：
 
 ```powershell
 uv run chariot tool enable list_dir
-uv run chariot chat --convo new "请列出当前目录"
+uv run chariot chat --conversation new "请列出当前目录"
 uv run chariot tool disable list_dir
 ```
 
@@ -362,7 +362,7 @@ uv run pytest tests/providers -q
 
 ```powershell
 uv run chariot tool enable read_file
-uv run chariot chat --convo new "请读一下 README.md"
+uv run chariot chat --conversation new "请读一下 README.md"
 uv run chariot tool disable read_file
 ```
 
@@ -374,7 +374,7 @@ uv run chariot tool config http_get -o 'allowed_domains=["example.com"]'
 uv run chariot tool config http_get -o "allowed_domains=[example.com]"
 uv run chariot tool config http_get -o 'allowed_domains=[example.com]'
 uv run chariot tool config http_get -o "allowed_domains=[\"example.com\"]" 这种不行
-uv run chariot chat --convo new "请请求 https://example.com"
+uv run chariot chat --conversation new "请请求 https://example.com"
 uv run chariot tool disable http_get
 ```
 
@@ -507,7 +507,7 @@ uv run pytest tests/memory tests/eval tests/sidecar -q
 - 拆 `Chat.tsx`
 - API 层拆成 `rpc client + domain api`
 - compat alias 逐步退场
-- 新页面按 `provider / convo` 新主名构建
+- 新页面按 `provider / conversation` 新主名构建
 
 #### 3.6.4 本阶段改名
 
@@ -520,7 +520,7 @@ uv run pytest tests/memory tests/eval tests/sidecar -q
 - `addProvider`
 - `updateProvider`
 - `deleteProvider`
-- `Convo`
+- `Conversation`
 
 #### 3.6.5 交付结果
 
@@ -561,7 +561,7 @@ bun run --filter=@chariot/desktop tauri dev
 现在先进入 `Phase 0`，顺序如下：
 
 1. 落地第一批高收益重命名。
-2. 清理 `provider / model`、`convo / conversation` 的主术语混用。
+2. 清理 `provider / model`、`conversation / conversation` 的主术语混用。
 3. 清理 `edit_* / update_*` 混用。
 4. 确认主循环和 sidecar 入口的新命名全部打通。
 

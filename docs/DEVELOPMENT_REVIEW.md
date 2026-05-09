@@ -52,7 +52,7 @@
 - `Conversation` 类型 alias — `lib/api.ts:277 / 279 / 285 / 331 ~ 335`
 
 CLI 端 `cli/__main__.py` / `cli/repl.py` / `cli/render.py` 仍有 `conversation`
-散文残留(`commands/convo.py:32` 注释里还在用)。
+散文残留(`commands/conversation.py:32` 注释里还在用)。
 
 ### 1.3 Phase 2 已部分超前
 
@@ -222,7 +222,7 @@ Phase 2 改了 sidecar 后,Phase 1 的工具调用 demo 是不是还跑得起来
 
 每个 Phase 的"验收要求"加一行:
 
-> 前序 Phase 的 chat / convo / tool smoke demo 必须仍能跑通。
+> 前序 Phase 的 chat / conversation / tool smoke demo 必须仍能跑通。
 
 #### 3.4.2 没有 Phase 完成状态标记
 

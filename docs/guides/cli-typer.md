@@ -4,8 +4,8 @@
 **面向**:第一次改 `chariot` CLI 子命令、或者想新增一条命令时查的自己。
 **前置**:项目已装 `typer>=0.13`(`pyproject.toml` 里有),会 Python 类型注解。
 
-当前子命令(见 `chariot/cli/__main__.py`):`status / chat / logs / stats / provider / tool / convo`,
-其中 `provider` / `tool` / `convo` 是二级子命令组(参见 `chariot/cli/commands/`)。
+当前子命令(见 `chariot/cli/__main__.py`):`status / chat / logs / stats / provider / tool / conversation`,
+其中 `provider` / `tool` / `conversation` 是二级子命令组(参见 `chariot/cli/commands/`)。
 
 ---
 
@@ -61,7 +61,7 @@ def _root(
 
 for mod in (
     status_mod, logs_mod, stats_mod, chat_mod,
-    provider_mod, tool_mod, convo_mod,
+    provider_mod, tool_mod, conversation_mod,
 ):
     mod.register(app)
 ```
@@ -302,5 +302,5 @@ def test_provider_help() -> None:
 - Typer 官方:<https://typer.tiangolo.com/>
 - Click(底层)文档:<https://click.palletsprojects.com/>
 - 项目入口:`chariot/cli/__main__.py`
-- 项目命令实现:`chariot/cli/commands/*.py`(`status / chat / logs / stats / provider / tool / convo`)
+- 项目命令实现:`chariot/cli/commands/*.py`(`status / chat / logs / stats / provider / tool / conversation`)
 - 项目测试:`tests/cli/`

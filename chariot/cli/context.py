@@ -7,9 +7,9 @@ usage 统计,把每个 event 透传给 caller 的 `on_event` 回调(REPL 下是
 
 stateful / stateless body.messages 契约
 ---------------------------------------
-- **stateless**(`convo_id is None`):req.messages = 整段本地历史。
+- **stateless**(`conversation_id is None`):req.messages = 整段本地历史。
   AIAgent 不持久化,Provider 看到的就是这里发的全部
-- **stateful**(`convo_id` 是 ULID):req.messages = **只发本轮新增 user
+- **stateful**(`conversation_id` 是 ULID):req.messages = **只发本轮新增 user
   message**(`self.messages[-1:]`)。AIAgent 内部 load DB 历史 prepend,把
   req.messages 里的 user 消息 append 到 messages 表(详见 `AIAgent._run_stateful_chat`)
   → 所以 client 必须只送"新增"的部分,否则会重复 persist
@@ -78,11 +78,11 @@ class ChatContext:
     provider_name: str = ""
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
-    # 0.4.0:可选 convo id(ULID)。给了则 ChatRequest.convo_id 透传给 AIAgent,
+    # 0.4.0:可选 conversation id(ULID)。给了则 ChatRequest.conversation_id 透传给 AIAgent,
     # 走 stateful 路径(DB load history + persist new turn)。CLI 本地
     # self.messages 仍累积本进程内的轮(便于 REPL 打印 / 撤回);发请求时
     # stateful 模式只送"这一轮新增"避免双 persist
-    convo_id: str | None = None
+    conversation_id: str | None = None
     # 0.6.5+:CLI `--model` flag 的承载;每轮 req 透传给 `ChatRequest.model`,
     # Provider 内部用 `req.model or self.config.model` 决定 wire body["model"]。
     # None = 不覆盖,沿用 entry.options.model(常态)
@@ -102,7 +102,7 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(provider_name / max_tokens / convo_id)。"""
+        """清空对话历史,保留会话配置(provider_name / max_tokens / conversation_id)。"""
         self.messages.clear()
 
     def set_provider(self, name: str) -> None:
@@ -189,18 +189,18 @@ class ChatContext:
             messages=[self._to_message(m) for m in self._messages_to_send()],
             model=self.model_override,
             max_tokens=self.max_tokens,
-            convo_id=self.convo_id,
+            conversation_id=self.conversation_id,
         )
 
     def _messages_to_send(self) -> list[dict[str, Any]]:
         """决定 req.messages 装什么。
 
-        - stateful(有 convo_id):只发末尾那条(本轮新增 user msg);AIAgent
+        - stateful(有 conversation_id):只发末尾那条(本轮新增 user msg);AIAgent
           自己从 DB prepend 历史。这条规则避免 AIAgent 把已 persist 的老消息
           重复 append(详见模块 docstring 契约段)
         - stateless:发全量本地历史,AIAgent 不持久化
         """
-        if self.convo_id is not None:
+        if self.conversation_id is not None:
             return self.messages[-1:] if self.messages else []
         return list(self.messages)
 

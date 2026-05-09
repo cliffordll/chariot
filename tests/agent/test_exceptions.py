@@ -3,7 +3,7 @@
 覆盖:
 - ProviderError 三元组(code / message / status)+ 默认 status=502
 - ConfigError 子类层级
-- ConvoLockTimeout 的 layer 字段
+- ConversationLockTimeout 的 layer 字段
 - ToolExecutionError 的 tool_name 字段
 """
 
@@ -13,9 +13,9 @@ import pytest
 
 from chariot.agent.exceptions import (
     ConfigError,
-    ConvoLockTimeout,
-    ConvoNotFound,
-    DuplicateConvoId,
+    ConversationLockTimeout,
+    ConversationNotFound,
+    DuplicateConversationId,
     DuplicateProviderName,
     ProviderError,
     ProviderNotFound,
@@ -60,11 +60,11 @@ class TestConfigError:
         assert isinstance(exc, ConfigError)
 
     def test_convo_not_found_subclass(self) -> None:
-        exc = ConvoNotFound("conv 01H... not in db")
+        exc = ConversationNotFound("conv 01H... not in db")
         assert isinstance(exc, ConfigError)
 
-    def test_duplicate_convo_id_subclass(self) -> None:
-        exc = DuplicateConvoId("conv id already used")
+    def test_duplicate_conversation_id_subclass(self) -> None:
+        exc = DuplicateConversationId("conv id already used")
         assert isinstance(exc, ConfigError)
 
 
@@ -84,12 +84,12 @@ class TestToolExecutionError:
         assert exc.extra == {"path": "/etc/passwd"}
 
 
-class TestConvoLockTimeout:
+class TestConversationLockTimeout:
     def test_local_layer(self) -> None:
-        exc = ConvoLockTimeout("waited 30s", layer="local")
+        exc = ConversationLockTimeout("waited 30s", layer="local")
         assert exc.layer == "local"
         assert exc.message == "waited 30s"
 
     def test_db_layer(self) -> None:
-        exc = ConvoLockTimeout("retried 3 times", layer="db")
+        exc = ConversationLockTimeout("retried 3 times", layer="db")
         assert exc.layer == "db"

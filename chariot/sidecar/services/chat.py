@@ -53,7 +53,7 @@ class ChatRequestDecoder:
         "stop_sequences",
         "metadata",
         "thinking",
-        "convo_id",
+        "conversation_id",
         "agent_id",
     )
 

@@ -1,27 +1,27 @@
-"""ConvoLockManager — 同 convo_id 的并发写串行化。
+"""ConversationLockManager — 同 conversation_id 的并发写串行化。
 
 **双层锁**:
 
-- **进程内**:`asyncio.Lock` per convo_id —— 同进程内同 convo 串行
+- **进程内**:`asyncio.Lock` per conversation_id —— 同进程内同 conversation 串行
 - **跨进程**:SQLite `BEGIN IMMEDIATE` 短事务
-  (`ConvoRepo.with_advisory_lock`) —— 多进程同 convo 串行写
+  (`ConversationRepo.with_advisory_lock`) —— 多进程同 conversation 串行写
 
-库化后多 surface 进程(CLI + Gateway + sidecar)可能同时写同 convo,
+库化后多 surface 进程(CLI + Gateway + sidecar)可能同时写同 conversation,
 靠 SQLite 层保护跨进程互斥。
 
 设计取舍
 --------
 - **进程内 in-memory `asyncio.Lock`**:async 协程在事件循环里串行,asyncio.Lock
-  足够。timeout 走 `asyncio.wait_for`,超时 → `ConvoLockTimeout(layer="local")`
+  足够。timeout 走 `asyncio.wait_for`,超时 → `ConversationLockTimeout(layer="local")`
 - **DB-level lock(SQLite BEGIN IMMEDIATE)**:多进程并发触发;实现见
-  `ConvoRepo.with_advisory_lock`(短事务 + busy_timeout 重试),超时 →
-  `ConvoLockTimeout(layer="db")`
+  `ConversationRepo.with_advisory_lock`(短事务 + busy_timeout 重试),超时 →
+  `ConversationLockTimeout(layer="db")`
 
 封装
 ----
-单例 ClassVar `_locks: dict[convo_id, asyncio.Lock]`,惰性创建。`acquire(convo_id)`
+单例 ClassVar `_locks: dict[conversation_id, asyncio.Lock]`,惰性创建。`acquire(conversation_id)`
 是 async context manager,`yield` 期间持锁,退出自动释放。lock 实例不主动
-GC(数量级 = 活跃 convo 数,可忽略)。
+GC(数量级 = 活跃 conversation 数,可忽略)。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, ClassVar
 
-from chariot.agent.exceptions import ConvoLockTimeout
+from chariot.agent.exceptions import ConversationLockTimeout
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,22 +40,22 @@ if TYPE_CHECKING:
 _DEFAULT_TIMEOUT_S = 30.0
 
 
-class ConvoLockManager:
-    """每 convo_id 一把双层锁(进程内 + 可选 SQLite advisory)。
+class ConversationLockManager:
+    """每 conversation_id 一把双层锁(进程内 + 可选 SQLite advisory)。
 
     用法::
 
         # 单层模式(进程内锁,无跨进程保护)
-        async with ConvoLockManager.acquire(convo_id):
+        async with ConversationLockManager.acquire(conversation_id):
             # critical section
 
         # 双层模式(AIAgent / AgentLoop 调用)
-        async with ConvoLockManager.acquire(convo_id, db_session=session):
+        async with ConversationLockManager.acquire(conversation_id, db_session=session):
             # critical section(进程内锁 + DB advisory 都持有)
 
     错误形态:
-    - 进程内锁超时 → `ConvoLockTimeout(layer="local")`
-    - DB 锁超时   → `ConvoLockTimeout(layer="db")`
+    - 进程内锁超时 → `ConversationLockTimeout(layer="local")`
+    - DB 锁超时   → `ConversationLockTimeout(layer="db")`
     """
 
     _locks: ClassVar[dict[str, asyncio.Lock]] = {}
@@ -64,12 +64,12 @@ class ConvoLockManager:
     @asynccontextmanager
     async def acquire(
         cls,
-        convo_id: str,
+        conversation_id: str,
         *,
         db_session: AsyncSession | None = None,
         timeout_s: float | None = None,
     ) -> AsyncGenerator[None]:
-        """获取 convo_id 对应锁;async with 块结束时自动释放。
+        """获取 conversation_id 对应锁;async with 块结束时自动释放。
 
         - `db_session=None`:仅进程内锁
         - `db_session` 非空:进程内 + SQLite advisory 双层
@@ -78,17 +78,17 @@ class ConvoLockManager:
             timeout_s = cls._read_timeout_env()
 
         # 惰性创建 Lock —— 在单线程 asyncio 里 get / set 之间没有 await,
-        # 同 convo 的两次 acquire 不会竞争出多把 Lock
-        lock = cls._locks.get(convo_id)
+        # 同 conversation 的两次 acquire 不会竞争出多把 Lock
+        lock = cls._locks.get(conversation_id)
         if lock is None:
             lock = asyncio.Lock()
-            cls._locks[convo_id] = lock
+            cls._locks[conversation_id] = lock
 
         try:
             await asyncio.wait_for(lock.acquire(), timeout=timeout_s)
         except TimeoutError as e:
-            raise ConvoLockTimeout(
-                f"convo {convo_id} 锁等待超时({timeout_s}s),另一个客户端正在写,稍后重试",
+            raise ConversationLockTimeout(
+                f"conversation {conversation_id} 锁等待超时({timeout_s}s),另一个客户端正在写,稍后重试",
                 layer="local",
             ) from e
 
@@ -98,9 +98,9 @@ class ConvoLockManager:
             else:
                 # 双层:已持进程内锁;再获 DB advisory lock 包 critical section
                 # import 放方法内避免循环 import(repos → agent → repos)
-                from chariot.repos.convo_repo import ConvoRepo
+                from chariot.repos.conversation_repo import ConversationRepo
 
-                async with ConvoRepo(db_session).with_advisory_lock(convo_id, timeout_s=timeout_s):
+                async with ConversationRepo(db_session).with_advisory_lock(conversation_id, timeout_s=timeout_s):
                     yield
         finally:
             lock.release()

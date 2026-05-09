@@ -14,8 +14,9 @@ flags:
 - `--api-key <key>`(可选):本次会话覆盖 entry.options.api_key;同 base_url
   也走 Provider 重建路径
 - `--max-tokens N`(messages 协议的 max_tokens)
-- `--convo <id|new>`(0.4.0 + 0.6.0 rename):走 stateful path;`new` → CLI 生成 ULID 并打印;
-  ULID 字面量 → 接续该会话;不传 → stateless(单轮 / 不持久化)
+- `--conversation <id|new>`(主名) / `--convo <id|new>`(兼容别名):走 stateful path;
+  `new` → CLI 生成 ULID 并打印;ULID 字面量 → 接续该会话;不传 → stateless
+  (单轮 / 不持久化)
 
 `--model` vs `--base-url` / `--api-key` 路径分裂(0.6.5 起):
 - `--model` 只切 wire LLM id,不影响 (base_url, api_key) → 不动 ClientSpec →
@@ -82,9 +83,10 @@ def chat_cmd(
     max_tokens: Annotated[
         int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")
     ] = 1024,
-    convo: Annotated[
+    conversation: Annotated[
         str | None,
         typer.Option(
+            "--conversation",
             "--convo",
             metavar="new|ULID",
             help=(
@@ -94,7 +96,7 @@ def chat_cmd(
         ),
     ] = None,
 ) -> None:
-    convo_id = _resolve_convo_id(convo)
+    conversation_id = _resolve_conversation_id(conversation)
     asyncio.run(
         _run(
             text=text,
@@ -103,12 +105,12 @@ def chat_cmd(
             base_url=base_url,
             api_key=api_key,
             max_tokens=max_tokens,
-            convo_id=convo_id,
+            conversation_id=conversation_id,
         )
     )
 
 
-def _resolve_convo_id(raw: str | None) -> str | None:
+def _resolve_conversation_id(raw: str | None) -> str | None:
     """- None → None(stateless)
     - 'new' → 生成新 ULID,打印 hint 给用户记住,返该 id
     - 26 字符 ULID 字面量 → 原样返
@@ -118,12 +120,12 @@ def _resolve_convo_id(raw: str | None) -> str | None:
         return None
     if raw == "new":
         new_id = str(ULID())
-        Renderer.out(f"(new convo: {new_id})")
+        Renderer.out(f"(new conversation: {new_id})")
         return new_id
     if _ULID_RE.match(raw):
         return raw
     Renderer.die(
-        f"--convo 取值非法: {raw!r};应为 'new' 或 26 字符 ULID(`chariot convo list` 看现有 id)",
+        f"--conversation/--convo 取值非法: {raw!r};应为 'new' 或 26 字符 ULID(`chariot conversation list` 看现有 id)",
     )
     return None  # pragma: no cover · die 已退出
 
@@ -156,7 +158,7 @@ async def _run(
     base_url: str | None,
     api_key: str | None,
     max_tokens: int,
-    convo_id: str | None,
+    conversation_id: str | None,
 ) -> None:
     # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
     # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
@@ -177,7 +179,7 @@ async def _run(
                 agent=agent,
                 provider_name=provider_name,
                 max_tokens=max_tokens,
-                convo_id=convo_id,
+                conversation_id=conversation_id,
                 model_override=model,
             )
             if text is None or not text.strip():

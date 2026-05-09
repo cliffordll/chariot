@@ -30,7 +30,7 @@
 ## v2:AIAgent 进化(chariot 的核心方向)
 
 - ✅ **多轮对话记忆**(0.4.0)—— `conversations` + `messages` 表;
-  `X-Chariot-Convo` header 触发 stateful;Agent.handle 接 ConvoRepo
+  `X-Chariot-Conversation` header 触发 stateful;Agent.handle 接 ConversationRepo
 - ✅ **工具调用 / function calling**(0.4.0)—— BaseTool + ToolRegistry + 4 内置
   工具(read_file / list_dir / shell_exec / http_get);Agent slow path 工具循环
 - ✅ **协议级流式工具循环**(0.5.0)—— Agent 全程 streaming;`tool_use` /

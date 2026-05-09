@@ -368,7 +368,7 @@ B5 提了一句 "budget and quota",但没展开。
 数据结构:
 
 - `budgets`(scope_kind / scope_id / window / limit_tokens / limit_cost)
-  - scope:`global` / `meta_agent` / `experiment` / `objective` / `convo`
+  - scope:`global` / `meta_agent` / `experiment` / `objective` / `conversation`
 - `budget_usage`(budget_id / window_start / used_tokens / used_cost)
 
 拦截点:
@@ -411,7 +411,7 @@ UI:
 
 边界:
 
-- feedback 必须跟 turn / convo / objective 关联
+- feedback 必须跟 turn / conversation / objective 关联
 - reflection 必须把 feedback 作为一等输入,不能只看 trace
 
 ## 4. P2 差距

@@ -166,7 +166,7 @@ UI：
 ### 3.6 手动验收 demo
 
 ```powershell
-uv run chariot chat --convo new "hello"
+uv run chariot chat --conversation new "hello"
 uv run chariot prompt inspect <turn-id>
 uv run chariot prompt list
 ```
@@ -255,7 +255,7 @@ UI：
 ### 4.6 手动验收 demo
 
 ```powershell
-uv run chariot chat --convo new "总结一下当前项目结构"
+uv run chariot chat --conversation new "总结一下当前项目结构"
 uv run chariot context inspect <turn-id>
 uv run chariot context sources <turn-id>
 ```
@@ -296,7 +296,7 @@ uv run chariot context sources <turn-id>
 按这些维度检索：
 
 - `workspace`
-- `convo`
+- `conversation`
 - `provider`
 - `tags`
 - `recency`
@@ -361,7 +361,7 @@ UI：
 ```powershell
 uv run chariot memory add --type preference --text "默认用中文输出，但保留关键 English technical terms"
 uv run chariot memory list
-uv run chariot chat --convo new "以后回答我用什么语言风格？"
+uv run chariot chat --conversation new "以后回答我用什么语言风格？"
 uv run chariot memory show <id>
 ```
 
@@ -750,7 +750,7 @@ uv run chariot artifact view <id>
 - provider trace
 - tool trace
 - checkpoint trace
-- trace query by convo / tool / provider / error
+- trace query by conversation / tool / provider / error
 
 ### 10.3 模块落点
 
@@ -777,7 +777,7 @@ CLI：
 ### 10.6 手动验收 demo
 
 ```powershell
-uv run chariot chat --convo new "hello"
+uv run chariot chat --conversation new "hello"
 uv run chariot trace list
 uv run chariot trace view <turn-id>
 ```

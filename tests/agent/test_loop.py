@@ -145,7 +145,7 @@ def _make_loop(
         provider=_ScriptedProvider(turns),
         tools=tools or {},
         repo=None,
-        convo_id=None,
+        conversation_id=None,
         max_iter=max_iter,
     )
 
@@ -329,7 +329,7 @@ class TestProviderError:
             provider=_RaisingProvider(),
             tools={},
             repo=None,
-            convo_id=None,
+            conversation_id=None,
         )
         events = [ev async for ev in loop.stream_chat(req)]
         assert len(events) == 1

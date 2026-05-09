@@ -47,7 +47,7 @@ def test_root_help() -> None:
         "chat",
         "provider",
         "tool",
-        "convo",
+        "conversation",
         "memory",
         "eval",
         "skill",
@@ -65,7 +65,7 @@ def test_root_help() -> None:
         "chat",
         "provider",
         "tool",
-        "convo",
+        "conversation",
         "memory",
         "eval",
         "skill",
@@ -96,20 +96,20 @@ def test_phase4_subcommand_groups_have_list(sub: str) -> None:
 
 
 def test_convo_subcommand_group_has_list_show_rm_rename() -> None:
-    """`chariot convo` 子命令组(0.4.0;0.6.0 起 conversation → convo)。"""
-    result = runner.invoke(app, ["convo", "--help"])
+    """`chariot conversation` 子命令组(0.4.0;0.6.0 起 conversation → conversation)。"""
+    result = runner.invoke(app, ["conversation", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for sub in ("list", "show", "rm", "rename"):
-        assert sub in out, f"`chariot convo --help` 缺少子命令 {sub!r}"
+        assert sub in out, f"`chariot conversation --help` 缺少子命令 {sub!r}"
 
 
 def test_chat_has_convo_option() -> None:
-    """`chariot chat` 加 --convo 选项(0.4.0;0.6.0 起 conversation → convo)。"""
+    """`chariot chat` 加 --conversation 选项(0.4.0;0.6.0 起 conversation → conversation)。"""
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    assert "--convo" in out
+    assert "--conversation" in out
     # metavar 让用户立刻看到取值范围,不必读 help 长文
     assert "new|ULID" in out
 
@@ -141,8 +141,8 @@ def test_provider_probe_has_override_options() -> None:
 
 
 def test_chat_convo_invalid_value_dies_locally() -> None:
-    """非法 --convo 值 → CLI 立刻 die,不打 AIAgent。"""
-    result = runner.invoke(app, ["chat", "--convo", "foo", "hi"])
+    """非法 --conversation 值 → CLI 立刻 die,不打 AIAgent。"""
+    result = runner.invoke(app, ["chat", "--conversation", "foo", "hi"])
     assert result.exit_code != 0
     out = _plain(result.output)
     # 错误文案应包含合法取值提示("new" 或 ULID)
@@ -156,8 +156,8 @@ def test_tool_enable_requires_name() -> None:
 
 
 def test_convo_show_requires_id() -> None:
-    """`chariot convo show` 没传 id → 退出码非 0。"""
-    result = runner.invoke(app, ["convo", "show"])
+    """`chariot conversation show` 没传 id → 退出码非 0。"""
+    result = runner.invoke(app, ["conversation", "show"])
     assert result.exit_code != 0
 
 
@@ -209,10 +209,15 @@ def test_config_subcommand_removed() -> None:
     assert result.exit_code != 0
 
 
-def test_conversation_subcommand_renamed() -> None:
-    """0.6.0 起 `chariot conversation` rename 成 `chariot convo`,旧名退出码非 0。"""
+def test_conversation_subcommand_renamed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`conversation` 现在是主名。"""
+    from chariot.cli import _runtime
+
+    monkeypatch.setattr(_runtime, "DEFAULT_DB_PATH", tmp_path / "chariot.db")
     result = runner.invoke(app, ["conversation", "list"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -278,7 +283,7 @@ def test_short_quiet_flag() -> None:
 
 
 def test_convo_delete_subcommand_visible() -> None:
-    result = runner.invoke(app, ["convo", "--help"])
+    result = runner.invoke(app, ["conversation", "--help"])
     assert result.exit_code == 0
     assert "delete" in _plain(result.output)
 

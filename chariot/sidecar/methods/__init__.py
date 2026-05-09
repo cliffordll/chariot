@@ -5,14 +5,14 @@
 - `__init__.py`(本文件):`SidecarAgent` Protocol + `MethodBase` 共享基 +
   `register_methods()` 集中注册入口
 - `chat.py`:`ChatMethod` + `_RequestDecoder`(chat method handler)
-- `convo.py`:`ConvoMethods`(convo CRUD)
+- `conversation.py`:`ConversationMethods`(conversation CRUD)
 - `tool.py`:`ToolMethods`(tool CRUD,只能改 enabled / options)
 - `provider.py`:`ProviderMethods`(provider CRUD + probe)
 - `log.py`:`LogMethods`(log 查询)
 
 method 列表(15 条):
 - chat:跑一次 chat,流式 notify ChatEvent + 终止 response
-- list_convos / get_convo / rename_convo / delete_convo
+- list_conversations / get_conversation / rename_conversation / delete_conversation
 - list_tools / enable_tool / disable_tool / config_tool
 - list_providers / add_provider / update_provider / delete_provider / probe_provider
 - list_logs
@@ -38,8 +38,8 @@ from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.agent.exceptions import (
     ConfigError,
-    ConvoNotFound,
-    DuplicateConvoId,
+    ConversationNotFound,
+    DuplicateConversationId,
     DuplicateProviderName,
     ProviderNotFound,
     ToolNotFound,
@@ -75,7 +75,7 @@ class SidecarAgent(Protocol):
 
 
 class MethodBase:
-    """sidecar method handler 类的共享基(给 chat / convo / tool / provider / log 继承)。
+    """sidecar method handler 类的共享基(给 chat / conversation / tool / provider / log 继承)。
 
     职责:
     1. 持 `agent` 引用(子类 handler 通过 `self.agent` 访问 run / session_maker)
@@ -95,17 +95,17 @@ class MethodBase:
         """开 DB session + 翻译 repo 抛的语义异常 → RpcError。
 
         异常映射:
-        - ConvoNotFound / ProviderNotFound / ToolNotFound → ERR_NOT_FOUND
-        - DuplicateConvoId / DuplicateProviderName → ERR_DUPLICATE
+        - ConversationNotFound / ProviderNotFound / ToolNotFound → ERR_NOT_FOUND
+        - DuplicateConversationId / DuplicateProviderName → ERR_DUPLICATE
         - ConfigError(及子类:InvalidProviderOptions 等)→ ERR_INVALID_PARAMS
         - 其它非 RpcError 异常 → 不抓,让框架转 ERR_INTERNAL
         """
         async with self.runtime.session_maker() as session:
             try:
                 yield session
-            except (ConvoNotFound, ProviderNotFound, ToolNotFound) as e:
+            except (ConversationNotFound, ProviderNotFound, ToolNotFound) as e:
                 raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
-            except (DuplicateConvoId, DuplicateProviderName) as e:
+            except (DuplicateConversationId, DuplicateProviderName) as e:
                 raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
             except ConfigError as e:
                 raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
@@ -186,18 +186,22 @@ def register_methods(
     runtime = SidecarRuntime(agent, db_path=db_path, session_key=session_key)
 
     from chariot.sidecar.methods.chat import ChatMethod
-    from chariot.sidecar.methods.convo import ConvoMethods
+    from chariot.sidecar.methods.conversation import ConversationMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.provider import ProviderMethods
     from chariot.sidecar.methods.tool import ToolMethods
 
     server.method("chat")(ChatMethod(runtime))
 
-    convos = ConvoMethods(runtime)
-    server.method("list_convos")(convos.list_)
-    server.method("get_convo")(convos.get)
-    server.method("rename_convo")(convos.rename)
-    server.method("delete_convo")(convos.delete)
+    conversations = ConversationMethods(runtime)
+    server.method("list_conversations")(conversations.list_)
+    server.method("get_conversation")(conversations.get)
+    server.method("rename_conversation")(conversations.rename)
+    server.method("delete_conversation")(conversations.delete)
+    server.method("list_convos")(conversations.list_)
+    server.method("get_convo")(conversations.get)
+    server.method("rename_convo")(conversations.rename)
+    server.method("delete_convo")(conversations.delete)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

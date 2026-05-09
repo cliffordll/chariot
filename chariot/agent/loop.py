@@ -15,7 +15,7 @@ from chariot.agent.tool_execution import ToolExecutionService
 
 if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
-    from chariot.repos.convo_repo import ConvoRepo
+    from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
 
 
@@ -30,15 +30,15 @@ class AgentLoop:
         *,
         provider: BaseProvider,
         tools: dict[str, BaseTool],
-        repo: ConvoRepo | None,
-        convo_id: str | None,
+        repo: ConversationRepo | None,
+        conversation_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
     ) -> None:
         self._provider = provider
         self._tools = tools
         self._tool_execution = ToolExecutionService(tools)
         self._repo = repo
-        self._convo_id = convo_id
+        self._conversation_id = conversation_id
         self._max_iter = max_iter
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
@@ -146,26 +146,26 @@ class AgentLoop:
         return sr if isinstance(sr, str) else None
 
     async def _persist_assistant(self, assistant_blocks: list[dict[str, Any]]) -> None:
-        if self._repo is None or self._convo_id is None:
+        if self._repo is None or self._conversation_id is None:
             return
         if not assistant_blocks:
             return
         content = [entry["block"] for entry in assistant_blocks]
         await self._repo.append_message(
-            self._convo_id,
+            self._conversation_id,
             role="assistant",
             content=content,
             provider_name=self._provider.config.name,
         )
 
     async def _persist_tool_results(self, tool_results: list[ChatEvent]) -> None:
-        if self._repo is None or self._convo_id is None:
+        if self._repo is None or self._conversation_id is None:
             return
         if not tool_results:
             return
         content = [self._tool_result_event_to_block(ev) for ev in tool_results]
         await self._repo.append_message(
-            self._convo_id,
+            self._conversation_id,
             role="user",
             content=content,
         )

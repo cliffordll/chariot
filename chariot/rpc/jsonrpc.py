@@ -112,9 +112,9 @@ class JsonRpcServer:
             await ctx.notify("chat_event", {"kind": "message_start"})
             return {"stream_id": "..."}
 
-        @server.method("list_convos")
-        async def list_convos(params, ctx):
-            return {"convos": [...]}
+        @server.method("list_conversations")
+        async def list_conversations(params, ctx):
+            return {"conversations": [...]}
 
         # 接 stdio:
         reader, writer = await _stdio_pair()  # 见 chariot/sidecar/__main__.py

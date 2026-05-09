@@ -5,8 +5,8 @@
 - default tools 注入:`req.tools is None` + 装载 N 个 tool → AgentLoop 拿到 N 个 schema
 - default tools:`req.tools=[]` → 关闭工具调用(透传 [],不替换)
 - default tools:`req.tools=[<显式>]` → 透传(不替换)
-- stateless:无 convo_id → 不开 session(sessionmaker 不被调)
-- stateful:有 convo_id → ConvoLockManager.acquire 被调一次
+- stateless:无 conversation_id → 不开 session(sessionmaker 不被调)
+- stateful:有 conversation_id → ConversationLockManager.acquire 被调一次
 - 单例 / bootstrap:`current()` 未装载抛 RuntimeError;装载后可拿
 """
 
@@ -201,7 +201,7 @@ class TestRequestNormalization:
 
 class TestStatelessPath:
     async def test_no_session_opened(self) -> None:
-        """无 convo_id → AIAgent.run_chat 不调 sessionmaker。"""
+        """无 conversation_id → AIAgent.run_chat 不调 sessionmaker。"""
         provider = _CapturingProvider("p")
         sm_mock = AsyncMock()  # 任何调用都失败/记录
         agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=sm_mock)
@@ -225,7 +225,7 @@ class TestStatelessPath:
 
 class TestStatefulPath:
     async def test_lock_manager_acquire_called(self) -> None:
-        """有 convo_id → ConvoLockManager.acquire 被调一次。"""
+        """有 conversation_id → ConversationLockManager.acquire 被调一次。"""
         provider = _CapturingProvider("p")
         agent = AIAgent(
             providers={"p": provider},
@@ -235,7 +235,7 @@ class TestStatefulPath:
         req = ChatRequest(
             provider_name="p",
             messages=[Message(role="user", content="hi")],
-            convo_id="01H_TEST",
+            conversation_id="01H_TEST",
         )
         events = [ev async for ev in agent.run_chat(req)]
         # sessionmaker=None → yield 'no_sessionmaker' error

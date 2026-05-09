@@ -61,7 +61,7 @@
 - `chariot/database/`
   - SQLite session、ORM、migrations
 - `chariot/repos/`
-  - provider / tool / convo / log 等数据访问层
+  - provider / tool / conversation / log 等数据访问层
 - `packages/app/`
   - React 前端
 - `packages/desktop/tauri/`
@@ -88,7 +88,7 @@ React UI                             Tauri shell + Rust rpc client
 |                    chariot/sidecar/                        |
 |                                                            |
 |  methods/chat.py  methods/provider.py  methods/tool.py     |
-|  methods/convo.py methods/log.py                           |
+|  methods/conversation.py methods/log.py                           |
 +-------------------------------|----------------------------+
                                 |
                                 v
@@ -138,10 +138,10 @@ AgentLoop                                                  |
     +---------------------- stateful ----------------------+
                                                            |
                                                            v
-                                          ConvoLockManager.acquire(convo_id)
+                                          ConversationLockManager.acquire(conversation_id)
                                                            |
                                                            v
-                                                 ConvoRepo.ensure_exists(...)
+                                                 ConversationRepo.ensure_exists(...)
                                                            |
                                                            v
                                            persist new user messages to DB
@@ -224,14 +224,14 @@ AgentLoop                                                  |
 4. `chariot/sidecar/methods/chat.py` 解析 RPC 参数
 5. `AIAgent` 选择 provider、准备 request
 6. `AgentLoop` 消费 provider stream，执行 tool loop
-7. 会话和消息通过 `ConvoRepo` 落到 SQLite
+7. 会话和消息通过 `ConversationRepo` 落到 SQLite
 
 ### 4.2 Stateful request 路径
 
-有 `convo_id` 时，当前还会多经过这些步骤：
+有 `conversation_id` 时，当前还会多经过这些步骤：
 
-1. `ConvoLockManager` 获取本地会话锁
-2. `ConvoRepo.ensure_exists(...)`
+1. `ConversationLockManager` 获取本地会话锁
+2. `ConversationRepo.ensure_exists(...)`
 3. 持久化本轮新 user message
 4. 从 `messages` 表加载历史
 5. 拼出完整 request 再进入 `AgentLoop`
@@ -306,7 +306,7 @@ AgentLoop                                                  |
 
 - providers
 - tools
-- convos
+- conversations
 - messages
 - logs
 - memories

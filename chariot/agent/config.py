@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING, Any
 # 异常类型 0.6.0 起 re-export 自 exceptions.py,本模块不重复定义
 from chariot.agent.exceptions import (
     ConfigError,
-    ConvoNotFound,
-    DuplicateConvoId,
+    ConversationNotFound,
+    DuplicateConversationId,
     DuplicateProviderName,
     ProviderNotFound,
     ToolNotFound,
@@ -42,8 +42,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ChariotConfig",
     "ConfigError",
-    "ConvoNotFound",
-    "DuplicateConvoId",
+    "ConversationNotFound",
+    "DuplicateConversationId",
     "DuplicateProviderName",
     "ProviderEntry",
     "ProviderNotFound",

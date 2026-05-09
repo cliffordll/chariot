@@ -12,13 +12,13 @@
 
 from __future__ import annotations
 
-from chariot.repos.convo_repo import Convo, ConvoRepo
+from chariot.repos.conversation_repo import Conversation, ConversationRepo
 from chariot.repos.log_repo import LogRepo
 from chariot.repos.tool_repo import ToolRepo
 
 __all__ = [
-    "Convo",
-    "ConvoRepo",
+    "Conversation",
+    "ConversationRepo",
     "LogRepo",
     "ToolRepo",
 ]

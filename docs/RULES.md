@@ -12,7 +12,7 @@
 当前主名统一为：
 
 - `provider`
-- `convo`
+- `conversation`
 - `message`
 - `tool`
 - `skill`
@@ -31,17 +31,17 @@
 - 业务主概念统一使用 `provider`
 - `model` 只保留给上游模型名
 
-### 1.3 `convo` 作为主名
+### 1.3 `conversation` 作为主名
 
-仓库里“多轮对话单元”统一使用 `convo`。
+仓库里“多轮对话单元”统一使用 `conversation`。
 
 统一使用：
 
-- `ConvoRow`
-- `ConvoRepo`
-- `convo_id`
-- `list_convos`
-- `get_convo`
+- `ConversationRow`
+- `ConversationRepo`
+- `conversation_id`
+- `list_conversations`
+- `get_conversation`
 
 `conversation` 只允许留在兼容层和历史文档。
 
@@ -63,7 +63,7 @@
 
 只保留这些稳定缩写：
 
-- `convo`
+- `conversation`
 - `repo`
 - `rpc`
 - `cli`
@@ -181,6 +181,6 @@
 
 后续新代码统一按下面三条执行：
 
-1. 主概念统一叫 `provider`、`convo`
+1. 主概念统一叫 `provider`、`conversation`
 2. 规则上不再新造缩略词
 3. 命名和结构一起收，不做脱离模块的大扫除

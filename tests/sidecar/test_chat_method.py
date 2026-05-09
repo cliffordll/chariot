@@ -7,7 +7,7 @@ JsonRpcServer 走完完整 dispatch 路径"的端到端行为,而非单帧解析
 - 流式:N 个 ChatEvent → N 个 chat_event notify + 1 个 response
 - params 校验:provider_name 缺 / messages 缺 / role 非法 / content 类型错 →
   ERR_INVALID_PARAMS
-- 可选字段 pass-through:model / convo_id / max_tokens / system 进 ChatRequest
+- 可选字段 pass-through:model / conversation_id / max_tokens / system 进 ChatRequest
 - response shape:`{stream_id, ended_at}`(stream_id 是 UUID4 hex,ended_at
   是 epoch 浮点秒)
 - ChatEvent payload shape:`dataclasses.asdict` 形态(kind / message /
@@ -253,7 +253,7 @@ class TestOptionalFieldsPassThrough:
             "provider_name": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             "model": "claude-haiku-4-5",
-            "convo_id": "01H_TEST",
+            "conversation_id": "01H_TEST",
             "max_tokens": 1024,
             "system": "be nice",
         }
@@ -265,7 +265,7 @@ class TestOptionalFieldsPassThrough:
         assert captured is not None
         assert captured.provider_name == "mock"
         assert captured.model == "claude-haiku-4-5"
-        assert captured.convo_id == "01H_TEST"
+        assert captured.conversation_id == "01H_TEST"
         assert captured.max_tokens == 1024
         assert captured.system == "be nice"
 

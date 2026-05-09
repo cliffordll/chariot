@@ -1,13 +1,13 @@
 """`chariot` CLI 入口。
 
 子命令(0.6.0 库化后,撤 daemon `start` / `stop`;0.6.0 起
-`model` rename → `provider`,`conversation` rename → `convo`):
+`model` rename → `provider`,`conversation` 为主名,`convo` 保留兼容别名):
 
 - `chariot status`     —— DB 路径 / providers / tools / version
 - `chariot logs [-n N]`
 - `chariot stats [period]`
 - `chariot chat [text]` —— 一次性 / REPL,直接构造 AIAgent
-- `chariot provider ...` / `tool ...` / `convo ...`
+- `chariot provider ...` / `tool ...` / `conversation ...`
 - `chariot memory ...` / `eval ...` / `skill ...` / `checkpoint ...`
 """
 
@@ -24,7 +24,7 @@ from chariot.cli.commands import (
     checkpoint as checkpoint_mod,
 )
 from chariot.cli.commands import (
-    convo as convo_mod,
+    conversation as conversation_mod,
 )
 from chariot.cli.commands import (
     evals as eval_mod,
@@ -83,7 +83,7 @@ for mod in (
     chat_mod,
     provider_mod,
     tool_mod,
-    convo_mod,
+    conversation_mod,
     memory_mod,
     eval_mod,
     skill_mod,
