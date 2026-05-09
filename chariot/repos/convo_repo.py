@@ -15,9 +15,9 @@ v5(0.6.0)起表名 `conversations` rename → `convos`,字段
 
 不暴露的事
 ----------
-- ULID 生成:controller 层负责(`POST /admin/convos` 显式创建用 server
-  生成,模式 A 由 client 自带);repo 接受任意非空字符串作 id
-- ID 校验:controller 层做(正则 `^[0-9A-Z]{26}$`);repo 不重复校验
+- ULID 生成:surface 层负责(sidecar 路径下 client 自带 convo_id,首次 chat
+  时 ensure_exists);repo 接受任意非空字符串作 id
+- ID 校验:surface 层做(正则 `^[0-9A-Z]{26}$`);repo 不重复校验
 
 cascade delete 不依赖 SQLite PRAGMA foreign_keys —— `delete()` 手动 DELETE FROM
 messages,行为不被全局开关影响。

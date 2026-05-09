@@ -29,8 +29,8 @@
     "publisher": "Chariot",
     "copyright": "Copyright © 2025 Chariot",
     "category": "DeveloperTool",
-    "shortDescription": "本地 LLM API 格式转换中枢",
-    "longDescription": "Chariot 是本机运行的 LLM API 代理 + 翻译器:任一请求格式(Messages / Chat Completions / Responses)可转到任意上游,内置 mock 上游允许开箱即用。",
+    "shortDescription": "本机自演化 CLI agent",
+    "longDescription": "Chariot 是本机跑的自演化 CLI agent。核心是协议无关的 Python 库(chariot/agent/),跨 CLI 与 Tauri 桌面壳多 surface;内置 MockProvider 零外部依赖,通过 BaseProvider 可挂真实 LLM 后端(当前 AnthropicProvider)。",
     "externalBin": ["binaries/chariot-sidecar"],
     "icon": [
       "icons/32x32.png",

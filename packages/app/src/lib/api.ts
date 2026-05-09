@@ -290,6 +290,8 @@ export interface ConversationDetail {
 }
 
 export type ModelEntry = Provider;
+/** 跟 `ModelEntry` 等价,新代码用这个名字(Provider 概念已经替代 Model)。 */
+export type ProviderEntry = Provider;
 
 export interface ModelsListResponse {
   /** entry name 列表(0.2.x 兼容字段)。 */
@@ -298,6 +300,8 @@ export interface ModelsListResponse {
   types: string[];
   entries: Provider[];
 }
+/** 跟 `ModelsListResponse` 等价,新代码用这个名字。 */
+export type ProvidersListResponse = ModelsListResponse;
 
 export interface ToolsListResponse {
   /** ToolRegistry.known_types();sidecar 暂不返,固定空数组。 */

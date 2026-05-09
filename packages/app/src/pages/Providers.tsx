@@ -32,21 +32,24 @@ import {
 import {
   api,
   type ApiError,
-  type ModelEntry,
-  type ModelsListResponse,
+  type ProviderEntry,
+  type ProvidersListResponse,
 } from "@/lib/api";
 
 /**
- * Models 页 —— 模型管理(0.3.1 路由模型重构后)。
+ * Providers 页 —— Provider 管理(0.6.0+ Model 概念整体 rename Provider)。
  *
  * 能力:
  * - 列出所有 entries:行内拆开展示 model / api_key(脱敏) / base_url 主键
+ *   注:`options.model` 是 Anthropic API 的 LLM model id 字段(如 claude-sonnet-4-6),
+ *   跟 Provider 概念不是一回事 —— Provider 是 chariot 内部的路由 entry,
+ *   model 是上游 LLM 真实 id
  * - 展开行 → ParamsEditor:KV 形式编辑 sampling 默认参数,Save 写 DB
- * - 新建 / 编辑 / 复制 / 删除 entry(走 admin/models/entries CRUD)
- * - Test 按钮跑探针
+ * - 新建 / 编辑 / 复制 / 删除 entry(走 sidecar `add_provider` / `edit_provider` /
+ *   `delete_provider` RPC method)
+ * - Test 按钮跑探针(`probe_provider`)
  *
- * 0.3.1 起 active 概念删除;client 在 body.model 写 entry name 直接路由,
- * Chat 页负责选哪个 entry。
+ * Chat 页负责选哪个 entry(`ChatRequest.provider_name` 路由)。
  */
 
 interface FieldSchema {
@@ -89,14 +92,14 @@ const TYPE_SCHEMAS: Record<string, FieldSchema[]> = {
  * Add 模式下的快速预设。点击 chip → 自动填 name + options.model。
  * 用户仍需自己填 api_key(或留空用 env)。其它 type 暂不预设。
  */
-interface ModelTemplate {
+interface ProviderTemplate {
   id: string;
   label: string;
   type: string;
   options: Record<string, string>;
 }
 
-const TEMPLATES: ModelTemplate[] = [
+const TEMPLATES: ProviderTemplate[] = [
   {
     id: "claude-opus-4-5",
     label: "Claude Opus 4.5",
@@ -117,9 +120,9 @@ const TEMPLATES: ModelTemplate[] = [
   },
 ];
 
-type ModelsState =
+type ProvidersState =
   | { kind: "loading" }
-  | { kind: "ok"; data: ModelsListResponse }
+  | { kind: "ok"; data: ProvidersListResponse }
   | { kind: "err"; message: string };
 
 type ProbeState =
@@ -131,13 +134,13 @@ type ProbeState =
 type DialogMode =
   | { kind: "closed" }
   | { kind: "add" }
-  | { kind: "edit"; source: ModelEntry }
-  | { kind: "duplicate"; source: ModelEntry };
+  | { kind: "edit"; source: ProviderEntry }
+  | { kind: "duplicate"; source: ProviderEntry };
 
 type DeleteState = { open: false } | { open: true; name: string };
 
-export default function Models() {
-  const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
+export default function Providers() {
+  const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
   const [dialog, setDialog] = useState<DialogMode>({ kind: "closed" });
   const [del, setDel] = useState<DeleteState>({ open: false });
@@ -145,13 +148,13 @@ export default function Models() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    setModelsState({ kind: "loading" });
+    setProvidersState({ kind: "loading" });
     try {
       const data = await api.listModels();
-      setModelsState({ kind: "ok", data });
+      setProvidersState({ kind: "ok", data });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setModelsState({ kind: "err", message: msg });
+      setProvidersState({ kind: "err", message: msg });
     }
   }, []);
 
@@ -189,11 +192,11 @@ export default function Models() {
   }, []);
 
   const findEntry = useCallback(
-    (name: string): ModelEntry | undefined => {
-      if (modelsState.kind !== "ok") return undefined;
-      return modelsState.data.entries.find((e) => e.name === name);
+    (name: string): ProviderEntry | undefined => {
+      if (providersState.kind !== "ok") return undefined;
+      return providersState.data.entries.find((e) => e.name === name);
     },
-    [modelsState],
+    [providersState],
   );
 
   const openEdit = useCallback(
@@ -219,7 +222,7 @@ export default function Models() {
   return (
     <section>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Models</h1>
+        <h1 className="text-2xl font-semibold">Providers</h1>
         <div className="flex items-center gap-2">
           <Button size="sm" onClick={() => setDialog({ kind: "add" })}>
             + Add
@@ -230,8 +233,8 @@ export default function Models() {
         </div>
       </div>
 
-      <ModelsCard
-        modelsState={modelsState}
+      <ProvidersCard
+        providersState={providersState}
         probeStates={probeStates}
         expanded={expanded}
         onToggleExpand={toggleExpand}
@@ -245,7 +248,7 @@ export default function Models() {
       {dialog.kind !== "closed" && (
         <AddEditDialog
           mode={dialog}
-          knownTypes={modelsState.kind === "ok" ? modelsState.data.types : []}
+          knownTypes={providersState.kind === "ok" ? providersState.data.types : []}
           onClose={() => setDialog({ kind: "closed" })}
           onSuccess={() => void load()}
         />
@@ -267,8 +270,8 @@ export default function Models() {
 
 // ---------- 列表卡片 ----------
 
-function ModelsCard({
-  modelsState,
+function ProvidersCard({
+  providersState,
   probeStates,
   expanded,
   onToggleExpand,
@@ -278,7 +281,7 @@ function ModelsCard({
   onDelete,
   onParamsSaved,
 }: {
-  modelsState: ModelsState;
+  providersState: ProvidersState;
   probeStates: Record<string, ProbeState>;
   expanded: Set<string>;
   onToggleExpand: (name: string) => void;
@@ -288,21 +291,21 @@ function ModelsCard({
   onDelete: (name: string) => void;
   onParamsSaved: () => void;
 }) {
-  if (modelsState.kind === "loading") {
+  if (providersState.kind === "loading") {
     return (
       <div className="max-w-4xl rounded-lg border border-border p-4 text-sm text-muted-foreground">
-        Loading models…
+        Loading providers…
       </div>
     );
   }
-  if (modelsState.kind === "err") {
+  if (providersState.kind === "err") {
     return (
       <div className="max-w-4xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        无法读取 model 列表:{modelsState.message}
+        无法读取 provider 列表:{providersState.message}
       </div>
     );
   }
-  const { data } = modelsState;
+  const { data } = providersState;
 
   return (
     <div className="max-w-4xl rounded-lg border border-border p-4">
@@ -319,7 +322,7 @@ function ModelsCard({
           </div>
           <ul className="mb-4 divide-y divide-border rounded-md border border-border">
             {data.entries.map((entry) => (
-              <ModelRow
+              <ProviderRow
                 key={entry.name}
                 entry={entry}
                 state={probeStates[entry.name] ?? { kind: "idle" }}
@@ -349,7 +352,7 @@ function ModelsCard({
   );
 }
 
-function ModelRow({
+function ProviderRow({
   entry,
   state,
   isExpanded,
@@ -360,7 +363,7 @@ function ModelRow({
   onDelete,
   onParamsSaved,
 }: {
-  entry: ModelEntry;
+  entry: ProviderEntry;
   state: ProbeState;
   isExpanded: boolean;
   onToggleExpand: () => void;
@@ -438,7 +441,7 @@ function ModelRow({
 }
 
 /** 展开区 · options 主键只读展示(model / api_key 脱敏 / base_url)。 */
-function OptionsBlock({ entry }: { entry: ModelEntry }) {
+function OptionsBlock({ entry }: { entry: ProviderEntry }) {
   const o = entry.options;
   const model = typeof o.model === "string" ? o.model : null;
   const apiKey = typeof o.api_key === "string" ? o.api_key : null;
@@ -584,7 +587,7 @@ function ParamsEditor({
   entry,
   onSaved,
 }: {
-  entry: ModelEntry;
+  entry: ProviderEntry;
   onSaved: () => void;
 }) {
   const [rows, setRows] = useState<ParamRow[]>(() => paramsToRows(entry.params));
@@ -776,7 +779,7 @@ function AddEditDialog({
 
   const title =
     mode.kind === "add"
-      ? "新建 model entry"
+      ? "新建 provider entry"
       : mode.kind === "edit"
         ? `编辑 ${initial!.name}`
         : `复制 ${initial!.name}`;
@@ -921,7 +924,7 @@ function AddEditDialog({
             <p className="rounded-md border border-amber-300/30 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
               type <code className="font-mono">{type}</code> 没有 UI 表单 schema。
               建议用 CLI 加:
-              <code className="ml-1 font-mono">chariot model add --type {type} -o key=value</code>
+              <code className="ml-1 font-mono">chariot provider add --type {type} -o key=value</code>
             </p>
           )}
 
