@@ -17,10 +17,10 @@
 | SQLite | 本地文件型 DB,单文件 `~/.chariot/chariot.db`,零运维 |
 | **aiosqlite** | 异步驱动,不在代码层 import,只作 SQLAlchemy 驱动后端 |
 | **SQLAlchemy 2.x async** | 所有 DB 操作(业务 CRUD + migrations)统一走这层 |
-| `chariot/database/models.py` | ORM 声明(`LogEntry` / `ProviderRow` / `ToolRow` / `ConvoRow` / `MessageRow`) |
+| `chariot/database/models.py` | ORM 声明(`LogEntry` / `ProviderRow` / `ToolRow` / `ConversationRow` / `MessageRow`) |
 | `chariot/database/session.py` | engine / session 工厂 + migration runner |
 | `chariot/database/migrations/` | `NNN_*.sql` schema 变更文件 |
-| `chariot/repos/*.py` | 业务 Repo 层(`LogRepo` / `ProviderRepo` / `ToolRepo` / `ConvoRepo`),把 SA 操作包成领域语义 |
+| `chariot/repos/*.py` | 业务 Repo 层(`LogRepo` / `ProviderRepo` / `ToolRepo` / `ConversationRepo`),把 SA 操作包成领域语义 |
 
 业务路径优先走 Repo;直接拿 `AsyncSession` 写 raw `select(...)` 只在临时脚本 /
 还没沉淀 Repo 的场景用。
@@ -94,7 +94,7 @@ async with sm() as session:
 
 ### 通过 AIAgent / Surface 路径
 
-`AIAgent.run(req)` 内部自己拿 session、调 `ConvoRepo` / `LogWriter`,surface
+`AIAgent.run(req)` 内部自己拿 session、调 `ConversationRepo` / `LogWriter`,surface
 层(CLI / sidecar method)只调 `agent.run`,不直接 open session。
 
 ### 脱离任何 chariot 上下文(纯脚本 / 测试)
@@ -167,7 +167,7 @@ ChariotORM 主键策略**两种并存**,别混:
 | `LogEntry` | `id` | 32 字符 ULID | `session.get(LogEntry, "<26-char ulid>")` |
 | `ProviderRow` | `id` | 自增 int | `session.get(ProviderRow, 1)` —— 但业务上**别这么查** |
 | `ProviderRow` | `name` | 唯一索引(用户面 ID) | `select(ProviderRow).where(ProviderRow.name == "claude")` |
-| `ConvoRow` | `id` | ULID | `session.get(ConvoRow, "<ulid>")` |
+| `ConversationRow` | `id` | ULID | `session.get(ConversationRow, "<ulid>")` |
 
 `ProviderRow.id` 自增 int 是 ORM 内部 PK,业务上唯一标识用 `name`(带 `unique=True` + 索引)。
 
@@ -503,7 +503,7 @@ from pathlib import Path
 c = sqlite3.connect(str(Path.home()/'.chariot/chariot.db'))
 print('user_version =', c.execute('PRAGMA user_version').fetchone()[0])
 print('tables:', [r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\").fetchall()])
-for t in ('logs', 'providers', 'tools', 'convos', 'messages', 'settings'):
+for t in ('logs', 'providers', 'tools', 'conversations', 'messages', 'settings'):
     cols = [r[1] for r in c.execute(f'PRAGMA table_info({t})').fetchall()]
     print(f'{t}:', cols)
 "
@@ -534,7 +534,7 @@ SQLite 单写并发:一个写事务未 commit,其他写阻塞。打印连接池�
 print(engine.pool.status())
 ```
 
-`ConvoLockManager` 已经在进程内 + DB advisory 双层串行同 convo_id 写,但跨表
+`ConversationLockManager` 已经在进程内 + DB advisory 双层串行同 conversation_id 写,但跨表
 的事务卡顿仍可能出现(超长 tool 执行 / 大批量 log 写),用 `engine.pool.status()`
 判。
 

@@ -1,4 +1,4 @@
--- Chariot schema v6 · 把 `models` 表改名 `providers`,字段
+-- Chariot schema v5 · 把 `models` 表改名 `providers`,字段
 -- `messages.model_name` 改名 `provider_name`,`logs.model` 改名 `provider`
 -- (跨层缩写统一:0.6.0 abstract 层已经是 BaseProvider,DB 层跟上)
 --
@@ -17,4 +17,4 @@ ALTER TABLE messages RENAME COLUMN model_name TO provider_name;
 
 ALTER TABLE logs RENAME COLUMN model TO provider;
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 5;

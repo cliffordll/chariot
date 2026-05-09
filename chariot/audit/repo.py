@@ -1,4 +1,4 @@
-"""AuditRepo:`audit_events` 表的数据访问层(v8)。"""
+"""AuditRepo:`audit_events` 表的数据访问层(v7)。"""
 
 from __future__ import annotations
 

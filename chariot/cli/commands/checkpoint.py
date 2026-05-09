@@ -17,7 +17,7 @@ checkpoint_app = typer.Typer(
 )
 
 
-@checkpoint_app.command("list", help="列出 checkpoint records")
+@checkpoint_app.command("list", help="列出 checkpoints")
 def list_cmd() -> None:
     asyncio.run(_list())
 
@@ -26,7 +26,7 @@ async def _list() -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
         entries = await CheckpointRepo(session).list_entries()
     if not entries:
-        Renderer.out("(没有 checkpoint records)")
+        Renderer.out("(没有 checkpoints)")
         return
     rows = [(entry.id, entry.name, entry.kind, entry.target or "") for entry in entries]
     Renderer.table(["id", "name", "kind", "target"], rows, title="checkpoints")

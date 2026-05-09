@@ -1,4 +1,4 @@
-"""EvalRepo:`eval_runs` + `eval_cases` 表的数据访问层(v8)。"""
+"""EvalRepo:`eval_runs` + `eval_cases` 表的数据访问层(v7)。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""SkillRepo:`skills` 表的数据访问层(v8)。"""
+"""SkillRepo:`skills` 表的数据访问层(v7)。"""
 
 from __future__ import annotations
 

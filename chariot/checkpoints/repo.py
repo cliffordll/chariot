@@ -1,4 +1,4 @@
-"""CheckpointRepo:`checkpoint_records` 表的数据访问层(v8)。"""
+"""CheckpointRepo:`checkpoints` 表的数据访问层(v7)。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class CheckpointEntry:
 
 
 class CheckpointRepo:
-    """`checkpoint_records` 表的数据访问层。"""
+    """`checkpoints` 表的数据访问层。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session

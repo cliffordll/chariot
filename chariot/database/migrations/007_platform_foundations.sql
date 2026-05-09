@@ -1,4 +1,4 @@
--- Chariot schema v8 · 平台基础设施最小落点
+-- Chariot schema v7 · 平台基础设施最小落点
 -- 只落 Phase 4 的最小物理基础:memory / eval / audit / checkpoints / skills。
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_events_status ON audit_events(status);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at);
 
-CREATE TABLE IF NOT EXISTS checkpoint_records (
+CREATE TABLE IF NOT EXISTS checkpoints (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     kind TEXT NOT NULL,
@@ -60,9 +60,9 @@ CREATE TABLE IF NOT EXISTS checkpoint_records (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_checkpoint_records_name ON checkpoint_records(name);
-CREATE INDEX IF NOT EXISTS idx_checkpoint_records_kind ON checkpoint_records(kind);
-CREATE INDEX IF NOT EXISTS idx_checkpoint_records_created_at ON checkpoint_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_name ON checkpoints(name);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_kind ON checkpoints(kind);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_created_at ON checkpoints(created_at);
 
 CREATE TABLE IF NOT EXISTS skills (
     id TEXT PRIMARY KEY,
@@ -77,3 +77,5 @@ CREATE TABLE IF NOT EXISTS skills (
 
 CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
 CREATE INDEX IF NOT EXISTS idx_skills_enabled ON skills(enabled);
+
+PRAGMA user_version = 7;

@@ -33,7 +33,7 @@ class TestMigrationV8:
             "eval_runs",
             "eval_cases",
             "audit_events",
-            "checkpoint_records",
+            "checkpoints",
             "skills",
         }
         rows = (

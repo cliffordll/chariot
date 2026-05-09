@@ -1,4 +1,4 @@
--- Chariot schema v7 · 给 `providers` 表加 `is_default` 列(默认 provider 机制)。
+-- Chariot schema v6 · 给 `providers` 表加 `is_default` 列(默认 provider 机制)。
 --
 -- 同 commit 落 `ProviderRepo.get_default / set_default / unset_default` +
 -- CLI `provider use` / `provider show` 命令。`chariot chat` 不传 `--provider`
@@ -9,4 +9,4 @@
 
 ALTER TABLE providers ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
 
-PRAGMA user_version = 7;
+PRAGMA user_version = 6;

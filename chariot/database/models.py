@@ -9,22 +9,19 @@
 - v4(0.4.0):加 `conversations / messages / tools` 三表 —— 多轮会话层 +
   Tool 层。messages.role 仅 `user / assistant`(Anthropic 协议原生两种),
   tool_use / tool_result 嵌入 content blocks 数组;tools 4 条 seeded fixture
-- v5(0.6.0):`conversations` rename → `convos`,`messages.conversation_id`
-  rename → `convo_id`(跨层缩写统一,详见 docs/DESIGN.md §7.1)
-- v6(0.6.0):`models` rename → `providers`,`messages.model_name` rename →
+- v5(0.6.0):`models` rename → `providers`,`messages.model_name` rename →
   `provider_name`,`logs.model` rename → `provider`(0.6.0 抽象层已是
   BaseProvider,DB 层跟上;`ChatRequest.model` / options.model 仍叫 model
   对齐 Claude API)
-- v7(0.6.0):`providers` 加 `is_default` 列(同 commit 落 `ProviderRepo.get_default
+- v6(0.6.0):`providers` 加 `is_default` 列(同 commit 落 `ProviderRepo.get_default
   / set_default / unset_default` + CLI `provider use` / `provider show` 命令)
-- v8(0.6.5+):平台基础设施最小落点 —— `memories / eval_runs / eval_cases /
-  audit_events / checkpoint_records / skills`
-- v9(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
-
+- v7(0.6.5+):平台基础设施最小落点 —— `memories / eval_runs / eval_cases /
+  audit_events / checkpoints / skills`
+- v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
-- `ConvoRow.id` / `MessageRow.id` 是 26 字符 ULID 字符串(历史迁移前的旧
+- `ConversationRow.id` / `MessageRow.id` 是 26 字符 ULID 字符串(历史迁移前的旧
   message 行会保留 legacy 文本 id)
 """
 
@@ -100,8 +97,8 @@ class ProviderRow(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 
-class ConvoRow(Base):
-    """`convos` 表(v5 起;v4 时叫 `conversations`):多轮对话单元。
+class ConversationRow(Base):
+    """`conversations` 表(v5 起;v4 时叫 `conversations`):多轮对话单元。
 
     - `id`:26 字符 ULID(client 或 server 生成,正则校验在 controller 层做);
       ULID 单调时间戳前缀让 `ORDER BY id` 即时间序
@@ -111,7 +108,7 @@ class ConvoRow(Base):
       "我用了哪个 model"),不跟 v6 rename
     """
 
-    __tablename__ = "convos"
+    __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
@@ -127,17 +124,17 @@ class MessageRow(Base):
       blocks,tool_result 嵌在 user.content blocks
     - `content`:JSON,原样存 anthropic content(字符串或 blocks 数组);
       `SELECT * ORDER BY seq` 直接构成 Anthropic messages 数组,零翻译成本
-    - `seq`:会话内单调 0 起;`(convo_id, seq)` UNIQUE
+    - `seq`:会话内单调 0 起;`(conversation_id, seq)` UNIQUE
     - `provider_name`:仅 role='assistant' 行非空,记本轮用的 provider entry name
       (v6 起;v4~v5 时叫 `model_name`)
-    - 不设 FK:cascade delete 由 `ConvoRepo.delete()` 手动 DELETE FROM messages
-      WHERE convo_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
+    - 不设 FK:cascade delete 由 `ConversationRepo.delete()` 手动 DELETE FROM messages
+      WHERE conversation_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
     """
 
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
-    convo_id: Mapped[str] = mapped_column(index=True)
+    conversation_id: Mapped[str] = mapped_column(index=True)
     seq: Mapped[int]
     role: Mapped[str]  # 'user' | 'assistant'
     content: Mapped[str]  # JSON-serialized;str 或 list[dict]
@@ -218,9 +215,9 @@ class AuditEventRow(Base):
 
 
 class CheckpointRow(Base):
-    """`checkpoint_records` 表:v8 起的 checkpoint 最小基础。"""
+    """`checkpoints` 表:v8 起的 checkpoint 最小基础。"""
 
-    __tablename__ = "checkpoint_records"
+    __tablename__ = "checkpoints"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     name: Mapped[str] = mapped_column(index=True)

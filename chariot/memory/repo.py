@@ -1,4 +1,4 @@
-"""MemoryRepo:`memories` 表的数据访问层(v8)。"""
+"""MemoryRepo:`memories` 表的数据访问层(v7)。"""
 
 from __future__ import annotations
 
