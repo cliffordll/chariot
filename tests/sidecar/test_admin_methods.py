@@ -415,9 +415,7 @@ class TestChatPerCallOverride:
 
     async def test_base_url_creates_per_call_agent(self, server: JsonRpcServer) -> None:
         """带 base_url → 走 AgentRegistry.reserve,registry size 变 1。"""
-        await self._run_chat(
-            server, self._chat_params(base_url="https://override.example/v1")
-        )
+        await self._run_chat(server, self._chat_params(base_url="https://override.example/v1"))
         assert AgentRegistry.size() == 1
 
     async def test_api_key_creates_per_call_agent(self, server: JsonRpcServer) -> None:
@@ -432,14 +430,8 @@ class TestChatPerCallOverride:
         await self._run_chat(server, params)
         assert AgentRegistry.size() == 1
 
-    async def test_different_override_creates_separate_agents(
-        self, server: JsonRpcServer
-    ) -> None:
+    async def test_different_override_creates_separate_agents(self, server: JsonRpcServer) -> None:
         """不同 base_url → 各自缓存,session_key hash 不撞。"""
-        await self._run_chat(
-            server, self._chat_params(base_url="https://override-a.example")
-        )
-        await self._run_chat(
-            server, self._chat_params(base_url="https://override-b.example")
-        )
+        await self._run_chat(server, self._chat_params(base_url="https://override-a.example"))
+        await self._run_chat(server, self._chat_params(base_url="https://override-b.example"))
         assert AgentRegistry.size() == 2

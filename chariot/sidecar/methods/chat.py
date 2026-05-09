@@ -94,9 +94,9 @@ class ChatMethod(MethodBase):
 
         # 16 字符 sha256 prefix 足够区分 — 撞库不是威胁,人为指定的 (base_url,
         # api_key) 组合是有限的;LRU 32 满了自然淘汰
-        digest = hashlib.sha256(
-            json.dumps(options, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
+        digest = hashlib.sha256(json.dumps(options, sort_keys=True).encode("utf-8")).hexdigest()[
+            :16
+        ]
         session_key = f"sidecar:override:{provider_name}:{digest}"
 
         return await AgentRegistry.reserve(
