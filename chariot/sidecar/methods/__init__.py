@@ -45,6 +45,7 @@ from chariot.agent.exceptions import (
     ToolNotFound,
 )
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+from chariot.sidecar.runtime import SidecarRuntime
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -85,8 +86,9 @@ class MethodBase:
     让 noun 子类 `from chariot.sidecar.methods import MethodBase` 一行 import 即用。
     """
 
-    def __init__(self, agent: SidecarAgent) -> None:
-        self.agent = agent
+    def __init__(self, runtime: SidecarRuntime) -> None:
+        self.runtime = runtime
+        self.agent = runtime.agent
 
     @asynccontextmanager
     async def _session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -98,7 +100,7 @@ class MethodBase:
         - ConfigError(及子类:InvalidProviderOptions 等)→ ERR_INVALID_PARAMS
         - 其它非 RpcError 异常 → 不抓,让框架转 ERR_INTERNAL
         """
-        async with self.agent.session_maker() as session:
+        async with self.runtime.session_maker() as session:
             try:
                 yield session
             except (ConvoNotFound, ProviderNotFound, ToolNotFound) as e:
@@ -162,6 +164,7 @@ def register_methods(
     agent: SidecarAgent,
     *,
     db_path: Path,
+    session_key: str | None = None,
 ) -> None:
     """把 sidecar 所有 15 个业务 method 注册到给定 server(显式调用)。
 
@@ -180,32 +183,34 @@ def register_methods(
     # 子模块惰性 import:`__init__` 加载完 → 调 register_methods → 这时各
     # noun 文件首次 import,它们 `from chariot.sidecar.methods import MethodBase`
     # 已经成立
+    runtime = SidecarRuntime(agent, db_path=db_path, session_key=session_key)
+
     from chariot.sidecar.methods.chat import ChatMethod
     from chariot.sidecar.methods.convo import ConvoMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.provider import ProviderMethods
     from chariot.sidecar.methods.tool import ToolMethods
 
-    server.method("chat")(ChatMethod(agent, db_path=db_path))
+    server.method("chat")(ChatMethod(runtime))
 
-    convos = ConvoMethods(agent)
+    convos = ConvoMethods(runtime)
     server.method("list_convos")(convos.list_)
     server.method("get_convo")(convos.get)
     server.method("rename_convo")(convos.rename)
     server.method("delete_convo")(convos.delete)
 
-    tools = ToolMethods(agent)
+    tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)
     server.method("enable_tool")(tools.enable)
     server.method("disable_tool")(tools.disable)
     server.method("config_tool")(tools.config)
 
-    providers = ProviderMethods(agent)
+    providers = ProviderMethods(runtime)
     server.method("list_providers")(providers.list_)
     server.method("add_provider")(providers.add)
     server.method("update_provider")(providers.update)
     server.method("delete_provider")(providers.delete)
     server.method("probe_provider")(providers.probe)
 
-    logs = LogMethods(agent)
+    logs = LogMethods(runtime)
     server.method("list_logs")(logs.list_)

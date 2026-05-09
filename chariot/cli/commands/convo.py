@@ -1,4 +1,4 @@
-"""`chariot convo list / show / rm / rename` —— 多轮会话管理。
+"""`chariot convo list / show / delete / rename` —— 多轮会话管理。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ConvoRepo。
 
@@ -10,7 +10,8 @@
 
 写:
 - `chariot convo show <id>`:详情 + 最近 N 条 messages 摘要
-- `chariot convo rm <id>`:删除(cascade messages)
+- `chariot convo delete <id>`:删除(cascade messages)
+- `chariot convo rm <id>`:删除别名(兼容)
 - `chariot convo rename <id> <new-title>`:改 title
 """
 
@@ -118,10 +119,11 @@ async def _show(convo_id: str, tail: int) -> None:
         Renderer.out(f"#{m.seq:3d} {m.role:9s}{marker}: {preview}")
 
 
-# ---------- rm ----------
+# ---------- delete / rm ----------
 
 
-@convo_app.command("rm", help="删除会话(cascade messages)")
+@convo_app.command("delete", help="删除会话(cascade messages)")
+@convo_app.command("rm", help="删除会话(cascade messages); `delete` 的兼容别名")
 def rm_cmd(
     convo_id: Annotated[str, typer.Argument(help="convo id (ULID)")],
 ) -> None:

@@ -125,6 +125,14 @@ class AgentRegistry:
             cls._agents.clear()
 
     @classmethod
+    async def release_prefix(cls, prefix: str) -> None:
+        """Release every cached agent whose session key starts with ``prefix``."""
+
+        async with cls._lock:
+            for key in [key for key in cls._agents if key.startswith(prefix)]:
+                cls._agents.pop(key, None)
+
+    @classmethod
     def size(cls) -> int:
         """当前 cache 中 agent 数量(测试 / debug 用,不加锁,松一致)。"""
         return len(cls._agents)

@@ -153,7 +153,7 @@ def test_provider_subcommand_group_has_list_show_use_and_crud() -> None:
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "use", "probe", "add", "edit", "rm", "copy"):
+    for sub in ("list", "show", "use", "probe", "add", "update", "delete", "rm", "copy"):
         assert sub in out, f"`chariot provider --help` 缺少子命令 {sub!r}"
 
 
@@ -259,3 +259,15 @@ def test_short_quiet_flag() -> None:
     runner.invoke(app, ["-q", "chat", "--max-tokens", "abc", "hi"])
     assert Renderer.QUIET is True
     Renderer.QUIET = False
+
+
+def test_convo_delete_subcommand_visible() -> None:
+    result = runner.invoke(app, ["convo", "--help"])
+    assert result.exit_code == 0
+    assert "delete" in _plain(result.output)
+
+
+def test_provider_delete_subcommand_visible() -> None:
+    result = runner.invoke(app, ["provider", "--help"])
+    assert result.exit_code == 0
+    assert "delete" in _plain(result.output)

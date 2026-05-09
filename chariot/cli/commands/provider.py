@@ -1,6 +1,6 @@
 """`chariot provider <subcmd>` —— Provider entry CRUD + 默认切换。
 
-子命令:list / show / use / probe / add / update / rm / copy。
+子命令:list / show / use / probe / add / update / delete / copy。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ProviderRepo + ProviderProber。
 0.6.0 起 `chariot model` rename 成 `chariot provider`(跟 ProviderRegistry /
@@ -21,7 +21,8 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
 CRUD:
 - `chariot provider add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
 - `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`:改 entry
-- `chariot provider rm <name>`:删 entry
+- `chariot provider delete <name>`:删 entry
+- `chariot provider rm <name>`:删 entry 别名(兼容)
 - `chariot provider copy <name> [--as new-name]`:复制(碰撞自动 _copy_N)
 
 `-o key=value` / `-p key=value` 都可重复;value 全部按字符串处理。
@@ -337,10 +338,11 @@ async def _update(
     Renderer.out(f"~ {entry.name} (type={entry.type})")
 
 
-# ---------- rm ----------
+# ---------- delete / rm ----------
 
 
-@provider_app.command("rm", help="删除 entry")
+@provider_app.command("delete", help="删除 entry")
+@provider_app.command("rm", help="删除 entry; `delete` 的兼容别名")
 def rm_cmd(
     name: Annotated[str, typer.Argument(help="要删的 entry 名")],
 ) -> None:
