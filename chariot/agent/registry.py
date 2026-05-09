@@ -50,7 +50,7 @@ class AgentRegistry:
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": "...", "api_key": "..."}},
         )
-        async for ev in agent.run(req):
+        async for ev in agent.run_chat(req):
             ...
 
         # session 结束:

@@ -8,7 +8,7 @@
 
 - list_convos / get_convo / rename_convo / delete_convo
 - list_tools / enable_tool / disable_tool / config_tool
-- list_providers / add_provider / edit_provider / delete_provider / probe_provider
+- list_providers / add_provider / update_provider / delete_provider / probe_provider
 - list_logs
 
 错误码映射:NOT_FOUND / DUPLICATE / INVALID_PARAMS 各 1-2 个 case。
@@ -254,7 +254,7 @@ class TestProviderMethods:
         )
         assert line["error"]["code"] == JsonRpcServer.ERR_DUPLICATE
 
-    async def test_edit_provider(self, server: JsonRpcServer) -> None:
+    async def test_update_provider(self, server: JsonRpcServer) -> None:
         await _call(
             server,
             "add_provider",
@@ -262,13 +262,13 @@ class TestProviderMethods:
         )
         line = await _call(
             server,
-            "edit_provider",
+            "update_provider",
             {"name": "p1", "options": {"x": 2}},
         )
         assert line["result"]["provider"]["options"] == {"x": 2}
 
-    async def test_edit_provider_not_found(self, server: JsonRpcServer) -> None:
-        line = await _call(server, "edit_provider", {"name": "ghost", "options": {}})
+    async def test_update_provider_not_found(self, server: JsonRpcServer) -> None:
+        line = await _call(server, "update_provider", {"name": "ghost", "options": {}})
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_delete_provider(self, server: JsonRpcServer) -> None:
@@ -368,7 +368,7 @@ class TestRegistration:
             "config_tool",
             "list_providers",
             "add_provider",
-            "edit_provider",
+            "update_provider",
             "delete_provider",
             "probe_provider",
             "list_logs",

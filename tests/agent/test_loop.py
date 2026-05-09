@@ -166,7 +166,7 @@ class TestMultiTurnWithToolUse:
         tools = {"stub": _StubTool("stub")}
         loop = _make_loop(turns, tools)
 
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         kinds = [ev.kind for ev in events]
         assert kinds.count("message_start") == 3
         assert kinds.count("tool_result") == 2
@@ -181,7 +181,7 @@ class TestMultiTurnWithToolUse:
             _text_turn(),
         ]
         loop = _make_loop(turns, tools)
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         tr = next(e for e in events if e.kind == "tool_result")
         assert tr.tool_use_id == "toolu_abc"
         assert tr.is_error is False
@@ -194,7 +194,7 @@ class TestMultiTurnWithToolUse:
             _text_turn(),
         ]
         loop = _make_loop(turns, {"stub": stub})
-        _ = [ev async for ev in loop.run(req)]
+        _ = [ev async for ev in loop.stream_chat(req)]
         assert stub.last_input == {"path": "/tmp"}
 
 
@@ -212,7 +212,7 @@ class TestToolException:
             _text_turn(),
         ]
         loop = _make_loop(turns, tools)
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         tr = next(e for e in events if e.kind == "tool_result")
         assert tr.is_error is True
         assert "simulated tool failure" in str(tr.content)
@@ -224,7 +224,7 @@ class TestToolException:
             _text_turn(),
         ]
         loop = _make_loop(turns, tools={})  # 没注册 tool
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         tr = next(e for e in events if e.kind == "tool_result")
         assert tr.is_error is True
         assert "unknown tool" in str(tr.content)
@@ -243,7 +243,7 @@ class TestInvalidInputJson:
             _text_turn(),
         ]
         loop = _make_loop(turns, tools={"stub": _StubTool("stub")})
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         tr = next(e for e in events if e.kind == "tool_result")
         assert tr.is_error is True
         assert "invalid_json" in str(tr.content)
@@ -261,7 +261,7 @@ class TestMaxIterExceeded:
         turns = [_tool_use_turn(f"toolu_{i}", "stub", ["{}"]) for i in range(5)]
         tools = {"stub": _StubTool("stub")}
         loop = _make_loop(turns, tools, max_iter=2)
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         last = events[-1]
         assert last.kind == "error"
         assert last.error_type == "agent_iter_exceeded"
@@ -276,7 +276,7 @@ class TestSingleTurnTextOnly:
     async def test_no_tool_use_stream_done(self, req: ChatRequest) -> None:
         """无 tool_use 直接 end_turn → stream_done 收尾,只 1 个 message_start。"""
         loop = _make_loop([_text_turn()])
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         kinds = [ev.kind for ev in events]
         assert kinds.count("message_start") == 1
         assert "tool_result" not in kinds
@@ -299,7 +299,7 @@ class TestProviderError:
             ),
         ]
         loop = _make_loop([events_seq])
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         kinds = [ev.kind for ev in events]
         # 末尾是 error,不是 stream_done(AgentLoop 不补)
         assert kinds == ["message_start", "error"]
@@ -331,7 +331,7 @@ class TestProviderError:
             repo=None,
             convo_id=None,
         )
-        events = [ev async for ev in loop.run(req)]
+        events = [ev async for ev in loop.stream_chat(req)]
         assert len(events) == 1
         ev = events[0]
         assert ev.kind == "error"

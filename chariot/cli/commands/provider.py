@@ -1,6 +1,6 @@
 """`chariot provider <subcmd>` —— Provider entry CRUD + 默认切换。
 
-子命令:list / show / use / probe / add / edit / rm / copy。
+子命令:list / show / use / probe / add / update / rm / copy。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ProviderRepo + ProviderProber。
 0.6.0 起 `chariot model` rename 成 `chariot provider`(跟 ProviderRegistry /
@@ -20,7 +20,7 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
 
 CRUD:
 - `chariot provider add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
-- `chariot provider edit <name> [--type T] [-o k=v] [-p k=v]`:改 entry
+- `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`:改 entry
 - `chariot provider rm <name>`:删 entry
 - `chariot provider copy <name> [--as new-name]`:复制(碰撞自动 _copy_N)
 
@@ -278,11 +278,11 @@ async def _add(name: str, type_: str, options: list[str], params: list[str]) -> 
     Renderer.out(f"+ {entry.name} (type={entry.type})")
 
 
-# ---------- edit ----------
+# ---------- update ----------
 
 
-@provider_app.command("edit", help="编辑现有 entry(改 type / options / params)")
-def edit_cmd(
+@provider_app.command("update", help="更新现有 entry(改 type / options / params)")
+def update_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
     type: Annotated[
         str | None,
@@ -305,10 +305,10 @@ def edit_cmd(
         ),
     ] = None,
 ) -> None:
-    asyncio.run(_edit(name, type, options, params))
+    asyncio.run(_update(name, type, options, params))
 
 
-async def _edit(
+async def _update(
     name: str,
     type_: str | None,
     options: list[str] | None,

@@ -150,7 +150,7 @@ class Renderer:
 
     @classmethod
     def render_event(cls, ev: ChatEvent) -> None:
-        """`AIAgent.run` 吐的 ChatEvent → 屏幕输出。
+        """`AIAgent.run_chat` 吐的 ChatEvent → 屏幕输出。
 
         REPL / once / batch 共用同一份 dispatch 逻辑(都把这个静态方法当 on_event
         回调传给 `ChatContext.run_turn`)。dispatch 规则见模块 docstring。

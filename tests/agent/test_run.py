@@ -80,7 +80,7 @@ class TestRouting:
             provider_name="not_exists",
             messages=[Message(role="user", content="hi")],
         )
-        events = [ev async for ev in agent.run(req)]
+        events = [ev async for ev in agent.run_chat(req)]
         assert len(events) == 1
         assert events[0].kind == "error"
         assert events[0].error_type == "unknown_provider"
@@ -93,7 +93,7 @@ class TestRouting:
             provider_name="p2",
             messages=[Message(role="user", content="hi")],
         )
-        _ = [ev async for ev in agent.run(req)]
+        _ = [ev async for ev in agent.run_chat(req)]
         # 只有 p2 被调用
         assert p1.last_req is None
         assert p2.last_req is not None
@@ -117,7 +117,7 @@ class TestDefaultToolsInjection:
             messages=[Message(role="user", content="hi")],
             tools=None,  # 触发 default 注入
         )
-        _ = [ev async for ev in agent.run(req)]
+        _ = [ev async for ev in agent.run_chat(req)]
         assert provider.last_req is not None
         assert provider.last_req.tools is not None
         names = sorted(t.name for t in provider.last_req.tools)
@@ -135,7 +135,7 @@ class TestDefaultToolsInjection:
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
-        _ = [ev async for ev in agent.run(req)]
+        _ = [ev async for ev in agent.run_chat(req)]
         assert provider.last_req is not None
         assert provider.last_req.tools == []  # 透传 [],不替换
 
@@ -153,7 +153,7 @@ class TestDefaultToolsInjection:
             messages=[Message(role="user", content="hi")],
             tools=list(explicit),  # 显式
         )
-        _ = [ev async for ev in agent.run(req)]
+        _ = [ev async for ev in agent.run_chat(req)]
         assert provider.last_req is not None
         assert provider.last_req.tools is not None
         assert len(provider.last_req.tools) == 1
@@ -167,7 +167,7 @@ class TestDefaultToolsInjection:
 
 class TestStatelessPath:
     async def test_no_session_opened(self) -> None:
-        """无 convo_id → AIAgent.run 不调 sessionmaker。"""
+        """无 convo_id → AIAgent.run_chat 不调 sessionmaker。"""
         provider = _CapturingProvider("p")
         sm_mock = AsyncMock()  # 任何调用都失败/记录
         agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=sm_mock)
@@ -176,7 +176,7 @@ class TestStatelessPath:
             provider_name="p",
             messages=[Message(role="user", content="hi")],
         )
-        events = [ev async for ev in agent.run(req)]
+        events = [ev async for ev in agent.run_chat(req)]
         # sessionmaker 没被调
         assert sm_mock.call_count == 0
         # 流正常收尾(stream_done 或 message_stop 末尾)
@@ -203,7 +203,7 @@ class TestStatefulPath:
             messages=[Message(role="user", content="hi")],
             convo_id="01H_TEST",
         )
-        events = [ev async for ev in agent.run(req)]
+        events = [ev async for ev in agent.run_chat(req)]
         # sessionmaker=None → yield 'no_sessionmaker' error
         assert events[0].kind == "error"
         assert events[0].error_type == "no_sessionmaker"

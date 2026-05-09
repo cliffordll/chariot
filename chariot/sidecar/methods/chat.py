@@ -48,7 +48,7 @@ class ChatMethod(MethodBase):
         1. params dict → ChatRequest(_RequestDecoder.parse)
         2. resolve agent — 默认走 self.agent;params 含 base_url / api_key
            → AgentRegistry.reserve 拿 per-call agent
-        3. agent.run(req) 流式产 ChatEvent
+        3. agent.run_chat(req) 流式产 ChatEvent
         4. 每个 event 走 ctx.notify("chat_event", asdict(event))
         5. 流结束返 {stream_id, ended_at}
 
@@ -60,7 +60,7 @@ class ChatMethod(MethodBase):
         agent = await self._resolve_agent(req.provider_name, base_url, api_key)
 
         stream_id = uuid.uuid4().hex
-        async for event in agent.run(req):
+        async for event in agent.run_chat(req):
             await ctx.notify("chat_event", dataclasses.asdict(event))
         return {
             "stream_id": stream_id,

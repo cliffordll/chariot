@@ -52,8 +52,8 @@ _DEFAULT_MAX_ITER = 10
 class AgentLoop:
     """chat 主循环 —— 单轮 Provider stream + 多轮工具调用 + 持久化。
 
-    由 `AIAgent.run` 实例化并 invoke;调用方通常不直接构造。所有状态在实例
-    字段里(provider / tools / repo / convo_id / max_iter),`run` 是唯一对外
+    由 `AIAgent.run_chat` 实例化并 invoke;调用方通常不直接构造。所有状态在实例
+    字段里(provider / tools / repo / convo_id / max_iter),`stream_chat` 是唯一对外
     方法。
     """
 
@@ -72,7 +72,7 @@ class AgentLoop:
         self._convo_id = convo_id
         self._max_iter = max_iter
 
-    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """主入口。逐 ChatEvent yield;退出条件见模块 docstring。"""
         current_req = req
         for _attempt in range(self._max_iter):

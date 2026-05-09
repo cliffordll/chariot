@@ -109,7 +109,7 @@ interface PendingTurn {
 type ConvPaneState =
   | { kind: "draft" }
   | { kind: "loading"; id: string }
-  | { kind: "loaded"; id: string; conversation: Convo; messages: Message[] }
+  | { kind: "loaded"; id: string; convo: Convo; messages: Message[] }
   | { kind: "err"; id: string; message: string };
 
 type ProvidersState =
@@ -161,7 +161,12 @@ export default function Chat() {
   const loadProviders = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
-      const data = await api.listModels();
+      const { providers } = await api.listProviders();
+      const data: ProvidersListResponse = {
+        available: providers.map((p) => p.name),
+        types: [],
+        entries: providers,
+      };
       setProvidersState({ kind: "ok", data });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -173,8 +178,8 @@ export default function Chat() {
     setConvsLoading(true);
     setConvsErr(null);
     try {
-      const r = await api.listConversations({ limit: 100 });
-      setConvs(r.items);
+      const { convos } = await api.listConvos();
+      setConvs(convos.slice(0, 100));
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setConvsErr(msg);
@@ -186,11 +191,11 @@ export default function Chat() {
   const loadConvDetail = useCallback(async (id: string) => {
     setActivePane({ kind: "loading", id });
     try {
-      const detail = await api.getConversation(id);
+      const detail = await api.getConvo(id);
       setActivePane({
         kind: "loaded",
         id,
-        conversation: detail.conversation,
+        convo: detail.convo,
         messages: detail.messages,
       });
     } catch (e) {
@@ -257,7 +262,7 @@ export default function Chat() {
     async (id: string) => {
       if (!window.confirm("删除这个对话?不可撤销。")) return;
       try {
-        await api.deleteConversation(id);
+        await api.deleteConvo(id);
       } catch (e) {
         const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
         alert(`删除失败: ${msg}`);
@@ -282,7 +287,7 @@ export default function Chat() {
       if (next === null) return;
       const title = next.trim() === "" ? null : next.trim();
       try {
-        await api.updateConversationTitle(id, title);
+        await api.renameConvo(id, title);
       } catch (e) {
         const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
         alert(`改名失败: ${msg}`);
@@ -314,12 +319,12 @@ export default function Chat() {
     let convId: string;
     if (pane.kind === "draft") {
       try {
-        const conv = await api.createConversation({});
+        const conv = await api.createConvo({});
         convId = conv.id;
         setActivePane({
           kind: "loaded",
           id: conv.id,
-          conversation: conv,
+          convo: conv,
           messages: [],
         });
       } catch (e) {
@@ -516,8 +521,8 @@ export default function Chat() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">
-            {pane.kind === "loaded" && pane.conversation.title
-              ? pane.conversation.title
+            {pane.kind === "loaded" && pane.convo.title
+              ? pane.convo.title
               : pane.kind === "draft"
                 ? "New chat"
                 : "Chat"}

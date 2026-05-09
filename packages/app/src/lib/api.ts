@@ -15,7 +15,7 @@
  * RPC method 名(对齐 sidecar `register_methods`,详 `chariot/sidecar/methods/__init__.py`):
  *   chat / list_convos / get_convo / rename_convo / delete_convo /
  *   list_tools / enable_tool / disable_tool / config_tool /
- *   list_providers / add_provider / edit_provider / delete_provider / probe_provider /
+ *   list_providers / add_provider / update_provider / delete_provider / probe_provider /
  *   list_logs
  */
 
@@ -194,6 +194,19 @@ const apiCore = {
     return rpc("delete_convo", { convo_id });
   },
 
+  createConvo(req: { id?: string; title?: string | null } = {}): Promise<Convo> {
+    const id = req.id ?? generateUlid();
+    const now = new Date().toISOString();
+    return Promise.resolve({
+      id,
+      title: req.title ?? null,
+      last_model: null,
+      message_count: 0,
+      created_at: now,
+      updated_at: now,
+    });
+  },
+
   // ---------- tools ----------
 
   listTools(): Promise<{ tools: Tool[] }> {
@@ -227,7 +240,7 @@ const apiCore = {
     return rpc("add_provider", { ...req });
   },
 
-  editProvider(
+  updateProvider(
     name: string,
     req: {
       type?: string;
@@ -235,11 +248,25 @@ const apiCore = {
       params?: Record<string, unknown>;
     },
   ): Promise<{ provider: Provider }> {
-    return rpc("edit_provider", { name, ...req });
+    return rpc("update_provider", { name, ...req });
   },
 
   deleteProvider(name: string): Promise<{ deleted: string }> {
     return rpc("delete_provider", { name });
+  },
+
+  async duplicateProvider(name: string, as_?: string): Promise<{ provider: Provider }> {
+    const { providers } = await apiCore.listProviders();
+    const src = providers.find((p) => p.name === name);
+    if (!src) throw new RpcError(-32001, `provider ${name} not found`);
+    const newName = (as_ ?? `${name}_copy`).trim();
+    const { provider } = await apiCore.addProvider({
+      name: newName,
+      type: src.type,
+      options: src.options,
+      params: src.params,
+    });
+    return { provider };
   },
 
   /**
@@ -320,7 +347,7 @@ export interface StatusResponse {
   uptime_ms: number;
   entries_count: number;
   tools_enabled: number;
-  conversations_count: number;
+  convos_count: number;
   url: string;
 }
 
@@ -370,16 +397,7 @@ const apiCompat: ApiCompat = {
 
   async createConversation(req = {}) {
     // sidecar 不暴露 create_convo;客户端生成 ULID,首次 chat 时自动创建
-    const id = req.id ?? generateUlid();
-    const now = new Date().toISOString();
-    return {
-      id,
-      title: req.title ?? null,
-      last_model: null,
-      message_count: 0,
-      created_at: now,
-      updated_at: now,
-    };
+    return apiCore.createConvo(req);
   },
 
   async deleteConversation(id) {
@@ -410,7 +428,7 @@ const apiCompat: ApiCompat = {
   },
 
   async updateModel(name, req) {
-    const { provider } = await apiCore.editProvider(name, req);
+    const { provider } = await apiCore.updateProvider(name, req);
     return provider;
   },
 
@@ -420,16 +438,7 @@ const apiCompat: ApiCompat = {
 
   async duplicateModel(name, as_) {
     // sidecar 不暴露 duplicate_provider;客户端 list + add 合成
-    const { providers } = await apiCore.listProviders();
-    const src = providers.find((p) => p.name === name);
-    if (!src) throw new RpcError(-32001, `provider ${name} not found`);
-    const newName = (as_ ?? `${name}_copy`).trim();
-    const { provider } = await apiCore.addProvider({
-      name: newName,
-      type: src.type,
-      options: src.options,
-      params: src.params,
-    });
+    const { provider } = await apiCore.duplicateProvider(name, as_);
     return provider;
   },
 
@@ -465,7 +474,7 @@ const apiCompat: ApiCompat = {
       uptime_ms: 0,
       entries_count: providers.length,
       tools_enabled: tools.filter((t) => t.enabled).length,
-      conversations_count: convos.length,
+      convos_count: convos.length,
       url: "stdio://sidecar",
     };
   },

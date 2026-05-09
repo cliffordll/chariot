@@ -66,7 +66,7 @@ class _MockAgent:
         self.events = list(events)
         self.last_req: ChatRequest | None = None
 
-    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         self.last_req = req
         for ev in self.events:
             yield ev

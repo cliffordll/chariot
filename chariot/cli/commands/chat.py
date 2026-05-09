@@ -1,7 +1,7 @@
 """`chariot chat` — 一次性 + REPL 流式聊天(0.6.0 库化版)。
 
 撤旧 ProxyClient / SDK 路径;直接构造 AIAgent.bootstrap 实例 + 进程内调
-`agent.run(req)`,不再起独立 server。
+`agent.run_chat(req)`,不再起独立 server。
 
 flags:
 - `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认

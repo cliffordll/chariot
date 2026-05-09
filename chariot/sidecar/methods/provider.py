@@ -17,7 +17,7 @@ from chariot.sidecar.methods import MethodBase
 
 
 class ProviderMethods(MethodBase):
-    """provider CRUD method handlers(list / add / edit / delete / probe)。"""
+    """provider CRUD method handlers(list / add / update / delete / probe)。"""
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`list_providers`:按 created_at 升序列。
@@ -52,8 +52,8 @@ class ProviderMethods(MethodBase):
             )
         return {"provider": self._serialize(entry)}
 
-    async def edit(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
-        """`edit_provider`:改 type / options / params(任一字段缺省 = 不动)。
+    async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """`update_provider`:改 type / options / params(任一字段缺省 = 不动)。
 
         不允许改 name(name 是 ProviderRepo 的主 key 抽象;要改 name 走删 + 加)。
         """

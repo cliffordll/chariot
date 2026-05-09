@@ -14,7 +14,7 @@ method 列表(15 条):
 - chat:跑一次 chat,流式 notify ChatEvent + 终止 response
 - list_convos / get_convo / rename_convo / delete_convo
 - list_tools / enable_tool / disable_tool / config_tool
-- list_providers / add_provider / edit_provider / delete_provider / probe_provider
+- list_providers / add_provider / update_provider / delete_provider / probe_provider
 - list_logs
 
 约束(对照 hermes 教训,详 docs/DESIGN.md §11.4)
@@ -67,7 +67,7 @@ class SidecarAgent(Protocol):
     - 生产:`AIAgent` 结构上满足这个 Protocol
     """
 
-    def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]: ...
+    def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]: ...
 
     @property
     def session_maker(self) -> async_sessionmaker[AsyncSession]: ...
@@ -203,7 +203,7 @@ def register_methods(
     providers = ProviderMethods(agent)
     server.method("list_providers")(providers.list_)
     server.method("add_provider")(providers.add)
-    server.method("edit_provider")(providers.edit)
+    server.method("update_provider")(providers.update)
     server.method("delete_provider")(providers.delete)
     server.method("probe_provider")(providers.probe)
 

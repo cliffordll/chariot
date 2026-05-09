@@ -1,7 +1,7 @@
 """chat 会话上下文 —— REPL / once / batch 共用的轻量协调器。
 
 0.6.0 起持有 `AIAgent` 实例(进程内直调,撤 SDK ProxyClient),不走 HTTP / SSE。
-`run_turn` 调 `agent.run(req)` 消费 `ChatEvent` 流,本地累积 assistant 文本 +
+`run_turn` 调 `agent.run_chat(req)` 消费 `ChatEvent` 流,本地累积 assistant 文本 +
 usage 统计,把每个 event 透传给 caller 的 `on_event` 回调(REPL 下是
 `Renderer.render_event`)。
 
@@ -11,7 +11,7 @@ stateful / stateless body.messages 契约
   AIAgent 不持久化,Provider 看到的就是这里发的全部
 - **stateful**(`convo_id` 是 ULID):req.messages = **只发本轮新增 user
   message**(`self.messages[-1:]`)。AIAgent 内部 load DB 历史 prepend,把
-  req.messages 里的 user 消息 append 到 messages 表(详见 `AIAgent._run_stateful`)
+  req.messages 里的 user 消息 append 到 messages 表(详见 `AIAgent._run_stateful_chat`)
   → 所以 client 必须只送"新增"的部分,否则会重复 persist
 
 本地 `self.messages` 累积所有轮(给 REPL 失败 `pop_last` 回退用,以及 stateless
@@ -111,7 +111,7 @@ class ChatContext:
     # ---------- 核心:一轮请求 ----------
 
     async def run_turn(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
-        """构造 ChatRequest → 调 `agent.run(req)` → 流式 ChatEvent → 收尾。
+        """构造 ChatRequest → 调 `agent.run_chat(req)` → 流式 ChatEvent → 收尾。
 
         - 每个 ChatEvent 透传给 `on_event`(REPL 下是 `Renderer.render_event`)
         - 内部累积 assistant 文本(只取最末轮 message_stop 前的 text_delta)
@@ -130,7 +130,7 @@ class ChatContext:
         error_event: ChatEvent | None = None
         t0 = time.monotonic()
 
-        async for ev in self.agent.run(req):
+        async for ev in self.agent.run_chat(req):
             on_event(ev)
             self._accumulate_text(ev, current_text)
             if ev.kind == "message_stop":

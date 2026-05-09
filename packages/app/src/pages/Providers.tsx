@@ -45,7 +45,7 @@ import {
  *   跟 Provider 概念不是一回事 —— Provider 是 chariot 内部的路由 entry,
  *   model 是上游 LLM 真实 id
  * - 展开行 → ParamsEditor:KV 形式编辑 sampling 默认参数,Save 写 DB
- * - 新建 / 编辑 / 复制 / 删除 entry(走 sidecar `add_provider` / `edit_provider` /
+ * - 新建 / 编辑 / 复制 / 删除 entry(走 sidecar `add_provider` / `update_provider` /
  *   `delete_provider` RPC method)
  * - Test 按钮跑探针(`probe_provider`)
  *
@@ -150,7 +150,12 @@ export default function Providers() {
   const load = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
-      const data = await api.listModels();
+      const { providers } = await api.listProviders();
+      const data: ProvidersListResponse = {
+        available: providers.map((p) => p.name),
+        types: [],
+        entries: providers,
+      };
       setProvidersState({ kind: "ok", data });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -170,7 +175,7 @@ export default function Providers() {
   const runProbe = useCallback(async (name: string) => {
     setProbeStates((s) => ({ ...s, [name]: { kind: "probing" } }));
     try {
-      const r = await api.probeModel(name);
+      const r = await api.probeProvider(name);
       setProbeStates((s) => ({
         ...s,
         [name]: r.ok
@@ -630,7 +635,7 @@ function ParamsEditor({
     }
     setSubmitting(true);
     try {
-      await api.updateModel(entry.name, { params });
+      await api.updateProvider(entry.name, { params });
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -806,12 +811,12 @@ function AddEditDialog({
     setSubmitting(true);
     try {
       if (mode.kind === "add") {
-        await api.createModel({ name: name.trim(), type, options: cleanOptions });
+        await api.addProvider({ name: name.trim(), type, options: cleanOptions });
       } else if (mode.kind === "edit") {
-        await api.updateModel(initial!.name, { type, options: cleanOptions });
+        await api.updateProvider(initial!.name, { type, options: cleanOptions });
       } else {
         // duplicate: server 复制源 entry,as=new-name;type/options/params 都不在请求里
-        await api.duplicateModel(initial!.name, name.trim());
+        await api.duplicateProvider(initial!.name, name.trim());
       }
       onSuccess();
       onClose();
@@ -981,7 +986,7 @@ function DeleteDialog({
     setErr(null);
     setSubmitting(true);
     try {
-      await api.deleteModel(name);
+      await api.deleteProvider(name);
       onSuccess();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);

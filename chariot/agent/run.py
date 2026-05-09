@@ -3,7 +3,7 @@
 职责:
 1. 持有 `name → BaseProvider` 实例字典(从 DB providers 表装载)
 2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
-3. `run(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
+3. `run_chat(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
 
 接口契约:
 - 输入:`ChatRequest`(typed,跟 Claude API 1:1)
@@ -49,7 +49,7 @@ class AIAgent:
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": X, "api_key": Y}} or None,
         )
-        async for event in agent.run(req):
+        async for event in agent.run_chat(req):
             # 消费 ChatEvent
 
         # 测试路径(直接注入 mock providers / tools)
@@ -164,7 +164,7 @@ class AIAgent:
 
     # ---- 主入口 ----
 
-    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
         路由:按 `req.provider_name`(entry name)找 Provider 实例;缺失 →
@@ -187,13 +187,13 @@ class AIAgent:
         effective_req = self._inject_default_tools(req)
 
         if req.is_stateful():
-            async for event in self._run_stateful(effective_req, provider):
+            async for event in self._run_stateful_chat(effective_req, provider):
                 yield event
         else:
-            async for event in self._run_stateless(effective_req, provider):
+            async for event in self._run_stateless_chat(effective_req, provider):
                 yield event
 
-    async def _run_stateless(
+    async def _run_stateless_chat(
         self, req: ChatRequest, provider: BaseProvider
     ) -> AsyncIterator[ChatEvent]:
         """无 convo_id:直接跑 AgentLoop,不锁不持久化。"""
@@ -203,10 +203,10 @@ class AIAgent:
             repo=None,
             convo_id=None,
         )
-        async for event in loop.run(req):
+        async for event in loop.stream_chat(req):
             yield event
 
-    async def _run_stateful(
+    async def _run_stateful_chat(
         self, req: ChatRequest, provider: BaseProvider
     ) -> AsyncIterator[ChatEvent]:
         """有 convo_id:开 session + 进 convo lock + load history + AgentLoop。
@@ -227,7 +227,7 @@ class AIAgent:
         async with self._sessionmaker() as session:
             try:
                 async with ConvoLockManager.acquire(convo_id, db_session=session):
-                    async for event in self._stateful_critical_section(
+                    async for event in self._run_stateful_turn(
                         req, convo_id, provider, session
                     ):
                         yield event
@@ -237,7 +237,7 @@ class AIAgent:
                     error_message=str(e),
                 )
 
-    async def _stateful_critical_section(
+    async def _run_stateful_turn(
         self,
         req: ChatRequest,
         convo_id: str,
@@ -260,7 +260,7 @@ class AIAgent:
             repo=repo,
             convo_id=convo_id,
         )
-        async for event in loop.run(full_req):
+        async for event in loop.stream_chat(full_req):
             yield event
 
     @staticmethod
