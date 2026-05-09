@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from chariot.agent.chat_event import ChatEvent
@@ -156,11 +157,20 @@ class MethodBase:
         return val
 
 
-def register_methods(server: JsonRpcServer, agent: SidecarAgent) -> None:
+def register_methods(
+    server: JsonRpcServer,
+    agent: SidecarAgent,
+    *,
+    db_path: Path,
+) -> None:
     """把 sidecar 所有 15 个业务 method 注册到给定 server(显式调用)。
 
     `agent` 由调用方装载好后传入(典型 `__main__` 通过
     `AgentRegistry.reserve("sidecar", db_path=...)`);测试场景可传 mock。
+    `db_path` 给 ChatMethod 在 per-call override 路径上调用 `AgentRegistry.reserve`
+    用(0.6.6+,Chat 页对齐 CLI 的 `--base-url` / `--api-key`);默认 agent 路径
+    不读这个值,所以测试随便给个 path 都行。
+
     重复注册 method 名抛 `ValueError`(JsonRpcServer 兜底)。
 
     注意 import 是惰性的(函数体内做)— noun 子文件都
@@ -176,7 +186,7 @@ def register_methods(server: JsonRpcServer, agent: SidecarAgent) -> None:
     from chariot.sidecar.methods.provider import ProviderMethods
     from chariot.sidecar.methods.tool import ToolMethods
 
-    server.method("chat")(ChatMethod(agent))
+    server.method("chat")(ChatMethod(agent, db_path=db_path))
 
     convos = ConvoMethods(agent)
     server.method("list_convos")(convos.list_)

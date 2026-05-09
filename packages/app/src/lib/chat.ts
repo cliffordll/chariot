@@ -18,6 +18,10 @@ export interface ChatTurnOpts {
   provider: string;
   /** 可选 LLM model id 覆盖(per-call,详见 chat_request.py model 字段)。 */
   model?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.base_url。空字符串 / null = 不覆盖。 */
+  baseUrl?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.api_key。空字符串 / null = 不覆盖。 */
+  apiKey?: string | null;
   maxTokens: number;
   /**
    * Anthropic 采样参数。两者默认 1.0(等同不调);只在 ≠ 1 时才发到 body,以遵循
@@ -53,6 +57,8 @@ export async function runTurn(messages: ChatTurnMsg[], opts: ChatTurnOpts): Prom
     max_tokens: opts.maxTokens,
   };
   if (opts.model) req.model = opts.model;
+  if (opts.baseUrl) req.base_url = opts.baseUrl;
+  if (opts.apiKey) req.api_key = opts.apiKey;
   if (opts.convoId) req.convo_id = opts.convoId;
   if (opts.temperature !== undefined && opts.temperature !== 1) {
     req.temperature = opts.temperature;

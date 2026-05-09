@@ -110,6 +110,25 @@ export type StreamEvent =
   | StreamDoneEvent
   | ErrorEvent;
 
+/**
+ * 流中途收到的 ChatEvent(kind=error)— sidecar 那侧由 Provider 抛 ProviderError
+ * 或流中途 IO 错产生(契约见 chariot/docs/DESIGN.md §6.4.2)。
+ *
+ * runChatTurn 收到 error event 时不立刻终止流(仍 await chat RPC 返 stream_id),
+ * 但等 RPC resolve 后会 throw 一个 ChatStreamError,让上层 catch 路径接管 —
+ * 否则 success path 跑下去会把 pending 抹掉,用户看不到任何错误提示。
+ */
+export class ChatStreamError extends Error {
+  errorType: string;
+  errorMessage: string;
+  constructor(errorType: string, errorMessage: string) {
+    super(`${errorType}: ${errorMessage}`);
+    this.name = "ChatStreamError";
+    this.errorType = errorType;
+    this.errorMessage = errorMessage;
+  }
+}
+
 // ============================================================
 // chat 流消费
 // ============================================================
@@ -123,6 +142,11 @@ export interface ChatRequest {
   provider_name: string;
   messages: Array<{ role: "user" | "assistant"; content: string | unknown[] }>;
   model?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.base_url。sidecar 会走
+   *  AgentRegistry.reserve 拿 per-call AIAgent(LRU 32 缓存),不写库。 */
+  base_url?: string | null;
+  /** 0.6.6+ per-call override:覆盖 entry.options.api_key。同 base_url。 */
+  api_key?: string | null;
   max_tokens?: number;
   convo_id?: string | null;
   temperature?: number | null;
@@ -160,16 +184,34 @@ export async function runChatTurn(
   onEvent: (ev: StreamEvent) => void,
 ): Promise<ChatRunResult> {
   const tracker = new ChatStreamTracker();
+  // 流中途若收到 ChatEvent(kind=error),记下首条;chat RPC resolve 后转成
+  // ChatStreamError 抛出,走上层 catch 路径(否则 success path 会 setPending(null)
+  // 把刚 streaming 出的错误信息抹掉,前端看起来"消息发出去后无反应")。
+  let streamErr: ErrorEvent | null = null;
+  let frameCount = 0;
   const unlisten = await listen<ChatEventNotify>("rpc_notify", (e) => {
     if (e.payload.method !== "chat_event") return;
     if (signal.aborted) return;
+    frameCount += 1;
+    // 诊断日志:streaming 卡顿调试用。在 DevTools Console 过滤 [chariot] 看
+    // 帧到达情况;0.6.6+ 改 Tauri Channel 后可删
+    console.debug("[chariot] chat_event frame", frameCount, e.payload.params.kind);
     for (const stream_ev of tracker.consume(e.payload.params)) {
+      if (stream_ev.kind === "error" && streamErr === null) {
+        streamErr = stream_ev;
+      }
       onEvent(stream_ev);
     }
   });
   signal.addEventListener("abort", () => unlisten());
+  console.debug("[chariot] chat invoke start", req.provider_name, req.convo_id ?? "(stateless)");
   try {
     const result = await rpc<{ stream_id: string; ended_at: number }>("chat", req);
+    console.debug("[chariot] chat resolved", { frames: frameCount, ...result });
+    if (streamErr !== null) {
+      const err = streamErr as ErrorEvent;
+      throw new ChatStreamError(err.errorType, err.errorMessage);
+    }
     return {
       streamId: result.stream_id,
       endedAt: result.ended_at,
@@ -177,6 +219,9 @@ export async function runChatTurn(
       outputTokens: tracker.outputTokens,
       aborted: false,
     };
+  } catch (e) {
+    console.debug("[chariot] chat threw", { frames: frameCount, error: e });
+    throw e;
   } finally {
     unlisten();
   }

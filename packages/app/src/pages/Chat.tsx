@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -14,10 +15,10 @@ import {
   ApiError,
   api,
   type AnthropicBlock,
-  type Conversation,
+  type Convo,
   type Message,
-  type ModelEntry,
-  type ModelsListResponse,
+  type ProviderEntry,
+  type ProvidersListResponse,
 } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 import type { StreamEvent } from "@/lib/streams";
@@ -41,7 +42,7 @@ interface SamplingValues {
   topP: number | undefined;
 }
 
-function samplingFromEntry(entry: ModelEntry | undefined): SamplingValues {
+function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
   const p = entry?.params ?? {};
   const mt = p.max_tokens;
   const t = p.temperature;
@@ -55,6 +56,19 @@ function samplingFromEntry(entry: ModelEntry | undefined): SamplingValues {
 
 const ENTRY_STORAGE_KEY = "chariot.chat.selected_entry";
 const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
+
+// 0.6.6+ per-call override:三字段 chat RPC 都接,sidecar 走 AgentRegistry
+// per-call agent 缓存,**不**写库。
+//
+// 跟 CLI `--model` / `--base-url` / `--api-key` 三个 flag 行为对齐 —— 都是
+// per-call 临时覆盖,**不持久化**(in-memory only,关窗口 / 重启就丢)。要
+// 永久存走 Providers 页编辑 entry.options(那有 password 字段 + 列表脱敏 +
+// api_key_env 等正经的 entry 持久化路径,凭证 / 端点统一管)
+interface OverrideValues {
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+}
 
 function lsGet(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -95,21 +109,27 @@ interface PendingTurn {
 type ConvPaneState =
   | { kind: "draft" }
   | { kind: "loading"; id: string }
-  | { kind: "loaded"; id: string; conversation: Conversation; messages: Message[] }
+  | { kind: "loaded"; id: string; conversation: Convo; messages: Message[] }
   | { kind: "err"; id: string; message: string };
 
-type ModelsState =
+type ProvidersState =
   | { kind: "loading" }
-  | { kind: "ok"; data: ModelsListResponse }
+  | { kind: "ok"; data: ProvidersListResponse }
   | { kind: "err"; message: string };
 
 export default function Chat() {
-  const [modelsState, setModelsState] = useState<ModelsState>({ kind: "loading" });
+  const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
   const [selectedEntry, setSelectedEntryState] = useState<string | null>(() =>
     lsGet(ENTRY_STORAGE_KEY),
   );
+  // 三字段对齐 CLI per-call 语义,启动全空白(不读盘)
+  const [overrides, setOverridesState] = useState<OverrideValues>(() => ({
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+  }));
 
-  const [convs, setConvs] = useState<Conversation[]>([]);
+  const [convs, setConvs] = useState<Convo[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
   const [convsErr, setConvsErr] = useState<string | null>(null);
 
@@ -129,20 +149,23 @@ export default function Chat() {
     lsSet(ENTRY_STORAGE_KEY, name);
   }, []);
 
+  // 三字段都仅 in-memory(关窗口就丢),要永久存走 Providers 页编辑 entry.options
+  const setOverrides = setOverridesState;
+
   const setActivePane = useCallback((next: ConvPaneState) => {
     setPane(next);
     if (next.kind === "draft") lsSet(CONV_STORAGE_KEY, null);
     else lsSet(CONV_STORAGE_KEY, next.id);
   }, []);
 
-  const loadModels = useCallback(async () => {
-    setModelsState({ kind: "loading" });
+  const loadProviders = useCallback(async () => {
+    setProvidersState({ kind: "loading" });
     try {
       const data = await api.listModels();
-      setModelsState({ kind: "ok", data });
+      setProvidersState({ kind: "ok", data });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setModelsState({ kind: "err", message: msg });
+      setProvidersState({ kind: "err", message: msg });
     }
   }, []);
 
@@ -178,9 +201,9 @@ export default function Chat() {
 
   // initial loads
   useEffect(() => {
-    void loadModels();
+    void loadProviders();
     void loadConvs();
-  }, [loadModels, loadConvs]);
+  }, [loadProviders, loadConvs]);
 
   // 启动时若 localStorage 里残留了 conv id,拉一次详情
   useEffect(() => {
@@ -192,15 +215,15 @@ export default function Chat() {
 
   // entry 兜底:无效 → 落到第一条
   useEffect(() => {
-    if (modelsState.kind !== "ok") return;
-    const { data } = modelsState;
+    if (providersState.kind !== "ok") return;
+    const { data } = providersState;
     if (data.available.length === 0) {
       if (selectedEntry !== null) setSelectedEntry(null);
       return;
     }
     const valid = selectedEntry !== null && data.available.includes(selectedEntry);
     if (!valid) setSelectedEntry(data.available[0]);
-  }, [modelsState, selectedEntry, setSelectedEntry]);
+  }, [providersState, selectedEntry, setSelectedEntry]);
 
   // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
   // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
@@ -327,8 +350,8 @@ export default function Chat() {
 
     // 2. 取 sampling
     const entry =
-      modelsState.kind === "ok"
-        ? modelsState.data.entries.find((e) => e.name === selectedEntry)
+      providersState.kind === "ok"
+        ? providersState.data.entries.find((e) => e.name === selectedEntry)
         : undefined;
     const sampling = samplingFromEntry(entry);
 
@@ -341,6 +364,9 @@ export default function Chat() {
     try {
       const result = await runTurn(newMessages, {
         provider: selectedEntry,
+        model: overrides.model.trim() || null,
+        baseUrl: overrides.baseUrl.trim() || null,
+        apiKey: overrides.apiKey.trim() || null,
         maxTokens: sampling.maxTokens,
         temperature: sampling.temperature,
         topP: sampling.topP,
@@ -381,7 +407,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, selectedEntry, pane, modelsState, setActivePane, loadConvDetail, loadConvs]);
+  }, [input, inFlight, selectedEntry, pane, providersState, overrides, setActivePane, loadConvDetail, loadConvs]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -504,9 +530,11 @@ export default function Chat() {
         </div>
 
         <EntryRow
-          modelsState={modelsState}
+          providersState={providersState}
           selectedEntry={selectedEntry}
           onSelect={setSelectedEntry}
+          overrides={overrides}
+          onOverridesChange={setOverrides}
         />
 
         <div
@@ -545,42 +573,56 @@ export default function Chat() {
   );
 }
 
-// ---------- EntryRow(沿用 0.3.1)----------
+// ---------- EntryRow(0.3.1 起 · 0.6.6+ 加 per-call override 输入框)----------
 
 function EntryRow({
-  modelsState,
+  providersState,
   selectedEntry,
   onSelect,
+  overrides,
+  onOverridesChange,
 }: {
-  modelsState: ModelsState;
+  providersState: ProvidersState;
   selectedEntry: string | null;
   onSelect: (name: string) => void;
+  overrides: OverrideValues;
+  onOverridesChange: (next: OverrideValues) => void;
 }) {
-  if (modelsState.kind === "loading") {
+  // 高级面板收/展状态。in-memory(不持久化),跟 override 值同语义 —— 关窗口
+  // 默认收起,需要时手动展开
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  if (providersState.kind === "loading") {
     return <div className="mb-3 text-xs text-muted-foreground">读取 entries…</div>;
   }
-  if (modelsState.kind === "err") {
+  if (providersState.kind === "err") {
     return (
       <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-        无法读取 entries:{modelsState.message}
+        无法读取 entries:{providersState.message}
       </div>
     );
   }
-  const { data } = modelsState;
+  const { data } = providersState;
   if (data.available.length === 0) {
     return (
       <div className="mb-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        DB 里没有 entry。在 Models 页 + Add 新建一条后再来发消息。
+        DB 里没有 entry。在 Providers 页 + Add 新建一条后再来发消息。
       </div>
     );
   }
+  const hasOverride =
+    overrides.model.trim() !== "" ||
+    overrides.baseUrl.trim() !== "" ||
+    overrides.apiKey.trim() !== "";
+
   return (
-    <div className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2">
+    <div className="mb-3 rounded-md border border-border bg-muted/10 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">model</span>
+        <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
+          provider
+        </span>
         <Select value={selectedEntry ?? undefined} onValueChange={onSelect}>
           <SelectTrigger className="h-8 w-56">
-            <SelectValue placeholder="选 entry" />
+            <SelectValue placeholder="选 provider" />
           </SelectTrigger>
           <SelectContent>
             {data.available.map((name) => (
@@ -590,10 +632,83 @@ function EntryRow({
             ))}
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setAdvancedOpen((v) => !v)}
+        >
+          {advancedOpen ? "▴" : "▾"} 高级
+          {hasOverride && !advancedOpen && (
+            // 收起时若有 override,加一个圆点提醒"当前有 per-call 覆盖生效",
+            // 避免用户忘了上次填的值跑到这一轮
+            <span
+              className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-primary"
+              aria-label="has override"
+            />
+          )}
+        </Button>
         <span className="ml-auto text-xs text-muted-foreground">
-          sampling 参数随 entry.params 走;改去 Models 页编辑该 entry。
+          sampling 走 entry.params,去 Providers 页改
         </span>
       </div>
+      {advancedOpen && (
+        <div className="mt-3 space-y-1 border-t border-border pt-3">
+          <p className="mb-1 text-[11px] text-muted-foreground">
+            per-call 临时覆盖,留空 = 走 entry 配置;**不持久化**,关窗口即丢。
+            要永久值改 Providers 页 entry.options。
+          </p>
+          <OverrideField
+            label="model"
+            value={overrides.model}
+            placeholder="临时覆盖 entry.options.model(如 claude-sonnet-4-6)"
+            onChange={(v) => onOverridesChange({ ...overrides, model: v })}
+          />
+          <OverrideField
+            label="base_url"
+            value={overrides.baseUrl}
+            placeholder="临时覆盖 entry.options.base_url(如 https://api.anthropic.com)"
+            onChange={(v) => onOverridesChange({ ...overrides, baseUrl: v })}
+          />
+          <OverrideField
+            label="api_key"
+            value={overrides.apiKey}
+            placeholder="临时覆盖 entry.options.api_key"
+            onChange={(v) => onOverridesChange({ ...overrides, apiKey: v })}
+            isSecret
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverrideField({
+  label,
+  value,
+  placeholder,
+  onChange,
+  isSecret = false,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (v: string) => void;
+  isSecret?: boolean;
+}) {
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        type={isSecret ? "password" : "text"}
+        className="h-7 flex-1 font-mono text-xs"
+      />
     </div>
   );
 }
@@ -650,27 +765,38 @@ function MessagesView({
 }
 
 function MessageRow({ msg }: { msg: Message }) {
-  // user 单纯文本(string)→ 浅色气泡;否则按 blocks 渲染
-  if (msg.role === "user" && typeof msg.content === "string") {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-          {msg.content}
-        </div>
-      </div>
-    );
-  }
-
-  // user blocks(通常是 tool_result)
   if (msg.role === "user") {
+    // user content 形态分两种:
+    // - 纯文本(string 或全是 type="text" 的 blocks)→ 右侧深色 bubble(用户输入)
+    // - 含 tool_result blocks → 左侧 emerald 框(那是 AgentLoop 合成的工具反馈,
+    //   语义上虽是 user role,但视觉上属于"系统输出"
+    //
+    // bug 注:0.6.0+ AIAgent._persist_new_user_messages 把 user 输入强制
+    // normalize 成 blocks 落库,DB load 出来 content 永远是 list,**永远不是
+    // string**;之前 `typeof content === "string"` 守卫永远 false,导致用户输入
+    // 也走 tool_result 分支(emerald + 左对齐),整个 history 看起来"没区分左右"。
+    const blocks = asBlocks(msg.content);
+    const isPureText = blocks.length > 0 && blocks.every((b) => b.type === "text");
+    if (isPureText) {
+      const text = blocks
+        .map((b) => (b as { text?: string }).text ?? "")
+        .join("");
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+            {text}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-start gap-1">
-        <BlocksRender blocks={asBlocks(msg.content)} side="tool" />
+        <BlocksRender blocks={blocks} side="tool" />
       </div>
     );
   }
 
-  // assistant
+  // assistant — 左侧浅色 bubble
   return (
     <div className="flex flex-col items-start gap-1">
       {typeof msg.content === "string" ? (

@@ -19,12 +19,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
+
+# 默认 agent 路径不读 db_path(走 self.agent.run);测试给个常量占位即可
+_DUMMY_DB_PATH = Path("/tmp/chariot-test.db")
 
 # ---------------------------------------------------------------------------
 # 测试基础设施
@@ -93,7 +97,7 @@ class TestChatStreaming:
         ]
         agent = _MockAgent(events)
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {"provider_name": "mock", "messages": [{"role": "user", "content": "hi"}]}
         reader = make_reader(_chat_request_frame(1, params))
@@ -124,7 +128,7 @@ class TestChatStreaming:
     async def test_response_carries_stream_id_and_ended_at(self) -> None:
         agent = _MockAgent([])
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
             "provider_name": "mock",
@@ -148,7 +152,7 @@ class TestChatStreaming:
         events = [ChatEvent.message_start(message_id="m1", model="mock-1")]
         agent = _MockAgent(events)
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         reader = make_reader(
             _chat_request_frame(
@@ -178,7 +182,7 @@ class TestParamsValidation:
         """发一次 chat,返第一帧解析。"""
         agent = _MockAgent([])
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
         reader = make_reader(_chat_request_frame(1, params))
         writer = MockWriter()
         await server.serve(reader, writer)
@@ -243,7 +247,7 @@ class TestOptionalFieldsPassThrough:
     async def test_model_convo_max_tokens_system(self) -> None:
         agent = _MockAgent([])
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
             "provider_name": "mock",
@@ -269,7 +273,7 @@ class TestOptionalFieldsPassThrough:
         """content 是 content block list(图片 / tool_result 等场景)。"""
         agent = _MockAgent([])
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
             "provider_name": "mock",
@@ -298,7 +302,7 @@ class TestOptionalFieldsPassThrough:
         """
         agent = _MockAgent([])
         server = JsonRpcServer()
-        register_methods(server, agent)
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
             "provider_name": "mock",

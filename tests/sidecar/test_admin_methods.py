@@ -99,10 +99,14 @@ async def agent(tmp_path: Path) -> AIAgent:
 
 
 @pytest.fixture
-def server(agent: AIAgent) -> JsonRpcServer:
-    """已注册全套 method 的 JsonRpcServer 实例。"""
+def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
+    """已注册全套 method 的 JsonRpcServer 实例。
+
+    `db_path` 给 ChatMethod 用(0.6.6+ per-call override 路径);admin methods
+    跑的不走那条路径,但 register_methods 签名要求,这里跟 agent fixture 同源。
+    """
     s = JsonRpcServer()
-    register_methods(s, agent)
+    register_methods(s, agent, db_path=tmp_path / "chariot.db")
     return s
 
 
@@ -370,3 +374,72 @@ class TestRegistration:
             "list_logs",
         }
         assert server.known_methods() == expected
+
+
+# ---------------------------------------------------------------------------
+# Chat per-call override(0.6.6+)
+#
+# 桌面端 Chat 页对齐 CLI 的 `--base-url` / `--api-key`:RPC params 多接两个
+# 可选字段,任一非空 → ChatMethod 走 AgentRegistry.reserve(session_key 由
+# (provider_name, sorted options) 的 sha 算出)拿 per-call AIAgent。
+# 无 override → 走默认 agent(fixture 直接 bootstrap,不进 registry)。
+#
+# 验证抓手:`AgentRegistry.size()` —— default agent 不在 registry 里,所以 size
+# 完整反映"per-call agent 缓存有多少条"。
+# ---------------------------------------------------------------------------
+
+
+class TestChatPerCallOverride:
+    @staticmethod
+    def _chat_params(**extra: str) -> dict[str, Any]:
+        return {
+            "provider_name": "mock",
+            "messages": [{"role": "user", "content": "hi"}],
+            **extra,
+        }
+
+    @staticmethod
+    async def _run_chat(server: JsonRpcServer, params: dict[str, Any]) -> dict[str, Any]:
+        """跑一次 chat,取 response 帧(中间有 N 个 chat_event notify,response 在最后)。"""
+        reader = make_reader(_request_frame(1, "chat", params))
+        writer = MockWriter()
+        await server.serve(reader, writer)
+        responses = [line for line in writer.lines() if "result" in line]
+        assert len(responses) == 1, f"expected 1 response, got {len(responses)}"
+        return responses[0]
+
+    async def test_no_override_skips_registry(self, server: JsonRpcServer) -> None:
+        """无 base_url / api_key → ChatMethod 走 default agent,不动 AgentRegistry。"""
+        await self._run_chat(server, self._chat_params())
+        assert AgentRegistry.size() == 0
+
+    async def test_base_url_creates_per_call_agent(self, server: JsonRpcServer) -> None:
+        """带 base_url → 走 AgentRegistry.reserve,registry size 变 1。"""
+        await self._run_chat(
+            server, self._chat_params(base_url="https://override.example/v1")
+        )
+        assert AgentRegistry.size() == 1
+
+    async def test_api_key_creates_per_call_agent(self, server: JsonRpcServer) -> None:
+        """单独 api_key 也触发 per-call agent。"""
+        await self._run_chat(server, self._chat_params(api_key="sk-override-xyz"))
+        assert AgentRegistry.size() == 1
+
+    async def test_same_override_hits_lru_cache(self, server: JsonRpcServer) -> None:
+        """同 (provider, base_url, api_key) 第二次调用命中缓存,size 不变。"""
+        params = self._chat_params(base_url="https://override.example/v1")
+        await self._run_chat(server, params)
+        await self._run_chat(server, params)
+        assert AgentRegistry.size() == 1
+
+    async def test_different_override_creates_separate_agents(
+        self, server: JsonRpcServer
+    ) -> None:
+        """不同 base_url → 各自缓存,session_key hash 不撞。"""
+        await self._run_chat(
+            server, self._chat_params(base_url="https://override-a.example")
+        )
+        await self._run_chat(
+            server, self._chat_params(base_url="https://override-b.example")
+        )
+        assert AgentRegistry.size() == 2
