@@ -7,11 +7,13 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from chariot.agent.chat_request import ChatRequest, Message
 from chariot.repos.audit_repo import AuditRepo
 from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.eval_repo import EvalRepo
 from chariot.repos.memory_repo import MemoryRepo
+from chariot.repos.prompt_repo import PromptRepo
 from chariot.repos.skill_repo import SkillRepo
 
 
@@ -24,7 +26,7 @@ async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
     await dispose_db()
 
 
-class TestMigrationV8:
+class TestMigrationV10:
     async def test_platform_tables_exist(self, session: AsyncSession) -> None:
         names = {
             "memories",
@@ -33,6 +35,9 @@ class TestMigrationV8:
             "audit_events",
             "checkpoints",
             "skills",
+            "prompt_bundles",
+            "prompt_versions",
+            "prompt_traces",
         }
         rows = (
             await session.execute(
@@ -94,3 +99,31 @@ class TestPlatformRepos:
         listed = await repo.list_entries()
         assert listed[0].id == entry.id
         assert listed[0].enabled is True
+
+    async def test_prompt_repo_seed_list_and_trace(self, session: AsyncSession) -> None:
+        repo = PromptRepo(session)
+        await repo.seed_if_empty()
+
+        bundles = await repo.list_bundles()
+        assert bundles[0].name == "default"
+        assert bundles[0].version_count == 1
+        assert bundles[0].is_active is True
+        assert bundles[0].active_version == "v1"
+
+        trace = await repo.record_trace(
+            ChatRequest(
+                provider_name="mock",
+                messages=[Message(role="user", content="hi")],
+                system="system prompt",
+            ),
+            provider_name="mock",
+            model="mock-1",
+        )
+        assert len(trace.id) == 26
+        fetched = await repo.get_trace(trace.id)
+        assert fetched is not None
+        assert fetched.provider_name == "mock"
+
+        active_bundle = await repo.get_active_bundle()
+        assert active_bundle is not None
+        assert active_bundle.name == "default"

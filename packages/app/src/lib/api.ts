@@ -133,6 +133,65 @@ export interface StatusResponse {
   url: string;
 }
 
+export interface PromptLayer {
+  name: string;
+  source: string;
+  content: unknown;
+}
+
+export interface PromptBundle {
+  id: string;
+  name: string;
+  description: string | null;
+  layers: PromptLayer[];
+  is_active: boolean;
+  version_count: number;
+  active_version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptVersion {
+  id: string;
+  bundle_id: string;
+  bundle_name: string;
+  version: string;
+  spec: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptTrace {
+  id: string;
+  bundle_id: string;
+  bundle_name: string;
+  version_id: string;
+  version: string;
+  conversation_id: string | null;
+  provider_name: string;
+  model: string | null;
+  request: Record<string, unknown>;
+  source_refs: Array<Record<string, unknown>>;
+  prompt_size: number;
+  created_at: string;
+}
+
+export interface PromptBundleDetail extends PromptBundle {
+  versions?: PromptVersion[];
+}
+
+export interface PromptBundlePayload {
+  name: string;
+  description?: string | null;
+  layers?: PromptLayer[];
+}
+
+export interface PromptActivatePayload {
+  name: string;
+  version?: string | null;
+}
+
 const apiCore = {
   listConversations(): Promise<{ conversations: Conversation[] }> {
     return rpc("list_conversations");
@@ -240,6 +299,44 @@ const apiCore = {
 
   listLogs(params: ListLogsParams = {}): Promise<{ logs: LogEntry[] }> {
     return rpc("list_logs", { ...params });
+  },
+
+  listPromptBundles(): Promise<{ bundles: PromptBundle[] }> {
+    return rpc("list_prompt_bundles");
+  },
+
+  getPromptBundle(name: string): Promise<{ bundle: PromptBundleDetail }> {
+    return rpc("get_prompt_bundle", { name });
+  },
+
+  listPromptVersions(bundle_name: string): Promise<{ versions: PromptVersion[] }> {
+    return rpc("list_prompt_versions", { bundle_name });
+  },
+
+  getPromptVersion(bundle_name: string, version: string): Promise<{ version: PromptVersion }> {
+    return rpc("get_prompt_version", { bundle_name, version });
+  },
+
+  listPromptTraces(params: { bundle_name?: string; limit?: number; offset?: number } = {}): Promise<{ traces: PromptTrace[] }> {
+    return rpc("list_prompt_traces", { ...params });
+  },
+
+  inspectPrompt(trace_id: string): Promise<{ trace: PromptTrace }> {
+    return rpc("inspect_prompt", { trace_id });
+  },
+
+  addPromptBundle(payload: PromptBundlePayload): Promise<{ bundle: PromptBundle; version: PromptVersion }> {
+    return rpc("add_prompt_bundle", payload as unknown as Record<string, unknown>);
+  },
+
+  updatePromptBundle(
+    payload: PromptBundlePayload,
+  ): Promise<{ bundle: PromptBundle; version: PromptVersion }> {
+    return rpc("update_prompt_bundle", payload as unknown as Record<string, unknown>);
+  },
+
+  activatePromptBundle(payload: PromptActivatePayload): Promise<{ bundle: PromptBundle; version: PromptVersion | null }> {
+    return rpc("activate_prompt_bundle", payload as unknown as Record<string, unknown>);
   },
 
   async status(): Promise<StatusResponse> {
