@@ -18,6 +18,7 @@
 - v7(0.6.5+):平台基础设施最小落点 —— `memories / eval_runs / eval_cases /
   audit_events / checkpoints / skills`
 - v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
+ - v9(0.7.1-prompt):`prompt_bundles / prompt_versions / prompt_traces`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -240,3 +241,46 @@ class SkillRow(Base):
     meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class PromptBundleRow(Base):
+    """`prompt_bundles` 琛?prompt system 鐨勫畾涔夎〃銆?"""
+
+    __tablename__ = "prompt_bundles"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(default=None)
+    layers: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class PromptVersionRow(Base):
+    """`prompt_versions` 琛?prompt bundle 鐨勭増鏈埅闈綋銆?"""
+
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    bundle_id: Mapped[str] = mapped_column(index=True)
+    version: Mapped[str] = mapped_column(index=True)
+    spec: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class PromptTraceRow(Base):
+    """`prompt_traces` 琛?turn 鐨勭粓鏋滃拰鏉ユ簮蹇呯暀銆?"""
+
+    __tablename__ = "prompt_traces"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    bundle_id: Mapped[str] = mapped_column(index=True)
+    version_id: Mapped[str] = mapped_column(index=True)
+    conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_name: Mapped[str] = mapped_column(index=True)
+    model: Mapped[str | None] = mapped_column(default=None)
+    request: Mapped[str] = mapped_column(default="{}")  # JSON-serialized ChatRequest
+    source_refs: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
+    prompt_size: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)

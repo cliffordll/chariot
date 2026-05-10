@@ -1,4 +1,4 @@
-# Evolution Plan
+# Long Term Plan
 
 > 本文描述 `DEVELOPMENT.md` 完成之后，`chariot` 继续走向“智能体自主进化平台”时要做的详细开发计划。
 > 这里不重复当前重构任务，而是只讲后续能力建设。
@@ -993,4 +993,4 @@ uv run chariot checkpoint list
 
 - `ARCHITECTURE.md` 解决“系统应该长什么样”
 - `DEVELOPMENT.md` 解决“当前重构怎么做”
-- `EVOLUTION_PLAN.md` 解决“重构之后，怎么把平台真正推进到自主进化”
+- `LONGTERMPLAN.md` 解决“重构之后，怎么把平台真正推进到自主进化”

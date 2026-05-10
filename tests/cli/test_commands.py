@@ -1,11 +1,11 @@
-"""CLI 子命令结构测试(0.6.0 库化版 · 不调 server,只验 typer 接线)。
+"""CLI 鐎涙劕鎳℃禒銈囩波閺嬪嫭绁寸拠?0.6.0 鎼存挸瀵查悧?璺?娑撳秷鐨?server,閸欘亪鐛?typer 閹恒儳鍤?閵?
 
-用 typer.testing.CliRunner 执行 `chariot` / `chariot <cmd> --help`,断言:
-- 根命令和所有子命令可用(`chariot --help` 退出 0)
-- 每个子命令 `--help` 可显示(证明 register 正确)
-- 无效子命令的退出码非 0(typer 默认行为)
-- 必填参数缺失时子命令退出码非 0(以 `model add` 为例)
-- 库化后撤掉的 daemon 命令(`start` / `stop`)走子命令时退出码非 0
+閻?typer.testing.CliRunner 閹笛嗩攽 `chariot` / `chariot <cmd> --help`,閺傤叀鈻?
+- 閺嶇懓鎳℃禒銈呮嫲閹碘偓閺堝鐡欓崨鎴掓姢閸欘垳鏁?`chariot --help` 闁偓閸?0)
+- 濮ｅ繋閲滅€涙劕鎳℃禒?`--help` 閸欘垱妯夌粈?鐠囦焦妲?register 濮濓絿鈥?
+- 閺冪姵鏅ョ€涙劕鎳℃禒銈囨畱闁偓閸戣櫣鐖滈棃?0(typer 姒涙顓荤悰灞艰礋)
+- 韫囧懎锝為崣鍌涙殶缂傚搫銇戦弮璺虹摍閸涙垝鎶ら柅鈧崙铏圭垳闂?0(娴?`model add` 娑撹桨绶?
+- 鎼存挸瀵查崥搴㈡寵閹哄娈?daemon 閸涙垝鎶?`start` / `stop`)鐠ф澘鐡欓崨鎴掓姢閺冨爼鈧偓閸戣櫣鐖滈棃?0
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _plain(text: str) -> str:
-    """剥 ANSI 颜色 / 样式转义,方便 substring 断言跨平台稳定。"""
+    """閸?ANSI 妫版粏澹?/ 閺嶅嘲绱℃潪顑跨疅,閺傞€涚┒ substring 閺傤叀鈻堢捄銊ラ挬閸欐壆菙鐎规哎鈧?""
     return _ANSI_RE.sub("", text)
 
 
@@ -39,7 +39,7 @@ def test_root_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    # 0.6.0:撤 start / stop;保留剩余 7 个子命令
+    # 0.6.0:鎾?start / stop;淇濈暀鍓╀綑 7 涓瓙鍛戒护
     for sub in (
         "status",
         "logs",
@@ -52,8 +52,9 @@ def test_root_help() -> None:
         "eval",
         "skill",
         "checkpoint",
+        "prompt",
     ):
-        assert sub in out, f"--help 输出里缺少子命令 {sub!r}"
+        assert sub in out, f"--help 鏉堟挸鍤柌宀€宸辩亸鎴濈摍閸涙垝鎶?{sub!r}"
 
 
 @pytest.mark.parametrize(
@@ -70,52 +71,60 @@ def test_root_help() -> None:
         "eval",
         "skill",
         "checkpoint",
+        "prompt",
     ],
 )
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_subcommand_help(sub: str, flag: str) -> None:
     result = runner.invoke(app, [sub, flag])
-    assert result.exit_code == 0, f"{sub} {flag} 应成功,实际 exit={result.exit_code}"
+    assert result.exit_code == 0, f"{sub} {flag} 鎼存梹鍨氶崝?鐎圭偤妾?exit={result.exit_code}"
 
 
 def test_tool_subcommand_group_has_list_enable_disable_config() -> None:
-    """`chariot tool` 子命令组(0.4.0)。"""
+    """`chariot tool` 鐎涙劕鎳℃禒銈囩矋(0.4.0)閵?"""
     result = runner.invoke(app, ["tool", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for sub in ("list", "enable", "disable", "config"):
-        assert sub in out, f"`chariot tool --help` 缺少子命令 {sub!r}"
+        assert sub in out, f"`chariot tool --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 
-@pytest.mark.parametrize("sub", ["memory", "eval", "skill", "checkpoint"])
+@pytest.mark.parametrize("sub", ["memory", "eval", "skill", "checkpoint", "prompt"])
 def test_phase4_subcommand_groups_have_list(sub: str) -> None:
     result = runner.invoke(app, [sub, "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    assert "list" in out, f"`chariot {sub} --help` 缺少 list 子命令"
+    assert "list" in out, f"`chariot {sub} --help` 缂傚搫鐨?list 鐎涙劕鎳℃禒?"
 
+
+def test_prompt_subcommand_group_has_list_show_version_traces_inspect() -> None:
+    result = runner.invoke(app, ["prompt", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for sub in ("list", "show", "versions", "version", "traces", "inspect"):
+        assert sub in out, f"`chariot prompt --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 def test_convo_subcommand_group_has_list_show_rm_rename() -> None:
-    """`chariot conversation` 子命令组(0.4.0;0.6.0 起 conversation → conversation)。"""
+    """`chariot conversation` 鐎涙劕鎳℃禒銈囩矋(0.4.0;0.6.0 鐠?conversation 閳?conversation)閵?""
     result = runner.invoke(app, ["conversation", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for sub in ("list", "show", "rm", "rename"):
-        assert sub in out, f"`chariot conversation --help` 缺少子命令 {sub!r}"
+        assert sub in out, f"`chariot conversation --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 
 def test_chat_has_convo_option() -> None:
-    """`chariot chat` 加 --conversation 选项(0.4.0;0.6.0 起 conversation → conversation)。"""
+    """`chariot chat` 閸?--conversation 闁銆?0.4.0;0.6.0 鐠?conversation 閳?conversation)閵?""
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     assert "--conversation" in out
-    # metavar 让用户立刻看到取值范围,不必读 help 长文
+    # metavar 鐠佲晝鏁ら幋椋庣彌閸掕崵婀呴崚鏉垮絿閸婅壈瀵栭崶?娑撳秴绻€鐠?help 闂€鎸庢瀮
     assert "new|ULID" in out
 
 
 def test_chat_has_provider_option() -> None:
-    """`chariot chat` 加 --provider 选项(v7 起;不传走 DB 默认)。"""
+    """`chariot chat` 閸?--provider 闁銆?v7 鐠?娑撳秳绱剁挧?DB 姒涙顓?閵?""
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
@@ -123,88 +132,88 @@ def test_chat_has_provider_option() -> None:
 
 
 def test_chat_has_override_options() -> None:
-    """S.7.3 起:`chariot chat` 加 --model / --base-url / --api-key 三个 per-call 覆盖。"""
+    """S.7.3 鐠?`chariot chat` 閸?--model / --base-url / --api-key 娑撳閲?per-call 鐟曞棛娲婇妴?""
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for flag in ("--model", "--base-url", "--api-key"):
-        assert flag in out, f"`chariot chat --help` 缺少 {flag}"
+        assert flag in out, f"`chariot chat --help` 缂傚搫鐨?{flag}"
 
 
 def test_provider_probe_has_override_options() -> None:
-    """S.7.3 起:`chariot provider probe` 也接 --model / --base-url / --api-key。"""
+    """S.7.3 鐠?`chariot provider probe` 娑旂喐甯?--model / --base-url / --api-key閵?""
     result = runner.invoke(app, ["provider", "probe", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for flag in ("--model", "--base-url", "--api-key"):
-        assert flag in out, f"`chariot provider probe --help` 缺少 {flag}"
+        assert flag in out, f"`chariot provider probe --help` 缂傚搫鐨?{flag}"
 
 
 def test_chat_convo_invalid_value_dies_locally() -> None:
-    """非法 --conversation 值 → CLI 立刻 die,不打 AIAgent。"""
+    """闂堢偞纭?--conversation 閸?閳?CLI 缁斿鍩?die,娑撳秵澧?AIAgent閵?""
     result = runner.invoke(app, ["chat", "--conversation", "foo", "hi"])
     assert result.exit_code != 0
     out = _plain(result.output)
-    # 错误文案应包含合法取值提示("new" 或 ULID)
+    # 闁挎瑨顕ら弬鍥攳鎼存柨瀵橀崥顐㈡値濞夋洖褰囬崐鍏煎絹缁€?"new" 閹?ULID)
     assert "new" in out and "ULID" in out
 
 
 def test_tool_enable_requires_name() -> None:
-    """`chariot tool enable` 没传 name → 退出码非 0。"""
+    """`chariot tool enable` 濞屸€茬炊 name 閳?闁偓閸戣櫣鐖滈棃?0閵?""
     result = runner.invoke(app, ["tool", "enable"])
     assert result.exit_code != 0
 
 
 def test_convo_show_requires_id() -> None:
-    """`chariot conversation show` 没传 id → 退出码非 0。"""
+    """`chariot conversation show` 濞屸€茬炊 id 閳?闁偓閸戣櫣鐖滈棃?0閵?""
     result = runner.invoke(app, ["conversation", "show"])
     assert result.exit_code != 0
 
 
 def test_provider_subcommand_group_has_list_show_use_and_crud() -> None:
-    """`chariot provider` 子命令(0.6.0 起):list / show / use / probe / add / edit / rm / copy。
+    """`chariot provider` 鐎涙劕鎳℃禒?0.6.0 鐠?:list / show / use / probe / add / edit / rm / copy閵?
 
-    v7 起新增 `show`(展示 entry,默认显示当前默认)+ `use`(设默认)。
+    v7 鐠ч攱鏌婃晶?`show`(鐏炴洜銇?entry,姒涙顓婚弰鍓с仛瑜版挸澧犳妯款吇)+ `use`(鐠侀箖绮拋?閵?
     """
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
     for sub in ("list", "show", "use", "probe", "add", "update", "delete", "rm", "copy"):
-        assert sub in out, f"`chariot provider --help` 缺少子命令 {sub!r}"
+        assert sub in out, f"`chariot provider --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 
 def test_provider_use_requires_name() -> None:
-    """`chariot provider use` 不带参数 → typer 报参数缺失。"""
+    """`chariot provider use` 娑撳秴鐢崣鍌涙殶 閳?typer 閹躲儱寮弫鎵繁婢朵究鈧?""
     result = runner.invoke(app, ["provider", "use"])
     assert result.exit_code != 0
 
 
 def test_provider_add_requires_name_and_type() -> None:
-    """`chariot provider add` 没传 --name / --type 时 typer 报参数缺失。"""
+    """`chariot provider add` 濞屸€茬炊 --name / --type 閺?typer 閹躲儱寮弫鎵繁婢朵究鈧?""
     result = runner.invoke(app, ["provider", "add"])
     assert result.exit_code != 0
 
 
 def test_model_subcommand_renamed() -> None:
-    """0.6.0 起 `chariot model` rename 成 `chariot provider`,旧名退出码非 0。"""
+    """0.6.0 鐠?`chariot model` rename 閹?`chariot provider`,閺冄冩倳闁偓閸戣櫣鐖滈棃?0閵?""
     result = runner.invoke(app, ["model", "list"])
     assert result.exit_code != 0
 
 
 def test_start_subcommand_removed() -> None:
-    """0.6.0 库化后撤 daemon `start` 命令。"""
+    """0.6.0 鎼存挸瀵查崥搴㈡寵 daemon `start` 閸涙垝鎶ら妴?""
     result = runner.invoke(app, ["start"])
     assert result.exit_code != 0
 
 
 def test_stop_subcommand_removed() -> None:
-    """0.6.0 库化后撤 daemon `stop` 命令。"""
+    """0.6.0 鎼存挸瀵查崥搴㈡寵 daemon `stop` 閸涙垝鎶ら妴?""
     result = runner.invoke(app, ["stop"])
     assert result.exit_code != 0
 
 
 def test_config_subcommand_removed() -> None:
-    """0.3.0 起 chariot config init/show 子命令组废弃(模型配置改 DB-backed)。"""
+    """0.3.0 鐠?chariot config init/show 鐎涙劕鎳℃禒銈囩矋鎼寸喎绱?濡€崇€烽柊宥囩枂閺€?DB-backed)閵?""
     result = runner.invoke(app, ["config", "--help"])
     assert result.exit_code != 0
 
@@ -212,7 +221,7 @@ def test_config_subcommand_removed() -> None:
 def test_conversation_subcommand_renamed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`conversation` 现在是主名。"""
+    """`conversation` 閻滄澘婀弰顖欏瘜閸氬秲鈧?""
     from chariot.cli import _runtime
 
     monkeypatch.setattr(_runtime, "DEFAULT_DB_PATH", tmp_path / "chariot.db")
@@ -233,28 +242,28 @@ def test_unknown_subcommand_fails() -> None:
 
 
 def test_upstream_subcommand_removed() -> None:
-    """v0 架构没有 upstream 概念,`chariot upstream` 子命令应不存在。"""
+    """v0 閺嬭埖鐎▽鈩冩箒 upstream 濮掑倸搴?`chariot upstream` 鐎涙劕鎳℃禒銈呯安娑撳秴鐡ㄩ崷銊ｂ偓?""
     result = runner.invoke(app, ["upstream"])
     assert result.exit_code != 0
 
 
 def test_chat_protocol_option_removed() -> None:
-    """0.2.0 起单协议化,`chat --protocol ...` 选项已下线。"""
+    """0.2.0 鐠у嘲宕熼崡蹇氼唴閸?`chat --protocol ...` 闁銆嶅韫瑓缁捐￥鈧?""
     result = runner.invoke(app, ["chat", "--protocol", "messages", "hi"])
     assert result.exit_code != 0
 
 
 def test_chat_invalid_max_tokens_fails() -> None:
-    """`--max-tokens` 必须是 int;非数字 typer 自带 parser 阶段就报错。"""
+    """`--max-tokens` 韫囧懘銆忛弰?int;闂堢偞鏆熺€?typer 閼奉亜鐢?parser 闂冭埖顔岀亸杈ㄥГ闁挎瑣鈧?""
     result = runner.invoke(app, ["chat", "--max-tokens", "abc", "hi"])
     assert result.exit_code != 0
 
 
-# ---------- --quiet 全局 flag ----------
+# ---------- --quiet 閸忋劌鐪?flag ----------
 
 
 def test_quiet_flag_accepted_by_root_help() -> None:
-    """根 --help 里有 --quiet / -q 选项。"""
+    """閺?--help 闁插本婀?--quiet / -q 闁銆嶉妴?""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
@@ -263,14 +272,14 @@ def test_quiet_flag_accepted_by_root_help() -> None:
 
 
 def test_quiet_flag_sets_renderer_state() -> None:
-    """--quiet 触发根 callback 后,Renderer.QUIET = True。"""
+    """--quiet 鐟欙箑褰傞弽?callback 閸?Renderer.QUIET = True閵?""
     from chariot.cli.render import Renderer
 
-    Renderer.QUIET = False  # 保险丝
-    # 用一个必然失败的子命令快速走完 callback + 子命令参数校验
+    Renderer.QUIET = False  # 娣囨繈娅撴稉?
+    # 閻劋绔存稉顏勭箑閻掕泛銇戠拹銉ф畱鐎涙劕鎳℃禒銈呮彥闁喕铔嬬€?callback + 鐎涙劕鎳℃禒銈呭棘閺佺増鐗庢?
     runner.invoke(app, ["--quiet", "chat", "--max-tokens", "abc", "hi"])
     assert Renderer.QUIET is True
-    Renderer.QUIET = False  # 复位,避免污染后续 test
+    Renderer.QUIET = False  # 婢跺秳缍?闁灝鍘ゅЧ鈩冪厠閸氬海鐢?test
 
 
 def test_short_quiet_flag() -> None:

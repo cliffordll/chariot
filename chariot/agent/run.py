@@ -113,6 +113,7 @@ class AIAgent:
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
         from chariot.repos.provider_repo import ProviderRepo
+        from chariot.repos.prompt_repo import PromptRepo
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
 
@@ -120,6 +121,7 @@ class AIAgent:
         async with sm() as session:
             await ProviderRepo(session).seed_if_empty()
             await ToolRepo(session).seed_if_empty()
+            await PromptRepo(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
 
@@ -198,6 +200,9 @@ class AIAgent:
         self, req: ChatRequest, provider: BaseProvider
     ) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
+        if self._sessionmaker is not None:
+            async with self._sessionmaker() as session:
+                await self._record_prompt_trace(session, req, provider)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
@@ -254,6 +259,7 @@ class AIAgent:
         await self._persist_new_user_messages(repo, conversation_id, req)
         history = await self._load_history_as_messages(repo, conversation_id)
         full_req = dataclasses.replace(req, messages=history)
+        await self._record_prompt_trace(session, full_req, provider)
 
         loop = AgentLoop(
             provider=provider,
@@ -315,4 +321,18 @@ class AIAgent:
             name=raw.get("name", tool.name),
             description=raw.get("description", ""),
             input_schema=raw.get("input_schema", {}),
+        )
+
+    @staticmethod
+    async def _record_prompt_trace(
+        session: AsyncSession,
+        req: ChatRequest,
+        provider: BaseProvider,
+    ) -> None:
+        from chariot.repos.prompt_repo import PromptRepo
+
+        await PromptRepo(session).record_trace(
+            req,
+            provider_name=provider.config.name,
+            model=provider.config.model,
         )
