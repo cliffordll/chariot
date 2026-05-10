@@ -71,8 +71,8 @@
 ## 文档与设计
 
 - **文档先行**:任何架构级改动,先在 `docs/` 更新设计文档,再写代码
-- **三文件体系**:`docs/DESIGN.md`(架构真源) + `docs/FEATURE.md`(任务清单 · heading emoji 标进度) + `docs/ROADMAP.md`(v1+ 方向) — 职责正交,不要混写。执行细节由 commit history 承载
-- **DESIGN / FEATURE 按版本归档**:历史的 `DESIGN.md` / `FEATURE.md` 是冻结快照,**不直接编辑**。
+- **三文件体系**:`docs/DEVELOPMENT.md`(当前开发计划) + `docs/EVOLUTION_PLAN.md`(Phase 0~5 后的长期能力规划) + `docs/ROADMAP.md`(v1+ 方向) — 职责正交,不要混写。执行细节由 commit history 承载
+- **DEVELOPMENT 按版本归档**:当前 `docs/DEVELOPMENT.md` 是活文档,归档时必须**原样复制**到 `docs/history/<version>/DEVELOPMENT.md`,**禁止**在归档过程中改写内容或丢信息。新计划要等用户确认后再覆盖主文档。
   - 用户**明确说"归档"**之前:不要主动 archive、不要改这两个文件,只能读
   - 用户说"归档"后,按下面流程动手:
     1. `git mv docs/DESIGN.md docs/history/<version>/DESIGN.md`、`git mv docs/FEATURE.md docs/history/<version>/FEATURE.md`(`<version>` 是该文档代表的 semver 版本号,如 `0.1.0`、`0.2.0` —— 即这套文档驱动的那个发布版本),保留 git 历史
