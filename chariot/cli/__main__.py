@@ -8,6 +8,7 @@ import typer
 
 from chariot.cli.commands import chat as chat_mod
 from chariot.cli.commands import checkpoint as checkpoint_mod
+from chariot.cli.commands import context as context_mod
 from chariot.cli.commands import conversation as conversation_mod
 from chariot.cli.commands import evals as eval_mod
 from chariot.cli.commands import logs as logs_mod
@@ -55,6 +56,7 @@ for mod in (
     eval_mod,
     skill_mod,
     checkpoint_mod,
+    context_mod,
 ):
     mod.register(app)
 

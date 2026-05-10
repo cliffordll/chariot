@@ -177,6 +177,41 @@ export interface PromptTrace {
   created_at: string;
 }
 
+export interface ContextSlice {
+  name: string;
+  source: string;
+  content: unknown;
+}
+
+export interface ContextSnapshot {
+  id: string;
+  conversation_id: string | null;
+  provider_name: string;
+  model: string | null;
+  request: Record<string, unknown>;
+  slices: ContextSlice[];
+  source_refs: Array<Record<string, unknown>>;
+  context_size: number;
+  created_at: string;
+}
+
+export interface ContextTrace {
+  id: string;
+  snapshot_id: string;
+  conversation_id: string | null;
+  provider_name: string;
+  model: string | null;
+  prompt_trace_id: string | null;
+  policy: Record<string, unknown>;
+  selected_refs: Array<Record<string, unknown>>;
+  created_at: string;
+}
+
+export interface ContextInspectResult {
+  snapshot: ContextSnapshot | null;
+  trace: ContextTrace | null;
+}
+
 export interface PromptBundleDetail extends PromptBundle {
   versions?: PromptVersion[];
 }
@@ -323,6 +358,26 @@ const apiCore = {
 
   inspectPrompt(trace_id: string): Promise<{ trace: PromptTrace }> {
     return rpc("inspect_prompt", { trace_id });
+  },
+
+  listContextSnapshots(params: { conversation_id?: string | null; limit?: number; offset?: number } = {}): Promise<{
+    snapshots: ContextSnapshot[];
+  }> {
+    return rpc("list_context_snapshots", { ...params });
+  },
+
+  getContextSnapshot(snapshot_id: string): Promise<{ snapshot: ContextSnapshot }> {
+    return rpc("get_context_snapshot", { snapshot_id });
+  },
+
+  listContextTraces(params: { conversation_id?: string | null; limit?: number; offset?: number } = {}): Promise<{
+    traces: ContextTrace[];
+  }> {
+    return rpc("list_context_traces", { ...params });
+  },
+
+  inspectContext(context_id: string): Promise<ContextInspectResult> {
+    return rpc("inspect_context", { context_id });
   },
 
   addPromptBundle(payload: PromptBundlePayload): Promise<{ bundle: PromptBundle; version: PromptVersion }> {
