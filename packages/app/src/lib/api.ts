@@ -68,10 +68,19 @@ export interface Provider {
   type: string;
   options: Record<string, unknown>;
   params: Record<string, unknown>;
+  capabilities: ProviderCapabilities;
+  health?: ProviderHealthSummary | null;
   default?: boolean;
 }
 
 export type ProviderEntry = Provider;
+
+export interface ProviderCapabilities {
+  supports_system: boolean;
+  supports_tools: boolean;
+  supports_tool_choice: boolean;
+  supports_thinking: boolean;
+}
 
 export interface ProbeError {
   code: string;
@@ -117,6 +126,23 @@ export interface ProvidersListResponse {
   available: string[];
   types: string[];
   entries: Provider[];
+}
+
+export interface ProviderStatusResponse {
+  default_provider: string | null;
+  provider_count: number;
+  known_types: string[];
+  providers: Provider[];
+}
+
+export interface ProviderHealthSummary {
+  provider_name: string;
+  last_ok: boolean;
+  latency_ms: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  last_probe_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ToolsListResponse {
@@ -298,6 +324,10 @@ const apiCore = {
     return rpc("list_providers");
   },
 
+  showProvider(name: string): Promise<{ provider: Provider }> {
+    return rpc("show_provider", { name });
+  },
+
   addProvider(req: {
     name: string;
     type: string;
@@ -322,6 +352,10 @@ const apiCore = {
     return rpc("delete_provider", { name });
   },
 
+  useProvider(name: string): Promise<{ provider: Provider }> {
+    return rpc("use_provider", { name });
+  },
+
   async duplicateProvider(name: string, as_?: string): Promise<{ provider: Provider }> {
     const { providers } = await apiCore.listProviders();
     const src = providers.find((p) => p.name === name);
@@ -338,6 +372,10 @@ const apiCore = {
 
   probeProvider(name: string): Promise<ProbeResult> {
     return rpc("probe_provider", { name });
+  },
+
+  getProviderStatus(): Promise<ProviderStatusResponse> {
+    return rpc("get_provider_status");
   },
 
   listLogs(params: ListLogsParams = {}): Promise<{ logs: LogEntry[] }> {

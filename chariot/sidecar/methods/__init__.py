@@ -144,10 +144,13 @@ def register_methods(
 
     providers = ProviderMethods(runtime)
     server.method("list_providers")(providers.list_)
+    server.method("show_provider")(providers.show)
     server.method("add_provider")(providers.add)
     server.method("update_provider")(providers.update)
     server.method("delete_provider")(providers.delete)
+    server.method("use_provider")(providers.use)
     server.method("probe_provider")(providers.probe)
+    server.method("get_provider_status")(providers.status)
 
     prompts = PromptMethods(runtime)
     server.method("list_prompt_bundles")(prompts.list_)
