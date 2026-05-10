@@ -1,174 +1,112 @@
-"""`chariot prompt` command group."""
+"""Prompt 管理命令。
+
+功能分三块：
+- 查看：`list` / `show` / `versions` / `version`
+- 管理：`add` / `update` / `activate`
+- 追踪：`traces` / `inspect`
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
+from chariot.agent.exceptions import ConfigError
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.prompt_repo import PromptRepo
+from chariot.repos.prompt_repo import (
+    DEFAULT_BUNDLE_LAYERS,
+    PromptRepo,
+)
+
+_MISSING = object()
+
+prompt_help = (
+    "管理 prompt bundle、版本和 trace。\n\n"
+    "查看：list、show、versions、version\n"
+    "管理：add、update、activate\n"
+    "追踪：traces、inspect\n"
+    "\n"
+    "说明：\n"
+    "  - `add` / `update` 支持多个 `--layer`，JSON 对象最稳。\n"
+    "  - `versions` 不带 bundle 时会先列出所有 bundle。\n"
+)
 
 prompt_app = typer.Typer(
     name="prompt",
-    help="查看 prompt bundle / version / trace",
+    help=prompt_help,
     no_args_is_help=True,
 )
 
 
-@prompt_app.command("list", help="列出 prompt bundles")
-def list_cmd() -> None:
-    asyncio.run(_list())
+def _fmt_dt(value: Any) -> str:
+    if value is None:
+        return "-"
+    if hasattr(value, "isoformat"):
+        return value.isoformat(timespec="seconds")
+    return str(value)
 
 
-async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        bundles = await PromptRepo(session).list_bundles()
-    if not bundles:
-        Renderer.out("(没有 prompt bundles)")
-        return
-    rows = [(b.id, b.name, str(b.version_count), b.description or "-") for b in bundles]
-    Renderer.table(["id", "name", "versions", "description"], rows, title="prompt bundles")
+def _json_text(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-@prompt_app.command("show", help="显示一个 prompt bundle 的 layers 和 versions")
-def show_cmd(
-    name: Annotated[str, typer.Argument(help="bundle name")],
-) -> None:
-    asyncio.run(_show(name))
+def _truncate(text: str, limit: int = 80) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
 
 
-async def _show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = PromptRepo(session)
-        bundle = await repo.get_bundle(name)
-        versions = await repo.list_versions(name)
-    if bundle is None:
-        Renderer.die(f"未找到 prompt bundle: {name!r}")
-        return
-    Renderer.out(f"id:           {bundle.id}")
-    Renderer.out(f"name:         {bundle.name}")
-    Renderer.out(f"description:  {bundle.description or '-'}")
-    Renderer.out(f"version_count: {bundle.version_count}")
-    Renderer.out("")
-    Renderer.out("layers:")
-    for layer in bundle.layers:
-        Renderer.out(f"- {layer.get('name')}: {layer.get('source')}")
-    Renderer.out("")
-    if versions:
-        rows = [(v.id, v.version, json.dumps(v.spec, ensure_ascii=False)) for v in versions]
-        Renderer.table(["id", "version", "spec"], rows, title="versions")
-
-
-@prompt_app.command("versions", help="列出一个 prompt bundle 的 versions")
-def versions_cmd(
-    name: Annotated[str | None, typer.Argument(help="bundle name")] = None,
-) -> None:
-    asyncio.run(_versions(name))
-
-
-async def _versions(name: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = PromptRepo(session)
-        if name is None:
-            bundles = await repo.list_bundles()
-            if not bundles:
-                Renderer.out("(没有 prompt bundles)")
-                return
-            rows = [(b.id, b.name, str(b.version_count), b.description or "-") for b in bundles]
-            Renderer.table(["id", "name", "versions", "description"], rows, title="prompt bundles")
-            Renderer.out("")
-            Renderer.out("use `chariot prompt versions <bundle>` to inspect a bundle")
-            return
-        bundle = await repo.get_bundle(name)
-        versions = await repo.list_versions(name)
-    if bundle is None:
-        Renderer.die(f"未找到 prompt bundle: {name!r}")
-        return
-    if not versions:
-        Renderer.out(f"(bundle {name!r} 没有 versions)")
+def _render_bundle_rows(entries: list[Any]) -> None:
+    if not entries:
+        Renderer.out("(没有 prompt bundle)")
         return
     rows = [
-        (v.id, v.version, v.created_at.isoformat(), json.dumps(v.spec, ensure_ascii=False))
-        for v in versions
+        (
+            entry.name,
+            "yes" if entry.is_active else "no",
+            str(entry.version_count),
+            entry.active_version or "-",
+            _truncate(entry.description or "-", 48),
+        )
+        for entry in entries
     ]
-    Renderer.table(["id", "version", "created_at", "spec"], rows, title=f"versions for {name}")
+    Renderer.table(["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
 
 
-@prompt_app.command("version", help="显示一个 prompt version")
-def version_cmd(
-    name: Annotated[str, typer.Argument(help="bundle name")],
-    version: Annotated[str, typer.Argument(help="version name")],
-) -> None:
-    asyncio.run(_version(name, version))
-
-
-async def _version(name: str, version: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await PromptRepo(session).get_version(name, version)
-    if entry is None:
-        Renderer.die(f"未找到 prompt version: {name!r}:{version!r}")
+def _render_layers_table(layers: list[dict[str, Any]]) -> None:
+    if not layers:
+        Renderer.out("(没有 layers)")
         return
-    Renderer.out(f"id:           {entry.id}")
-    Renderer.out(f"bundle_id:    {entry.bundle_id}")
-    Renderer.out(f"bundle_name:  {entry.bundle_name}")
-    Renderer.out(f"version:      {entry.version}")
-    Renderer.out(f"created_at:   {entry.created_at.isoformat()}")
-    Renderer.out(f"updated_at:   {entry.updated_at.isoformat()}")
-    Renderer.out("")
-    Renderer.out(json.dumps(entry.spec, ensure_ascii=False, indent=2))
-
-
-@prompt_app.command("inspect", help="查看一条 prompt trace")
-def inspect_cmd(
-    trace_id: Annotated[str, typer.Argument(help="prompt trace id")],
-) -> None:
-    asyncio.run(_inspect(trace_id))
-
-
-async def _inspect(trace_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        trace = await PromptRepo(session).get_trace(trace_id)
-    if trace is None:
-        Renderer.die(f"未找到 prompt trace: {trace_id!r}")
-        return
-    Renderer.out(f"id:             {trace.id}")
-    Renderer.out(f"bundle:         {trace.bundle_name}")
-    Renderer.out(f"version:        {trace.version}")
-    Renderer.out(f"conversation_id: {trace.conversation_id or '-'}")
-    Renderer.out(f"provider_name:  {trace.provider_name}")
-    Renderer.out(f"model:          {trace.model or '-'}")
-    Renderer.out(f"prompt_size:    {trace.prompt_size}")
-    Renderer.out(f"created_at:     {trace.created_at.isoformat()}")
-    Renderer.out("")
-    Renderer.out("source_refs:")
-    Renderer.out(json.dumps(trace.source_refs, ensure_ascii=False, indent=2))
-    Renderer.out("")
-    Renderer.out("request:")
-    Renderer.out(json.dumps(trace.request, ensure_ascii=False, indent=2))
-
-
-@prompt_app.command("traces", help="列出最近 prompt traces")
-def traces_cmd(
-    bundle_name: Annotated[str | None, typer.Option("--bundle", help="bundle name")] = None,
-    limit: Annotated[int, typer.Option("--limit", min=1, max=200, help="max rows")] = 50,
-    offset: Annotated[int, typer.Option("--offset", min=0, help="row offset")] = 0,
-) -> None:
-    asyncio.run(_traces(bundle_name=bundle_name, limit=limit, offset=offset))
-
-
-async def _traces(*, bundle_name: str | None, limit: int, offset: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = PromptRepo(session)
-        if bundle_name is None:
-            entries = await repo.list_traces(limit=limit, offset=offset)
+    rows = []
+    for layer in layers:
+        content = layer.get("content")
+        if isinstance(content, str):
+            rendered = content
+        elif content is None:
+            rendered = "-"
         else:
-            entries = await repo.list_traces_by_bundle(bundle_name, limit=limit, offset=offset)
+            rendered = json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True)
+        rows.append(
+            (
+                layer.get("name", "-"),
+                layer.get("source", "-"),
+                _truncate(rendered, 120),
+            )
+        )
+    Renderer.table(["layer", "source", "content"], rows, title="layers")
+
+
+def _render_trace_rows(entries: list[Any]) -> None:
     if not entries:
-        Renderer.out("(没有 prompt traces)")
+        Renderer.out("(没有 prompt trace)")
         return
     rows = [
         (
@@ -179,14 +117,392 @@ async def _traces(*, bundle_name: str | None, limit: int, offset: int) -> None:
             entry.provider_name,
             entry.model or "-",
             str(entry.prompt_size),
+            _fmt_dt(entry.created_at),
         )
         for entry in entries
     ]
     Renderer.table(
-        ["id", "bundle", "version", "conversation", "provider", "model", "size"],
+        ["trace", "bundle", "version", "conversation", "provider", "model", "size", "created_at"],
         rows,
         title="prompt traces",
     )
+
+
+def _parse_layers(values: list[str] | None) -> list[dict[str, Any]] | None:
+    if values is None:
+        return None
+    layers: list[dict[str, Any]] = []
+    for raw in values:
+        text = raw.strip()
+        if not text:
+            continue
+        parsed = _parse_layer_item(text)
+        if isinstance(parsed, list):
+            for item in parsed:
+                _append_layer(layers, item, raw=text)
+        else:
+            _append_layer(layers, parsed, raw=text)
+    return layers
+
+
+def _parse_layer_item(raw: str) -> Any:
+    if _looks_like_json(raw):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            Renderer.die(f"layer 不是合法 JSON: {raw!r}\n{exc}")
+            raise SystemExit(1)
+    return _parse_layer_mapping(raw)
+
+
+def _parse_layer_mapping(raw: str) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        Renderer.die(
+            "layer 不能为空。\n"
+            "模板: --layer '{\"name\":\"base_system\",\"source\":\"user\",\"content\":\"...\"}'\n"
+            "或: --layer 'name=base_system,source=user,content=...'",
+        )
+        raise SystemExit(1)
+    for part in parts:
+        if "=" in part:
+            key, _, value = part.partition("=")
+        elif ":" in part:
+            key, _, value = part.partition(":")
+        else:
+            Renderer.die(
+                "layer 必须是 JSON 对象，或 key=value / key:value 形式。\n"
+                f"收到: {raw!r}",
+            )
+            raise SystemExit(1)
+        key = key.strip()
+        if not key:
+            Renderer.die(f"layer key 不能为空: {raw!r}")
+            raise SystemExit(1)
+        result[key] = value.strip()
+    return result
+
+
+def _append_layer(target: list[dict[str, Any]], item: Any, *, raw: str) -> None:
+    if not isinstance(item, dict):
+        Renderer.die(f"layer 必须是对象或对象数组，不能是 {type(item).__name__}: {raw!r}")
+        raise SystemExit(1)
+    target.append(item)
+
+
+def _looks_like_json(raw: str) -> bool:
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
+
+
+def _layers_or_default(values: list[str] | None) -> list[dict[str, Any]]:
+    parsed = _parse_layers(values)
+    if parsed is None:
+        return list(DEFAULT_BUNDLE_LAYERS)
+    if not parsed:
+        Renderer.die("至少提供一个 layer，或者干脆不要传 `--layer` 使用默认 layers。")
+        raise SystemExit(1)
+    return parsed
+
+
+def _prompt_repo(session: Any) -> PromptRepo:
+    return PromptRepo(session)
+
+
+# -------------------- 查看 --------------------
+
+
+@prompt_app.command("list", help="列出所有 prompt bundle")
+def list_cmd() -> None:
+    asyncio.run(_list())
+
+
+async def _list() -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        bundles = await _prompt_repo(session).list_bundles()
+    _render_bundle_rows(bundles)
+
+
+@prompt_app.command("show", help="查看某个 bundle 的详情")
+def show_cmd(
+    name: Annotated[str, typer.Argument(help="bundle 名称")],
+) -> None:
+    asyncio.run(_show(name))
+
+
+async def _show(name: str) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = _prompt_repo(session)
+        bundle = await repo.get_bundle(name)
+        if bundle is None:
+            Renderer.die(f"未找到 prompt bundle: {name!r}")
+            return
+        versions = await repo.list_versions(name)
+
+    Renderer.kv(
+        {
+            "name": bundle.name,
+            "active": "yes" if bundle.is_active else "no",
+            "current_version": bundle.active_version or "-",
+            "versions": bundle.version_count,
+            "created_at": _fmt_dt(bundle.created_at),
+            "updated_at": _fmt_dt(bundle.updated_at),
+            "description": bundle.description or "-",
+        }
+    )
+    Renderer.out("")
+    _render_layers_table(bundle.layers)
+    if versions:
+        Renderer.out("")
+        rows = [
+            (
+                entry.version,
+                "yes" if entry.is_active else "no",
+                _fmt_dt(entry.created_at),
+                _fmt_dt(entry.updated_at),
+            )
+            for entry in versions
+        ]
+        Renderer.table(["version", "active", "created_at", "updated_at"], rows, title=f"versions of {bundle.name}")
+
+
+@prompt_app.command(
+    "versions",
+    help="列出 bundle 的版本；不传名称时先列出所有 bundle",
+)
+def versions_cmd(
+    name: Annotated[str, typer.Argument(help="bundle 名称；省略时列出所有 bundle")] = "",
+) -> None:
+    asyncio.run(_versions(name or None))
+
+
+async def _versions(name: str | None) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = _prompt_repo(session)
+        if name is None:
+            _render_bundle_rows(await repo.list_bundles())
+            Renderer.out("提示：使用 `chariot prompt versions <bundle>` 查看某个 bundle 的版本。")
+            return
+        bundle = await repo.get_bundle(name)
+        if bundle is None:
+            Renderer.die(f"未找到 prompt bundle: {name!r}")
+            return
+        versions = await repo.list_versions(name)
+
+    if not versions:
+        Renderer.out(f"(bundle {name!r} 没有版本)")
+        return
+    rows = [
+        (
+            entry.version,
+            "yes" if entry.is_active else "no",
+            str(len(entry.spec.get("layers", []))),
+            _fmt_dt(entry.created_at),
+            _fmt_dt(entry.updated_at),
+        )
+        for entry in versions
+    ]
+    Renderer.table(["version", "active", "layers", "created_at", "updated_at"], rows, title=f"versions of {bundle.name}")
+
+
+@prompt_app.command("version", help="查看某个 bundle 的指定版本")
+def version_cmd(
+    bundle_name: Annotated[str, typer.Argument(help="bundle 名称")],
+    version: Annotated[str, typer.Argument(help="版本号，例如 v1")],
+) -> None:
+    asyncio.run(_version(bundle_name, version))
+
+
+async def _version(bundle_name: str, version: str) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = _prompt_repo(session)
+        entry = await repo.get_version(bundle_name, version)
+        if entry is None:
+            Renderer.die(f"未找到 prompt version: {bundle_name!r}:{version!r}")
+            return
+
+    Renderer.kv(
+        {
+            "bundle": entry.bundle_name,
+            "version": entry.version,
+            "active": "yes" if entry.is_active else "no",
+            "created_at": _fmt_dt(entry.created_at),
+            "updated_at": _fmt_dt(entry.updated_at),
+        }
+    )
+    Renderer.out("")
+    layers = entry.spec.get("layers", [])
+    if isinstance(layers, list):
+        _render_layers_table(layers)
+    else:
+        Renderer.out(_json_text(layers))
+
+
+@prompt_app.command(
+    "traces",
+    help="列出 prompt trace；可按 bundle 过滤",
+)
+def traces_cmd(
+    bundle: Annotated[str, typer.Option("--bundle", help="只看某个 bundle")] = "",
+    limit: Annotated[int, typer.Option("--limit", help="返回条数上限")] = 50,
+    offset: Annotated[int, typer.Option("--offset", help="跳过前 N 条")] = 0,
+) -> None:
+    asyncio.run(_traces(bundle or None, limit=limit, offset=offset))
+
+
+async def _traces(bundle: str | None, *, limit: int, offset: int) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = _prompt_repo(session)
+        if bundle is None:
+            entries = await repo.list_traces(limit=limit, offset=offset)
+        else:
+            entries = await repo.list_traces_by_bundle(bundle, limit=limit, offset=offset)
+            if not entries:
+                found = await repo.get_bundle(bundle)
+                if found is None:
+                    Renderer.die(f"未找到 prompt bundle: {bundle!r}")
+                    return
+    _render_trace_rows(entries)
+
+
+@prompt_app.command("inspect", help="查看单条 prompt trace 的详情")
+def inspect_cmd(
+    trace_id: Annotated[str, typer.Argument(help="trace id")],
+) -> None:
+    asyncio.run(_inspect(trace_id))
+
+
+async def _inspect(trace_id: str) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        trace = await _prompt_repo(session).get_trace(trace_id)
+        if trace is None:
+            Renderer.die(f"未找到 prompt trace: {trace_id!r}")
+            return
+
+    Renderer.kv(
+        {
+            "trace_id": trace.id,
+            "bundle": trace.bundle_name,
+            "version": trace.version,
+            "conversation_id": trace.conversation_id or "-",
+            "provider": trace.provider_name,
+            "model": trace.model or "-",
+            "prompt_size": trace.prompt_size,
+            "created_at": _fmt_dt(trace.created_at),
+        }
+    )
+    Renderer.out("")
+    Renderer.out("request:")
+    Renderer.out(_json_text(trace.request))
+    Renderer.out("")
+    Renderer.out("source_refs:")
+    source_rows = [
+        (ref.get("layer", "-"), ref.get("source", "-"), "yes" if ref.get("present") else "no")
+        for ref in trace.source_refs
+    ]
+    Renderer.table(["layer", "source", "present"], source_rows, title="source refs")
+
+
+# -------------------- 管理 --------------------
+
+
+@prompt_app.command("add", help="创建 prompt bundle 并生成初始版本")
+def add_cmd(
+    name: Annotated[str, typer.Argument(help="bundle 名称")],
+    description: Annotated[
+        str,
+        typer.Option("--description", "-d", help="bundle 说明"),
+    ] = "",
+    layers: Annotated[
+        list[str],
+        typer.Option(
+            "--layer",
+            "-l",
+            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入",
+        ),
+    ] = [],
+) -> None:
+    asyncio.run(_add(name, description=description, layers=layers))
+
+
+async def _add(name: str, *, description: str, layers: list[str]) -> None:
+    bundle_layers = list(DEFAULT_BUNDLE_LAYERS) if not layers else _layers_or_default(layers)
+    bundle_description = description or None
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                entry = await _prompt_repo(session).create_bundle(
+                    name,
+                    description=bundle_description,
+                    layers=bundle_layers,
+                )
+        except ConfigError as exc:
+            Renderer.die(f"创建失败: {exc}")
+            return
+    Renderer.out(f"+ {entry.bundle_name}:{entry.version}")
+
+
+@prompt_app.command("update", help="更新 bundle 的说明或 layers，并生成新版本")
+def update_cmd(
+    name: Annotated[str, typer.Argument(help="bundle 名称")],
+    description: Annotated[
+        str,
+        typer.Option("--description", "-d", help="新的 bundle 说明"),
+    ] = _MISSING,
+    layers: Annotated[
+        list[str],
+        typer.Option(
+            "--layer",
+            "-l",
+            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入",
+        ),
+    ] = [],
+) -> None:
+    asyncio.run(_update(name, description=description, layers=layers))
+
+
+async def _update(name: str, *, description: str | object, layers: list[str]) -> None:
+    if description is _MISSING and not layers:
+        Renderer.die("至少提供 `--description` 或 `--layer` 之一。")
+        return
+    parsed_layers = _parse_layers(layers) if layers else None
+    kwargs: dict[str, Any] = {}
+    if description is not _MISSING:
+        kwargs["description"] = description or None
+    if parsed_layers is not None:
+        kwargs["layers"] = parsed_layers
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                entry = await _prompt_repo(session).update_bundle(name, **kwargs)
+        except ConfigError as exc:
+            Renderer.die(f"更新失败: {exc}")
+            return
+    Renderer.out(f"~ {entry.bundle_name}:{entry.version}")
+
+
+@prompt_app.command("activate", help="激活 bundle 或某个版本")
+def activate_cmd(
+    name: Annotated[str, typer.Argument(help="bundle 名称")],
+    version: Annotated[str, typer.Argument(help="版本号；省略则只激活 bundle")] = "",
+) -> None:
+    asyncio.run(_activate(name, version or None))
+
+
+async def _activate(name: str, version: str | None) -> None:
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                repo = _prompt_repo(session)
+                if version is None:
+                    entry = await repo.activate_bundle(name)
+                    Renderer.out(f"* {entry.name} 已激活")
+                    return
+                entry = await repo.activate_version(name, version)
+        except ConfigError as exc:
+            Renderer.die(f"激活失败: {exc}")
+            return
+    Renderer.out(f"* {entry.bundle_name}:{entry.version} 已激活")
 
 
 def register(app: typer.Typer) -> None:

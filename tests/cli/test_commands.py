@@ -97,11 +97,11 @@ def test_phase4_subcommand_groups_have_list(sub: str) -> None:
     assert "list" in out, f"`chariot {sub} --help` 缂傚搫鐨?list 鐎涙劕鎳℃禒?"
 
 
-def test_prompt_subcommand_group_has_list_show_version_traces_inspect() -> None:
+def test_prompt_subcommand_group_has_list_show_add_update_activate_version_traces_inspect() -> None:
     result = runner.invoke(app, ["prompt", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "versions", "version", "traces", "inspect"):
+    for sub in ("list", "show", "add", "update", "activate", "versions", "version", "traces", "inspect"):
         assert sub in out, f"`chariot prompt --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 def test_convo_subcommand_group_has_list_show_rm_rename() -> None:

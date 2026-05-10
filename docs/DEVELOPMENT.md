@@ -14,7 +14,7 @@
 - `prompt bundle`：定义 prompt 组合单元，承载不同角色和模式下的 prompt 结构。
 - `prompt version`：记录 prompt 的版本化快照，便于回溯和对比。
 - `prompt trace`：记录一次 turn 的最终 prompt 组成、来源和大小。
-- 最小查询入口：CLI / sidecar 可以查看 bundle、version 和单次 turn 的 prompt 组成。
+- 最小管理入口：CLI 可以新增、更新、激活 bundle/version，并查看 bundle、version 和单次 turn 的 prompt 组成。
 
 ### 工作原理
 
@@ -61,7 +61,7 @@
 
 - 一次 turn 结束后，能查询该 turn 的 prompt trace。
 - trace 里能看到 bundle/version、request 快照、source refs 和 prompt size。
-- `prompt list/show/inspect` 能查到 bundle、版本和单次 turn 的记录。
+- `prompt list/show/versions/version/traces/inspect` 能查到 bundle、版本和单次 turn 的记录。
 - prompt 的层次定义稳定，后续版本可以在 bundle/version 上演进，而不是散落在业务代码里。
 - 现有的核心 smoke 测试不回退。
 
@@ -79,6 +79,9 @@ uv run pytest tests/agent/test_prompt_system.py -q
 ```powershell
 uv run chariot chat --conversation new "请简要介绍一下你自己"
 uv run chariot prompt list
+uv run chariot prompt add demo --description "demo prompt"
+uv run chariot prompt update demo --description "demo v2"
+uv run chariot prompt activate demo
 uv run chariot prompt show default
 uv run chariot prompt versions default
 uv run chariot prompt version default v1
@@ -88,6 +91,7 @@ uv run chariot prompt inspect <trace_id>
 
 手工验收时重点看三件事：
 
+- `prompt add/update/activate` 能否创建并切换可用 prompt。
 - `prompt list/show/versions/version/traces` 能否看到 bundle、版本和 trace。
 - `prompt inspect` 能否看到这次 turn 的 request、source refs 和 prompt size。
 - 这条 trace 是否和实际聊天行为对应，而不是一条孤立的配置记录。

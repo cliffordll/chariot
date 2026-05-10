@@ -147,6 +147,9 @@ def register_methods(
     server.method("get_prompt_version")(prompts.version)
     server.method("list_prompt_traces")(prompts.traces)
     server.method("inspect_prompt")(prompts.inspect)
+    server.method("add_prompt_bundle")(prompts.add)
+    server.method("update_prompt_bundle")(prompts.update)
+    server.method("activate_prompt_bundle")(prompts.activate)
 
     logs = LogMethods(runtime)
     server.method("list_logs")(logs.list_)

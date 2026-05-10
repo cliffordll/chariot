@@ -66,6 +66,72 @@ class PromptService:
             )
         return self._trace_to_dict(trace)
 
+    async def add_bundle(
+        self,
+        session: Any,
+        *,
+        name: str,
+        description: str | None,
+        layers: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        repo = PromptRepo(session)
+        version = await repo.create_bundle(name, description=description, layers=layers)
+        bundle = await repo.get_bundle(name)
+        if bundle is None:
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after create")
+        return {
+            "bundle": self._bundle_to_dict(bundle),
+            "version": self._version_to_dict(version),
+        }
+
+    async def update_bundle(
+        self,
+        session: Any,
+        *,
+        name: str,
+        description: str | None = None,
+        description_set: bool = False,
+        layers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        repo = PromptRepo(session)
+        kwargs: dict[str, Any] = {}
+        if description_set:
+            kwargs["description"] = description
+        if layers is not None:
+            kwargs["layers"] = layers
+        version = await repo.update_bundle(name, **kwargs)
+        bundle = await repo.get_bundle(name)
+        if bundle is None:
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after update")
+        return {
+            "bundle": self._bundle_to_dict(bundle),
+            "version": self._version_to_dict(version),
+        }
+
+    async def activate_bundle(
+        self,
+        session: Any,
+        *,
+        name: str,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        repo = PromptRepo(session)
+        if version is None:
+            bundle = await repo.activate_bundle(name)
+            active_version = await repo.get_active_version(name)
+            return {
+                "bundle": self._bundle_to_dict(bundle),
+                "version": self._version_to_dict(active_version) if active_version is not None else None,
+            }
+        version_entry = await repo.activate_version(name, version)
+        bundle = await repo.get_bundle(name)
+        if bundle is None:
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after activate")
+        return {
+            "bundle": self._bundle_to_dict(bundle),
+            "version": self._version_to_dict(version_entry),
+        }
+
     @staticmethod
     def _bundle_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
         return {
@@ -73,7 +139,9 @@ class PromptService:
             "name": entry.name,
             "description": entry.description,
             "layers": entry.layers,
+            "is_active": entry.is_active,
             "version_count": entry.version_count,
+            "active_version": entry.active_version,
             "created_at": entry.created_at.isoformat(),
             "updated_at": entry.updated_at.isoformat(),
         }
@@ -86,6 +154,7 @@ class PromptService:
             "bundle_name": entry.bundle_name,
             "version": entry.version,
             "spec": entry.spec,
+            "is_active": entry.is_active,
             "created_at": entry.created_at.isoformat(),
             "updated_at": entry.updated_at.isoformat(),
         }

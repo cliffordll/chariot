@@ -187,7 +187,7 @@ class AIAgent:
             )
             return
 
-        effective_req = self._normalize_request(req, provider)
+        effective_req = await self._prepare_request(req, provider)
 
         if req.is_stateful():
             async for event in self._run_stateful_chat(effective_req, provider):
@@ -322,6 +322,22 @@ class AIAgent:
             description=raw.get("description", ""),
             input_schema=raw.get("input_schema", {}),
         )
+
+    async def _prepare_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+        """Compose the active prompt bundle into `system`, then normalize request fields."""
+        composed = req
+        if self._sessionmaker is not None:
+            from chariot.repos.prompt_repo import PromptRepo
+
+            async with self._sessionmaker() as session:
+                active_bundle = await PromptRepo(session).get_active_bundle()
+                if active_bundle is not None:
+                    system = PromptRepo.render_layers_text(
+                        active_bundle.layers,
+                        existing_system=req.system,
+                    )
+                    composed = dataclasses.replace(req, system=system)
+        return self._normalize_request(composed, provider)
 
     @staticmethod
     async def _record_prompt_trace(

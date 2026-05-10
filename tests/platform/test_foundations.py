@@ -26,7 +26,7 @@ async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
     await dispose_db()
 
 
-class TestMigrationV9:
+class TestMigrationV10:
     async def test_platform_tables_exist(self, session: AsyncSession) -> None:
         names = {
             "memories",
@@ -107,6 +107,8 @@ class TestPlatformRepos:
         bundles = await repo.list_bundles()
         assert bundles[0].name == "default"
         assert bundles[0].version_count == 1
+        assert bundles[0].is_active is True
+        assert bundles[0].active_version == "v1"
 
         trace = await repo.record_trace(
             ChatRequest(
@@ -121,3 +123,7 @@ class TestPlatformRepos:
         fetched = await repo.get_trace(trace.id)
         assert fetched is not None
         assert fetched.provider_name == "mock"
+
+        active_bundle = await repo.get_active_bundle()
+        assert active_bundle is not None
+        assert active_bundle.name == "default"

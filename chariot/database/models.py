@@ -19,6 +19,7 @@
   audit_events / checkpoints / skills`
 - v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
  - v9(0.7.1-prompt):`prompt_bundles / prompt_versions / prompt_traces`
+ - v10(0.7.1-prompt):`prompt_bundles.is_active / prompt_versions.is_active`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -252,6 +253,7 @@ class PromptBundleRow(Base):
     name: Mapped[str] = mapped_column(unique=True, index=True)
     description: Mapped[str | None] = mapped_column(default=None)
     layers: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
+    is_active: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
@@ -265,6 +267,7 @@ class PromptVersionRow(Base):
     bundle_id: Mapped[str] = mapped_column(index=True)
     version: Mapped[str] = mapped_column(index=True)
     spec: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    is_active: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
