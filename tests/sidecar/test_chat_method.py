@@ -24,6 +24,8 @@ from typing import Any
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
+from chariot.database.session import init_db
+from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
 
@@ -170,6 +172,32 @@ class TestChatStreaming:
         msg = notifies[0]["params"]["message"]
         assert msg["model"] == "mock-1"
         assert msg["role"] == "assistant"
+
+    async def test_chat_writes_log_row(self, tmp_path: Path) -> None:
+        events = [
+            ChatEvent.message_start(message_id="m1", model="mock-1", usage={"input_tokens": 3}),
+            ChatEvent.message_delta_done(stop_reason="end_turn", usage={"output_tokens": 7}),
+            ChatEvent.message_done(),
+        ]
+        agent = _MockAgent(events)
+        server = JsonRpcServer()
+        db_path = tmp_path / "chariot.db"
+        register_methods(server, agent, db_path=db_path)
+
+        params = {"provider_name": "mock", "messages": [{"role": "user", "content": "hi"}]}
+        reader = make_reader(_chat_request_frame(1, params))
+        writer = MockWriter()
+        await server.serve(reader, writer)
+
+        sm = await init_db(db_path)
+        async with sm() as session:
+            logs = await LogRepo(session).list_logs(limit=10, offset=0)
+
+        assert len(logs) == 1
+        assert logs[0].provider == "mock"
+        assert logs[0].status == "ok"
+        assert logs[0].input_tokens == 3
+        assert logs[0].output_tokens == 7
 
 
 # ---------------------------------------------------------------------------

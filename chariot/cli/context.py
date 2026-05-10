@@ -34,6 +34,7 @@ from typing import Any
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.run import AIAgent
+from chariot.repos.log_writer import log_writer
 
 
 def _empty_messages() -> list[dict[str, Any]]:
@@ -111,17 +112,7 @@ class ChatContext:
     # ---------- 核心:一轮请求 ----------
 
     async def run_turn(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
-        """构造 ChatRequest → 调 `agent.run_chat(req)` → 流式 ChatEvent → 收尾。
-
-        - 每个 ChatEvent 透传给 `on_event`(REPL 下是 `Renderer.render_event`)
-        - 内部累积 assistant 文本(只取最末轮 message_stop 前的 text_delta)
-        - 累积 usage 字段(message_start.input_tokens + message_delta.output_tokens)
-        - 流里出现 `kind="error"` event → 流结束后抛 `ChatError`
-
-        TurnResult.text 取**最后一个 message 的 text 块**(stop_reason=end_turn 那轮),
-        中间轮(stop_reason=tool_use)的 text 算"过程文本",用户已经通过 on_event
-        看到流式输出,不进 TurnResult。
-        """
+        """?? ChatRequest -> ? `agent.run_chat(req)` -> ?? ChatEvent -> ???"""
         req = self._build_request()
         current_text: list[str] = []
         last_message_text: list[str] = []
@@ -134,7 +125,6 @@ class ChatContext:
             on_event(ev)
             self._accumulate_text(ev, current_text)
             if ev.kind == "message_stop":
-                # 一个 message 收尾 —— snapshot;下一轮(若有)从空起
                 last_message_text = current_text
                 current_text = []
             input_tokens, output_tokens = self._accumulate_usage(ev, input_tokens, output_tokens)
@@ -142,17 +132,34 @@ class ChatContext:
                 error_event = ev
 
         if error_event is not None:
+            await log_writer.record(
+                provider=self.provider_name,
+                status="error",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=error_event.error_message or error_event.error_type or "",
+            )
             raise ChatError(
                 error_type=error_event.error_type or "unknown",
                 error_message=error_event.error_message or "",
             )
 
-        return TurnResult(
+        result = TurnResult(
             text="".join(last_message_text),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+        await log_writer.record(
+            provider=self.provider_name,
+            status="ok",
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=result.latency_ms,
+            error=None,
+        )
+        return result
 
     @staticmethod
     def _accumulate_text(ev: ChatEvent, sink: list[str]) -> None:

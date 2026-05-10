@@ -11,13 +11,28 @@ ChatContext 现在持 AIAgent 实例(不是 ProxyClient);测试用 dummy AIAgent
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+import pytest
+
+from chariot.agent.chat_event import ChatEvent
 from chariot.cli.context import ChatContext
+from chariot.database.session import init_db
+from chariot.repos.log_repo import LogRepo
 
 
 class _DummyAgent:
-    """ChatContext._build_request 不依赖 agent;给个壳骗过 dataclass 字段。"""
+    """ChatContext._build_request ???? agent;????? dataclass ???"""
+
+    async def run_chat(self, req):  # type: ignore[no-untyped-def]
+        yield ChatEvent.message_start(
+            message_id="m1",
+            model="mock-1",
+            usage={"input_tokens": 3},
+        )
+        yield ChatEvent.message_delta_done(stop_reason="end_turn", usage={"output_tokens": 7})
+        yield ChatEvent.message_done()
 
 
 def _make_ctx(*, conversation_id: str | None = None) -> ChatContext:
@@ -127,3 +142,27 @@ def test_request_passes_conversation_id_through() -> None:
     ctx.append_user("hi")
     req = ctx._build_request()
     assert req.conversation_id == ulid
+
+@pytest.mark.asyncio
+async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
+    db_path = tmp_path / "chariot.db"
+    await init_db(db_path)
+
+    ctx = _make_ctx()
+    ctx.agent = _DummyAgent()  # type: ignore[assignment]
+    ctx.append_user("hi")
+
+    result = await ctx.run_turn(lambda ev: None)
+    assert result.input_tokens == 3
+    assert result.output_tokens == 7
+
+    sm = await init_db(db_path)
+    async with sm() as session:
+        logs = await LogRepo(session).list_logs(limit=10, offset=0)
+
+    assert len(logs) == 1
+    assert logs[0].provider == "claude-haiku-4-5"
+    assert logs[0].status == "ok"
+    assert logs[0].input_tokens == 3
+    assert logs[0].output_tokens == 7
+
