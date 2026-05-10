@@ -34,6 +34,7 @@ import {
   type ApiError,
   type ProviderEntry,
   type ProvidersListResponse,
+  type ProviderStatusResponse,
 } from "@/lib/api";
 
 /**
@@ -122,7 +123,7 @@ const TEMPLATES: ProviderTemplate[] = [
 
 type ProvidersState =
   | { kind: "loading" }
-  | { kind: "ok"; data: ProvidersListResponse }
+  | { kind: "ok"; data: ProvidersListResponse; status: ProviderStatusResponse }
   | { kind: "err"; message: string };
 
 type ProbeState =
@@ -150,13 +151,13 @@ export default function Providers() {
   const load = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
-      const { providers } = await api.listProviders();
+      const [{ providers }, status] = await Promise.all([api.listProviders(), api.getProviderStatus()]);
       const data: ProvidersListResponse = {
         available: providers.map((p) => p.name),
         types: [],
         entries: providers,
       };
-      setProvidersState({ kind: "ok", data });
+      setProvidersState({ kind: "ok", data, status });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setProvidersState({ kind: "err", message: msg });
@@ -311,9 +312,11 @@ function ProvidersCard({
     );
   }
   const { data } = providersState;
+  const status = providersState.status;
 
   return (
     <div className="max-w-4xl rounded-lg border border-border p-4">
+      <ProviderStatusBanner status={status} />
       {data.entries.length === 0 ? (
         <p className="mb-4 text-xs text-muted-foreground">
           DB 里没有 entry。点击右上角 <code className="font-mono">+ Add</code> 新建一条。
@@ -346,7 +349,7 @@ function ProvidersCard({
 
       <div className="text-xs text-muted-foreground">
         registered types:{" "}
-        {data.types.map((t, i) => (
+        {status.known_types.map((t, i) => (
           <span key={t}>
             {i > 0 && ", "}
             <code className="font-mono">{t}</code>
@@ -396,6 +399,9 @@ function ProviderRow({
             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
               {entry.type}
             </Badge>
+            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+              {formatCapabilities(entry.capabilities)}
+            </Badge>
           </button>
           <ProbeStatus state={state} />
           <div className="ml-auto flex items-center gap-1">
@@ -442,6 +448,25 @@ function ProviderRow({
         </>
       )}
     </li>
+  );
+}
+
+function ProviderStatusBanner({ status }: { status: ProviderStatusResponse }) {
+  return (
+    <div className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span>
+          <span className="text-muted-foreground">default:</span>{" "}
+          <code className="font-mono">{status.default_provider ?? "(none)"}</code>
+        </span>
+        <span>
+          <span className="text-muted-foreground">providers:</span>{" "}
+          <code className="font-mono">{status.provider_count}</code>
+        </span>
+        <span className="text-muted-foreground">known types:</span>
+        <span className="font-mono">{status.known_types.join(", ") || "(none)"}</span>
+      </div>
+    </div>
   );
 }
 
@@ -505,6 +530,20 @@ function maskApiKey(value: string): string {
   if (value.length === 0) return "";
   if (value.length <= 12) return "***";
   return value.slice(0, 7) + "***...***" + value.slice(-4);
+}
+
+function formatCapabilities(caps: {
+  supports_system: boolean;
+  supports_tools: boolean;
+  supports_tool_choice: boolean;
+  supports_thinking: boolean;
+}): string {
+  const parts: string[] = [];
+  if (caps.supports_system) parts.push("system");
+  if (caps.supports_tools) parts.push("tools");
+  if (caps.supports_tool_choice) parts.push("choice");
+  if (caps.supports_thinking) parts.push("thinking");
+  return parts.length > 0 ? parts.join(" / ") : "(none)";
 }
 
 function ProbeStatus({ state }: { state: ProbeState }) {

@@ -21,6 +21,13 @@ class ProviderMethods(MethodBase):
             providers = await self._service.list_entries(session)
         return {"providers": providers}
 
+    async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._session() as session:
+            provider = await self._service.show_entry(session, name=name)
+        return {"provider": provider}
+
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
@@ -65,3 +72,8 @@ class ProviderMethods(MethodBase):
         name = self._require_str(params, "name")
         async with self._session() as session:
             return await self._service.probe(session, name=name)
+
+    async def status(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del params, ctx
+        async with self._session() as session:
+            return await self._service.status(session)

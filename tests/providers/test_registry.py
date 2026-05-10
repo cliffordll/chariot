@@ -83,6 +83,28 @@ class TestProviderRegistryBasic:
         """unregister 不存在的 type_name 不报错(idempotent)。"""
         ProviderRegistry.unregister("never_registered")  # 不抛
 
+    def test_capabilities_for_builtin_mock(self) -> None:
+        from chariot.providers.builtin.mock import MockProvider
+
+        ProviderRegistry.register("mock", MockProvider)
+        caps = ProviderRegistry.capabilities_for("mock")
+        assert caps == {
+            "supports_system": False,
+            "supports_tools": False,
+            "supports_tool_choice": False,
+            "supports_thinking": False,
+        }
+
+    def test_capabilities_for_custom_provider_defaults_true(self) -> None:
+        ProviderRegistry.register("dummy", _DummyProvider)
+        caps = ProviderRegistry.capabilities_for("dummy")
+        assert caps == {
+            "supports_system": True,
+            "supports_tools": True,
+            "supports_tool_choice": True,
+            "supports_thinking": True,
+        }
+
 
 class TestBaseProviderIsAbstract:
     """BaseProvider 是 ABC,不能直接实例化。"""

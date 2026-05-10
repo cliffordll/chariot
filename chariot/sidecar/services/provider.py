@@ -6,6 +6,7 @@ from typing import Any
 
 from chariot.agent.config import ProviderEntry
 from chariot.providers.prober import ProviderProber
+from chariot.providers.registry import ProviderRegistry
 from chariot.repos.provider_repo import ProviderRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
@@ -21,6 +22,28 @@ class ProviderService:
         default = await repo.get_default()
         default_name = default.name if default else None
         return [{**self.serialize(entry), "default": entry.name == default_name} for entry in entries]
+
+    async def show_entry(self, session: Any, *, name: str) -> dict[str, Any]:
+        repo = ProviderRepo(session)
+        entry = await repo.get_entry(name)
+        if entry is None:
+            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
+        default = await repo.get_default()
+        return {**self.serialize(entry), "default": default is not None and default.name == entry.name}
+
+    async def status(self, session: Any) -> dict[str, Any]:
+        repo = ProviderRepo(session)
+        entries = await repo.list_entries()
+        default = await repo.get_default()
+        return {
+            "default_provider": default.name if default is not None else None,
+            "provider_count": len(entries),
+            "known_types": sorted(ProviderRegistry.known_types()),
+            "providers": [
+                {**self.serialize(entry), "default": default is not None and entry.name == default.name}
+                for entry in entries
+            ],
+        }
 
     async def add_entry(
         self,
@@ -85,4 +108,5 @@ class ProviderService:
             "type": entry.type,
             "options": entry.options,
             "params": entry.params,
+            "capabilities": ProviderRegistry.capabilities_for(entry.type),
         }

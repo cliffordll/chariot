@@ -11,10 +11,11 @@ AIAgent 装载时拆 `ProviderEntry`:`registry.build(entry.type, entry.options)`
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, ClassVar
 
 from chariot.agent.exceptions import ConfigError
-from chariot.providers.base import BaseProvider
+from chariot.providers.base import BaseProvider, BaseProviderCapabilities
 
 
 class ProviderRegistry:
@@ -63,6 +64,22 @@ class ProviderRegistry:
             known = sorted(cls._registry.keys())
             raise ConfigError(f"unknown provider type: {type_name!r}; known types: {known}")
         return provider_cls.create(options)
+
+    @classmethod
+    def get_provider_class(cls, type_name: str) -> type[BaseProvider]:
+        """返已注册的 Provider 类;未知 type 抛 ConfigError。"""
+        provider_cls = cls._registry.get(type_name)
+        if provider_cls is None:
+            known = sorted(cls._registry.keys())
+            raise ConfigError(f"unknown provider type: {type_name!r}; known types: {known}")
+        return provider_cls
+
+    @classmethod
+    def capabilities_for(cls, type_name: str) -> dict[str, Any]:
+        """返某个 provider type 的能力标记,给 CLI / UI / sidecar 展示。"""
+        provider_cls = cls.get_provider_class(type_name)
+        caps = getattr(provider_cls, "capabilities", BaseProviderCapabilities())
+        return asdict(caps)
 
     @classmethod
     def known_types(cls) -> set[str]:
