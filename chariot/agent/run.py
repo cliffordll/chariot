@@ -187,13 +187,11 @@ class AIAgent:
             )
             return
 
-        effective_req = await self._prepare_request(req, provider)
-
         if req.is_stateful():
-            async for event in self._run_stateful_chat(effective_req, provider):
+            async for event in self._run_stateful_chat(req, provider):
                 yield event
         else:
-            async for event in self._run_stateless_chat(effective_req, provider):
+            async for event in self._run_stateless_chat(req, provider):
                 yield event
 
     async def _run_stateless_chat(
@@ -202,7 +200,9 @@ class AIAgent:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
-                await self._record_prompt_trace(session, req, provider)
+                memory_entries = await self._load_memory_entries(session, req, provider)
+                req = await self._prepare_request(req, provider, memory_entries)
+                await self._record_prompt_trace(session, req, provider, memory_entries)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
@@ -261,17 +261,20 @@ class AIAgent:
         await self._persist_new_user_messages(repo, conversation_id, req)
         history = await self._load_history_as_messages(repo, conversation_id)
         context_repo = ContextRepo(session)
+        memory_entries = await self._load_memory_entries(session, req, provider)
         context_snapshot = await context_repo.record_snapshot(
             build_context_snapshot(
                 req,
                 provider_name=provider.config.name,
                 model=provider.config.model,
                 history=[{"role": msg.role, "content": msg.content} for msg in history],
+                memory_entries=memory_entries,
                 provider_capabilities=dataclasses.asdict(provider.capabilities),
             )
         )
         full_req = dataclasses.replace(req, messages=history)
-        prompt_trace = await self._record_prompt_trace(session, full_req, provider)
+        full_req = await self._prepare_request(full_req, provider, memory_entries)
+        prompt_trace = await self._record_prompt_trace(session, full_req, provider, memory_entries)
         await context_repo.record_trace(
             context_snapshot.id,
             prompt_trace_id=prompt_trace.id,
@@ -339,7 +342,12 @@ class AIAgent:
             input_schema=raw.get("input_schema", {}),
         )
 
-    async def _prepare_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+    async def _prepare_request(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
+    ) -> ChatRequest:
         """Compose the active prompt bundle into `system`, then normalize request fields."""
         composed = req
         if self._sessionmaker is not None:
@@ -351,15 +359,43 @@ class AIAgent:
                     system = PromptRepo.render_layers_text(
                         active_bundle.layers,
                         existing_system=req.system,
+                        memory_entries=memory_entries,
                     )
                     composed = dataclasses.replace(req, system=system)
         return self._normalize_request(composed, provider)
+
+    async def _load_memory_entries(
+        self,
+        session: AsyncSession,
+        req: ChatRequest,
+        provider: BaseProvider,
+    ) -> list[dict[str, Any]] | None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        entries = await MemoryRepo(session).list_relevant_entries(
+            conversation_id=req.conversation_id,
+            provider_name=provider.config.name,
+            limit=6,
+        )
+        entries = [
+            {
+                "id": entry.id,
+                "kind": entry.kind,
+                "text": entry.text,
+                "meta": entry.meta,
+                "pinned": entry.pinned,
+                "archived": entry.archived,
+            }
+            for entry in entries
+        ]
+        return entries or None
 
     @staticmethod
     async def _record_prompt_trace(
         session: AsyncSession,
         req: ChatRequest,
         provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
     ) -> Any:
         from chariot.repos.prompt_repo import PromptRepo
 
@@ -367,4 +403,5 @@ class AIAgent:
             req,
             provider_name=provider.config.name,
             model=provider.config.model,
+            memory_entries=memory_entries,
         )

@@ -384,6 +384,16 @@ class TestRegistration:
             "get_prompt_version",
             "list_prompt_traces",
             "inspect_prompt",
+            "list_memories",
+            "get_memory",
+            "create_memory",
+            "update_memory",
+            "delete_memory",
+            "pin_memory",
+            "archive_memory",
+            "list_memory_events",
+            "list_memory_links",
+            "search_memory",
             "list_logs",
         }
         assert server.known_methods() == expected

@@ -4,6 +4,7 @@ import Chat from "@/pages/Chat";
 import Context from "@/pages/Context";
 import Dashboard from "@/pages/Dashboard";
 import Logs from "@/pages/Logs";
+import Memory from "@/pages/Memory";
 import Prompt from "@/pages/Prompt";
 import Providers from "@/pages/Providers";
 import Tools from "@/pages/Tools";
@@ -12,6 +13,7 @@ export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
   { path: "/providers", label: "Providers" },
   { path: "/tools", label: "Tools" },
+  { path: "/memory", label: "Memory" },
   { path: "/prompt", label: "Prompt" },
   { path: "/context", label: "Context" },
   { path: "/logs", label: "Logs" },
@@ -25,6 +27,7 @@ export function AppRoutes() {
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/providers" element={<Providers />} />
       <Route path="/tools" element={<Tools />} />
+      <Route path="/memory" element={<Memory />} />
       <Route path="/prompt" element={<Prompt />} />
       <Route path="/context" element={<Context />} />
       <Route path="/logs" element={<Logs />} />

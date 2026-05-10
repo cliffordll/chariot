@@ -173,8 +173,34 @@ class MemoryRow(Base):
     kind: Mapped[str] = mapped_column(index=True)
     text: Mapped[str]
     meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    is_pinned: Mapped[int] = mapped_column(default=0)
+    is_archived: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class MemoryEventRow(Base):
+    """`memory_events` 琛?v13 璧风殑 memory 鏁版嵁鍙樺寲璁板綍銆?"""
+
+    __tablename__ = "memory_events"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    memory_id: Mapped[str] = mapped_column(index=True)
+    event_type: Mapped[str] = mapped_column(index=True)
+    payload: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class MemoryLinkRow(Base):
+    """`memory_links` 琛?v13 璧风殑 memory 关联銆?"""
+
+    __tablename__ = "memory_links"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    memory_id: Mapped[str] = mapped_column(index=True)
+    link_type: Mapped[str] = mapped_column(index=True)
+    link_value: Mapped[str] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
 class EvalRunRow(Base):
