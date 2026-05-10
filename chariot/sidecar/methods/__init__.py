@@ -136,9 +136,11 @@ def register_methods(
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)
+    server.method("show_tool")(tools.show)
     server.method("enable_tool")(tools.enable)
     server.method("disable_tool")(tools.disable)
     server.method("config_tool")(tools.config)
+    server.method("probe_tool")(tools.probe)
 
     providers = ProviderMethods(runtime)
     server.method("list_providers")(providers.list_)
