@@ -29,10 +29,6 @@ prompt_help = (
     "查看：list、show、versions、version\n"
     "管理：add、update、activate\n"
     "追踪：traces、inspect\n"
-    "\n"
-    "说明：\n"
-    "  - `add` / `update` 支持多个 `--layer`，JSON 对象最稳。\n"
-    "  - `versions` 不带 bundle 时会先列出所有 bundle。\n"
 )
 
 prompt_app = typer.Typer(
@@ -225,53 +221,7 @@ async def _list() -> None:
 
 @prompt_app.command("show", help="查看某个 bundle 的详情")
 def show_cmd(
-    name: Annotated[str, typer.Argument(help="bundle 名称")],
-) -> None:
-    asyncio.run(_show(name))
-
-
-async def _show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = _prompt_repo(session)
-        bundle = await repo.get_bundle(name)
-        if bundle is None:
-            Renderer.die(f"未找到 prompt bundle: {name!r}")
-            return
-        versions = await repo.list_versions(name)
-
-    Renderer.kv(
-        {
-            "name": bundle.name,
-            "active": "yes" if bundle.is_active else "no",
-            "current_version": bundle.active_version or "-",
-            "versions": bundle.version_count,
-            "created_at": _fmt_dt(bundle.created_at),
-            "updated_at": _fmt_dt(bundle.updated_at),
-            "description": bundle.description or "-",
-        }
-    )
-    Renderer.out("")
-    _render_layers_table(bundle.layers)
-    if versions:
-        Renderer.out("")
-        rows = [
-            (
-                entry.version,
-                "yes" if entry.is_active else "no",
-                _fmt_dt(entry.created_at),
-                _fmt_dt(entry.updated_at),
-            )
-            for entry in versions
-        ]
-        Renderer.table(["version", "active", "created_at", "updated_at"], rows, title=f"versions of {bundle.name}")
-
-
-@prompt_app.command(
-    "versions",
-    help="列出 bundle 的版本；不传名称时先列出所有 bundle",
-)
-def versions_cmd(
-    name: Annotated[str, typer.Argument(help="bundle 名称；省略时列出所有 bundle")] = "",
+    name: Annotated[str, typer.Argument(help="bundle ?????????? bundle")] = "",
 ) -> None:
     asyncio.run(_versions(name or None))
 
@@ -406,7 +356,7 @@ async def _inspect(trace_id: str) -> None:
 # -------------------- 管理 --------------------
 
 
-@prompt_app.command("add", help="创建 prompt bundle 并生成初始版本")
+@prompt_app.command("add", help="创建 prompt bundle；不传 --layer 时使用默认 layers")
 def add_cmd(
     name: Annotated[str, typer.Argument(help="bundle 名称")],
     description: Annotated[
@@ -418,7 +368,7 @@ def add_cmd(
         typer.Option(
             "--layer",
             "-l",
-            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入",
+            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入；不传时使用默认 layers",
         ),
     ] = [],
 ) -> None:
@@ -442,7 +392,7 @@ async def _add(name: str, *, description: str, layers: list[str]) -> None:
     Renderer.out(f"+ {entry.bundle_name}:{entry.version}")
 
 
-@prompt_app.command("update", help="更新 bundle 的说明或 layers，并生成新版本")
+@prompt_app.command("update", help="更新 bundle 的说明或 layers，并生成新版本；空层表示不改 layers")
 def update_cmd(
     name: Annotated[str, typer.Argument(help="bundle 名称")],
     description: Annotated[
@@ -454,7 +404,7 @@ def update_cmd(
         typer.Option(
             "--layer",
             "-l",
-            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入",
+            help="单个 layer；支持 JSON 对象或 key=value,key=value 形式，可重复传入；空层表示不改 layers",
         ),
     ] = [],
 ) -> None:
