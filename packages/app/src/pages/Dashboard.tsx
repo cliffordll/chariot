@@ -158,7 +158,7 @@ export default function Dashboard() {
             <Stat
               label="conversations"
               value={
-                <code className="font-mono text-sm">{state.status.convos_count}</code>
+                <code className="font-mono text-sm">{state.status.conversations_count}</code>
               }
             />
             <Stat

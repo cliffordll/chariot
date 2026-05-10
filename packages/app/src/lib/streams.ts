@@ -136,7 +136,7 @@ export class ChatStreamError extends Error {
 /**
  * `chat` RPC 请求体(对齐 sidecar `_RequestDecoder.parse`)。
  *
- * 必填:`provider_name` + `messages`;可选:`model` / `max_tokens` / `convo_id` 等。
+ * 必填:`provider_name` + `messages`;可选:`model` / `max_tokens` / `conversation_id` 等。
  */
 export interface ChatRequest {
   provider_name: string;
@@ -148,7 +148,7 @@ export interface ChatRequest {
   /** 0.6.6+ per-call override:覆盖 entry.options.api_key。同 base_url。 */
   api_key?: string | null;
   max_tokens?: number;
-  convo_id?: string | null;
+  conversation_id?: string | null;
   temperature?: number | null;
   top_p?: number | null;
   [key: string]: unknown;
@@ -204,7 +204,7 @@ export async function runChatTurn(
     }
   });
   signal.addEventListener("abort", () => unlisten());
-  console.debug("[chariot] chat invoke start", req.provider_name, req.convo_id ?? "(stateless)");
+  console.debug("[chariot] chat invoke start", req.provider_name, req.conversation_id ?? "(stateless)");
   try {
     const result = await rpc<{ stream_id: string; ended_at: number }>("chat", req);
     console.debug("[chariot] chat resolved", { frames: frameCount, ...result });

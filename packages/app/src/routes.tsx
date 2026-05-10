@@ -20,8 +20,6 @@ export function AppRoutes() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/providers" element={<Providers />} />
-      {/* /models 旧路径保留兼容(0.5.0 收藏 / 用户记忆),自动跳到新地址 */}
-      <Route path="/models" element={<Navigate to="/providers" replace />} />
       <Route path="/tools" element={<Tools />} />
       <Route path="/logs" element={<Logs />} />
       <Route path="/chat" element={<Chat />} />
