@@ -21,7 +21,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
@@ -252,14 +252,30 @@ class AIAgent:
     ) -> AsyncIterator[ChatEvent]:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
+        from chariot.context.composer import build_snapshot as build_context_snapshot
         from chariot.repos.conversation_repo import ConversationRepo
+        from chariot.repos.context_repo import ContextRepo
 
         repo = ConversationRepo(session)
         await repo.ensure_exists(conversation_id)
         await self._persist_new_user_messages(repo, conversation_id, req)
         history = await self._load_history_as_messages(repo, conversation_id)
+        context_repo = ContextRepo(session)
+        context_snapshot = await context_repo.record_snapshot(
+            build_context_snapshot(
+                req,
+                provider_name=provider.config.name,
+                model=provider.config.model,
+                history=[{"role": msg.role, "content": msg.content} for msg in history],
+                provider_capabilities=dataclasses.asdict(provider.capabilities),
+            )
+        )
         full_req = dataclasses.replace(req, messages=history)
-        await self._record_prompt_trace(session, full_req, provider)
+        prompt_trace = await self._record_prompt_trace(session, full_req, provider)
+        await context_repo.record_trace(
+            context_snapshot.id,
+            prompt_trace_id=prompt_trace.id,
+        )
 
         loop = AgentLoop(
             provider=provider,
@@ -344,10 +360,10 @@ class AIAgent:
         session: AsyncSession,
         req: ChatRequest,
         provider: BaseProvider,
-    ) -> None:
+    ) -> Any:
         from chariot.repos.prompt_repo import PromptRepo
 
-        await PromptRepo(session).record_trace(
+        return await PromptRepo(session).record_trace(
             req,
             provider_name=provider.config.name,
             model=provider.config.model,

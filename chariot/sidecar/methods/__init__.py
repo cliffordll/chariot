@@ -109,6 +109,7 @@ def register_methods(
     runtime = SidecarRuntime(agent, db_path=db_path, session_key=session_key)
 
     from chariot.sidecar.methods.chat import ChatMethod
+    from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.prompt import PromptMethods
@@ -116,6 +117,12 @@ def register_methods(
     from chariot.sidecar.methods.tool import ToolMethods
 
     server.method("chat")(ChatMethod(runtime))
+
+    contexts = ContextMethods(runtime)
+    server.method("list_context_snapshots")(contexts.list_)
+    server.method("get_context_snapshot")(contexts.get)
+    server.method("list_context_traces")(contexts.traces)
+    server.method("inspect_context")(contexts.inspect)
 
     conversations = ConversationMethods(runtime)
     server.method("list_conversations")(conversations.list_)

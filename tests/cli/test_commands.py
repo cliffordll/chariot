@@ -48,6 +48,7 @@ def test_root_help() -> None:
         "provider",
         "tool",
         "conversation",
+        "context",
         "memory",
         "eval",
         "skill",
@@ -67,6 +68,7 @@ def test_root_help() -> None:
         "provider",
         "tool",
         "conversation",
+        "context",
         "memory",
         "eval",
         "skill",
@@ -89,7 +91,7 @@ def test_tool_subcommand_group_has_list_enable_disable_config() -> None:
         assert sub in out, f"`chariot tool --help` 缂傚搫鐨€涙劕鎳℃禒?{sub!r}"
 
 
-@pytest.mark.parametrize("sub", ["memory", "eval", "skill", "checkpoint", "prompt"])
+@pytest.mark.parametrize("sub", ["context", "memory", "eval", "skill", "checkpoint", "prompt"])
 def test_phase4_subcommand_groups_have_list(sub: str) -> None:
     result = runner.invoke(app, [sub, "--help"])
     assert result.exit_code == 0
@@ -301,3 +303,19 @@ def test_provider_delete_subcommand_visible() -> None:
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     assert "delete" in _plain(result.output)
+
+
+def test_context_subcommand_group_has_list_traces_inspect() -> None:
+    result = runner.invoke(app, ["context", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for sub in ("list", "traces", "inspect"):
+        assert sub in out, f"`chariot context --help` 缂傚倸鎼惃顖溾偓娑欏姇閹斥剝绂?{sub!r}"
+
+
+def test_context_subcommand_group_has_list_traces_inspect() -> None:
+    result = runner.invoke(app, ["context", "--help"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    for sub in ("list", "traces", "inspect"):
+        assert sub in out, f"`chariot context --help` 缂傚倸鎼惃顖溾偓娑欏姇閹斥剝绂?{sub!r}"

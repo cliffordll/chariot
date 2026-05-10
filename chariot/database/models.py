@@ -287,3 +287,31 @@ class PromptTraceRow(Base):
     source_refs: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
     prompt_size: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class ContextSnapshotRow(Base):
+    __tablename__ = "context_snapshots"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_name: Mapped[str] = mapped_column(index=True)
+    model: Mapped[str | None] = mapped_column(default=None)
+    request: Mapped[str] = mapped_column(default="{}")
+    slices: Mapped[str] = mapped_column(default="[]")
+    source_refs: Mapped[str] = mapped_column(default="[]")
+    context_size: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class ContextTraceRow(Base):
+    __tablename__ = "context_traces"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    snapshot_id: Mapped[str] = mapped_column(index=True)
+    conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_name: Mapped[str] = mapped_column(index=True)
+    model: Mapped[str | None] = mapped_column(default=None)
+    prompt_trace_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    policy: Mapped[str] = mapped_column(default="{}")
+    selected_refs: Mapped[str] = mapped_column(default="[]")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)

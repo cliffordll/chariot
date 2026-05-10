@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 
 import Chat from "@/pages/Chat";
+import Context from "@/pages/Context";
 import Dashboard from "@/pages/Dashboard";
 import Logs from "@/pages/Logs";
 import Prompt from "@/pages/Prompt";
@@ -12,6 +13,7 @@ export const NAV_ITEMS = [
   { path: "/providers", label: "Providers" },
   { path: "/tools", label: "Tools" },
   { path: "/prompt", label: "Prompt" },
+  { path: "/context", label: "Context" },
   { path: "/logs", label: "Logs" },
   { path: "/chat", label: "Chat" },
 ] as const;
@@ -24,6 +26,7 @@ export function AppRoutes() {
       <Route path="/providers" element={<Providers />} />
       <Route path="/tools" element={<Tools />} />
       <Route path="/prompt" element={<Prompt />} />
+      <Route path="/context" element={<Context />} />
       <Route path="/logs" element={<Logs />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
