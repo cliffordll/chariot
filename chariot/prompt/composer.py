@@ -36,9 +36,17 @@ def build_snapshot(
     model: str | None,
     bundle_name: str,
     version: str,
+    memory_entries: list[dict[str, Any]] | None = None,
+    memory_policy: dict[str, Any] | None = None,
 ) -> PromptSnapshot:
     request = asdict(req)
-    layers = _build_layers(req, provider_name=provider_name, model=model)
+    layers = _build_layers(
+        req,
+        provider_name=provider_name,
+        model=model,
+        memory_entries=memory_entries,
+        memory_policy=memory_policy,
+    )
     source_refs = [
         {
             "layer": layer.name,
@@ -66,6 +74,8 @@ def _build_layers(
     *,
     provider_name: str,
     model: str | None,
+    memory_entries: list[dict[str, Any]] | None,
+    memory_policy: dict[str, Any] | None,
 ) -> list[PromptLayer]:
     tool_names = [tool.name for tool in req.tools] if req.tools is not None else None
     return [
@@ -81,7 +91,14 @@ def _build_layers(
                 "agent_id": req.agent_id,
             },
         ),
-        PromptLayer(name="memory", source="not implemented yet", content=None),
+        PromptLayer(
+            name="memory",
+            source="MemoryRepo.list_relevant_entries",
+            content={
+                "policy": memory_policy or {"version": "v1", "name": "default_memory_policy"},
+                "entries": memory_entries,
+            },
+        ),
         PromptLayer(name="skill", source="not implemented yet", content=None),
         PromptLayer(name="tool_instruction", source="ChatRequest.tools", content=tool_names),
         PromptLayer(name="tool_choice", source="ChatRequest.tool_choice", content=req.tool_choice),

@@ -334,6 +334,8 @@ class PromptRepo:
         model: str | None,
         bundle_name: str | None = None,
         version: str | None = None,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: dict[str, Any] | None = None,
     ) -> PromptTraceEntry:
         await self.seed_if_empty()
         bundle = await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self._active_bundle_row()
@@ -354,6 +356,8 @@ class PromptRepo:
             model=model,
             bundle_name=bundle.name,
             version=ver.version,
+            memory_entries=memory_entries,
+            memory_policy=memory_policy,
         )
         row = PromptTraceRow(
             bundle_id=bundle.id,
@@ -454,10 +458,21 @@ class PromptRepo:
         return target
 
     @staticmethod
-    def render_layers_text(layers: list[dict[str, Any]], *, existing_system: str | None = None) -> str | None:
+    def render_layers_text(
+        layers: list[dict[str, Any]],
+        *,
+        existing_system: str | None = None,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: dict[str, Any] | None = None,
+    ) -> str | None:
         parts: list[str] = []
         for layer in layers:
             content = layer.get("content")
+            if layer.get("name") == "memory" and memory_entries is not None:
+                content = {
+                    "policy": memory_policy or {"version": "v1", "name": "default_memory_policy"},
+                    "entries": memory_entries,
+                }
             if content is None:
                 continue
             if not isinstance(content, str):

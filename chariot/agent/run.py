@@ -29,6 +29,8 @@ from chariot.agent.conversation_lock import ConversationLockManager
 from chariot.agent.exceptions import ConversationLockTimeout
 from chariot.agent.loop import AgentLoop
 from chariot.agent.provider_contract import normalize_request
+from chariot.memory.capture import MemoryCaptureService
+from chariot.memory.policy import MemoryPolicy
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -187,13 +189,11 @@ class AIAgent:
             )
             return
 
-        effective_req = await self._prepare_request(req, provider)
-
         if req.is_stateful():
-            async for event in self._run_stateful_chat(effective_req, provider):
+            async for event in self._run_stateful_chat(req, provider):
                 yield event
         else:
-            async for event in self._run_stateless_chat(effective_req, provider):
+            async for event in self._run_stateless_chat(req, provider):
                 yield event
 
     async def _run_stateless_chat(
@@ -202,15 +202,47 @@ class AIAgent:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
-                await self._record_prompt_trace(session, req, provider)
+                memory_policy = MemoryPolicy()
+                memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
+                req = await self._prepare_request(req, provider, memory_entries, memory_policy)
+                prompt_trace = await self._record_prompt_trace(
+                    session,
+                    req,
+                    provider,
+                    memory_entries,
+                    memory_policy,
+                )
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
             repo=None,
             conversation_id=None,
         )
+        last_event_kind = None
+        last_error_event: ChatEvent | None = None
         async for event in loop.stream_chat(req):
+            last_event_kind = event.kind
+            if event.kind == "error":
+                last_error_event = event
             yield event
+        if self._sessionmaker is not None and last_event_kind == "stream_done":
+            async with self._sessionmaker() as session:
+                await self._capture_memory(
+                    session,
+                    req=req,
+                    provider=provider,
+                    memory_policy=memory_policy,
+                    prompt_trace_id=prompt_trace.id,
+                )
+        elif self._sessionmaker is not None and last_error_event is not None:
+            async with self._sessionmaker() as session:
+                await self._capture_error_memory(
+                    session,
+                    req=req,
+                    provider=provider,
+                    error_event=last_error_event,
+                    prompt_trace_id=prompt_trace.id,
+                )
 
     async def _run_stateful_chat(
         self, req: ChatRequest, provider: BaseProvider
@@ -261,17 +293,28 @@ class AIAgent:
         await self._persist_new_user_messages(repo, conversation_id, req)
         history = await self._load_history_as_messages(repo, conversation_id)
         context_repo = ContextRepo(session)
+        memory_policy = MemoryPolicy()
+        memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
         context_snapshot = await context_repo.record_snapshot(
             build_context_snapshot(
                 req,
                 provider_name=provider.config.name,
                 model=provider.config.model,
                 history=[{"role": msg.role, "content": msg.content} for msg in history],
+                memory_entries=memory_entries,
+                memory_policy=memory_policy.describe(),
                 provider_capabilities=dataclasses.asdict(provider.capabilities),
             )
         )
         full_req = dataclasses.replace(req, messages=history)
-        prompt_trace = await self._record_prompt_trace(session, full_req, provider)
+        full_req = await self._prepare_request(full_req, provider, memory_entries, memory_policy)
+        prompt_trace = await self._record_prompt_trace(
+            session,
+            full_req,
+            provider,
+            memory_entries,
+            memory_policy,
+        )
         await context_repo.record_trace(
             context_snapshot.id,
             prompt_trace_id=prompt_trace.id,
@@ -283,8 +326,32 @@ class AIAgent:
             repo=repo,
             conversation_id=conversation_id,
         )
+        last_event_kind = None
+        last_error_event: ChatEvent | None = None
         async for event in loop.stream_chat(full_req):
+            last_event_kind = event.kind
+            if event.kind == "error":
+                last_error_event = event
             yield event
+        if last_event_kind == "stream_done":
+            await self._capture_memory(
+                session,
+                req=req,
+                provider=provider,
+                memory_policy=memory_policy,
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
+        elif last_error_event is not None:
+            await self._capture_error_memory(
+                session,
+                req=req,
+                provider=provider,
+                memory_policy=memory_policy,
+                error_event=last_error_event,
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
 
     @staticmethod
     async def _persist_new_user_messages(repo: ConversationRepo, conversation_id: str, req: ChatRequest) -> None:
@@ -339,7 +406,13 @@ class AIAgent:
             input_schema=raw.get("input_schema", {}),
         )
 
-    async def _prepare_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+    async def _prepare_request(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: MemoryPolicy | None = None,
+    ) -> ChatRequest:
         """Compose the active prompt bundle into `system`, then normalize request fields."""
         composed = req
         if self._sessionmaker is not None:
@@ -351,15 +424,47 @@ class AIAgent:
                     system = PromptRepo.render_layers_text(
                         active_bundle.layers,
                         existing_system=req.system,
+                        memory_entries=memory_entries,
+                        memory_policy=memory_policy.describe() if memory_policy is not None else None,
                     )
                     composed = dataclasses.replace(req, system=system)
         return self._normalize_request(composed, provider)
+
+    async def _load_memory_entries(
+        self,
+        session: AsyncSession,
+        req: ChatRequest,
+        provider: BaseProvider,
+        policy: MemoryPolicy,
+    ) -> list[dict[str, Any]] | None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        entries = await MemoryRepo(session).list_relevant_entries(
+            conversation_id=req.conversation_id,
+            provider_name=provider.config.name,
+            limit=policy.max_items,
+            policy=policy,
+        )
+        entries = [
+            {
+                "id": entry.id,
+                "kind": entry.kind,
+                "text": entry.text,
+                "meta": entry.meta,
+                "pinned": entry.pinned,
+                "archived": entry.archived,
+            }
+            for entry in entries
+        ]
+        return entries or None
 
     @staticmethod
     async def _record_prompt_trace(
         session: AsyncSession,
         req: ChatRequest,
         provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: MemoryPolicy | None = None,
     ) -> Any:
         from chariot.repos.prompt_repo import PromptRepo
 
@@ -367,4 +472,52 @@ class AIAgent:
             req,
             provider_name=provider.config.name,
             model=provider.config.model,
+            memory_entries=memory_entries,
+            memory_policy=memory_policy.describe() if memory_policy is not None else None,
+        )
+
+    async def _capture_memory(
+        self,
+        session: AsyncSession,
+        *,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_policy: MemoryPolicy,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        capture = MemoryCaptureService(MemoryRepo(session))
+        await capture.capture_turn(
+            req=req,
+            provider_name=provider.config.name,
+            policy=memory_policy,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
+        )
+
+    async def _capture_error_memory(
+        self,
+        session: AsyncSession,
+        *,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_policy: MemoryPolicy,
+        error_event: ChatEvent,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        capture = MemoryCaptureService(MemoryRepo(session))
+        if error_event.error_type is None or error_event.error_message is None:
+            return
+        await capture.capture_error(
+            conversation_id=req.conversation_id,
+            provider_name=provider.config.name,
+            error_type=error_event.error_type,
+            error_message=error_event.error_message,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
         )

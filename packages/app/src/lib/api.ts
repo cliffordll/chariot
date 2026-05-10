@@ -238,6 +238,33 @@ export interface ContextInspectResult {
   trace: ContextTrace | null;
 }
 
+export interface MemoryEntry {
+  id: string;
+  kind: string;
+  text: string;
+  meta: Record<string, unknown>;
+  pinned: boolean;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryEvent {
+  id: string;
+  memory_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MemoryLink {
+  id: string;
+  memory_id: string;
+  link_type: string;
+  link_value: string;
+  created_at: string;
+}
+
 export interface PromptBundleDetail extends PromptBundle {
   versions?: PromptVersion[];
 }
@@ -424,6 +451,73 @@ const apiCore = {
 
   inspectContext(context_id: string): Promise<ContextInspectResult> {
     return rpc("inspect_context", { context_id });
+  },
+
+  listMemories(params: {
+    kind?: string;
+    pinned?: boolean;
+    archived?: boolean;
+    conversation_id?: string;
+    provider_name?: string;
+    tag?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ entries: MemoryEntry[] }> {
+    return rpc("list_memories", { ...params });
+  },
+
+  getMemory(memory_id: string): Promise<{ memory: MemoryEntry }> {
+    return rpc("get_memory", { memory_id });
+  },
+
+  createMemory(payload: {
+    kind: string;
+    text: string;
+    meta?: Record<string, unknown>;
+    pinned?: boolean;
+    archived?: boolean;
+    links?: Array<Record<string, unknown>>;
+  }): Promise<{ memory: MemoryEntry }> {
+    return rpc("create_memory", payload as Record<string, unknown>);
+  },
+
+  updateMemory(
+    memory_id: string,
+    payload: {
+      kind?: string;
+      text?: string;
+      meta?: Record<string, unknown>;
+      pinned?: boolean;
+      archived?: boolean;
+      links?: Array<Record<string, unknown>>;
+    },
+  ): Promise<{ memory: MemoryEntry }> {
+    return rpc("update_memory", { memory_id, ...payload });
+  },
+
+  deleteMemory(memory_id: string): Promise<{ deleted: string }> {
+    return rpc("delete_memory", { memory_id });
+  },
+
+  pinMemory(memory_id: string): Promise<{ memory: MemoryEntry }> {
+    return rpc("pin_memory", { memory_id });
+  },
+
+  archiveMemory(memory_id: string): Promise<{ memory: MemoryEntry }> {
+    return rpc("archive_memory", { memory_id });
+  },
+
+  listMemoryEvents(memory_id?: string): Promise<{ events: MemoryEvent[] }> {
+    return rpc("list_memory_events", memory_id ? { memory_id } : {});
+  },
+
+  listMemoryLinks(memory_id?: string): Promise<{ links: MemoryLink[] }> {
+    return rpc("list_memory_links", memory_id ? { memory_id } : {});
+  },
+
+  searchMemory(query: string): Promise<{ entries: MemoryEntry[] }> {
+    return rpc("search_memory", { query });
   },
 
   addPromptBundle(payload: PromptBundlePayload): Promise<{ bundle: PromptBundle; version: PromptVersion }> {

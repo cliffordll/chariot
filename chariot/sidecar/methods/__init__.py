@@ -112,6 +112,7 @@ def register_methods(
     from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
     from chariot.sidecar.methods.log import LogMethods
+    from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
     from chariot.sidecar.methods.tool import ToolMethods
@@ -123,6 +124,18 @@ def register_methods(
     server.method("get_context_snapshot")(contexts.get)
     server.method("list_context_traces")(contexts.traces)
     server.method("inspect_context")(contexts.inspect)
+
+    memories = MemoryMethods(runtime)
+    server.method("list_memories")(memories.list_)
+    server.method("get_memory")(memories.show)
+    server.method("create_memory")(memories.add)
+    server.method("update_memory")(memories.update)
+    server.method("delete_memory")(memories.delete)
+    server.method("pin_memory")(memories.pin)
+    server.method("archive_memory")(memories.archive)
+    server.method("list_memory_events")(memories.events)
+    server.method("list_memory_links")(memories.links)
+    server.method("search_memory")(memories.search)
 
     conversations = ConversationMethods(runtime)
     server.method("list_conversations")(conversations.list_)
