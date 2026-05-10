@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, cast
 
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
 from chariot.database.models import MemoryEventRow, MemoryLinkRow, MemoryRow
+from chariot.memory.policy import MemoryPolicy
 
 
 @dataclass(frozen=True)
@@ -219,29 +220,33 @@ class MemoryRepo:
         provider_name: str | None = None,
         tags: list[str] | None = None,
         limit: int = 8,
+        policy: MemoryPolicy | None = None,
     ) -> list[MemoryEntry]:
+        policy = (policy or MemoryPolicy()).bounded(max_items=limit)
         pinned_entries = await self.list_entries(pinned=True, archived=False, limit=limit)
-        linked_entries: list[MemoryEntry] = []
+        conversation_entries: list[MemoryEntry] = []
+        provider_entries: list[MemoryEntry] = []
+        tag_entries: list[MemoryEntry] = []
         if conversation_id is not None:
-            linked_entries.extend(
-                await self.list_entries(conversation_id=conversation_id, archived=False, limit=limit)
+            conversation_entries = await self.list_entries(
+                conversation_id=conversation_id,
+                archived=False,
+                limit=limit,
             )
         if provider_name is not None:
-            linked_entries.extend(
-                await self.list_entries(provider_name=provider_name, archived=False, limit=limit)
+            provider_entries = await self.list_entries(
+                provider_name=provider_name,
+                archived=False,
+                limit=limit,
             )
         for tag in tags or []:
-            linked_entries.extend(await self.list_entries(tag=tag, archived=False, limit=limit))
-        merged: list[MemoryEntry] = []
-        seen: set[str] = set()
-        for entry in pinned_entries + linked_entries:
-            if entry.id in seen:
-                continue
-            merged.append(entry)
-            seen.add(entry.id)
-            if len(merged) >= limit:
-                break
-        return merged
+            tag_entries.extend(await self.list_entries(tag=tag, archived=False, limit=limit))
+        return policy.select(
+            pinned=pinned_entries,
+            conversation=conversation_entries,
+            provider=provider_entries,
+            tags=tag_entries,
+        )
 
     async def _get_row(self, entry_id: str) -> MemoryRow:
         row = await self.session.get(MemoryRow, entry_id)

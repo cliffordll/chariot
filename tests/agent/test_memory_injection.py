@@ -55,7 +55,9 @@ async def test_memory_is_injected_into_context_and_prompt(agent: AIAgent) -> Non
         traces = await context_repo.list_traces(conversation_id=conversation_id)
         prompt_trace = await PromptRepo(session).get_trace(traces[0].prompt_trace_id)
 
-    assert snapshots[0].slices[2]["content"][0]["text"] == "Reply in Chinese."
+    memory_state = snapshots[0].slices[2]["content"]
+    assert memory_state["entries"][0]["text"] == "Reply in Chinese."
+    assert memory_state["policy"]["name"] == "default_memory_policy"
     assert prompt_trace is not None
     assert any(
         ref["layer"] == "memory" and ref["present"] is True
