@@ -21,6 +21,13 @@ class ToolMethods(MethodBase):
             tools = await self._service.list_entries(session)
         return {"tools": tools}
 
+    async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._session() as session:
+            tool = await self._service.get_entry(session, name=name)
+        return {"tool": tool}
+
     async def enable(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         return await self._set_enabled(params, enabled=True)
@@ -42,3 +49,9 @@ class ToolMethods(MethodBase):
         async with self._session() as session:
             tool = await self._service.update_options(session, name=name, options=options)
         return {"tool": tool}
+
+    async def probe(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._session() as session:
+            return await self._service.probe_entry(session, name=name)

@@ -261,6 +261,14 @@ const apiCore = {
     return rpc("list_tools");
   },
 
+  showTool(name: string): Promise<{ tool: Tool }> {
+    return rpc("show_tool", { name });
+  },
+
+  probeTool(name: string): Promise<{ ok: boolean; latency_ms: number; error: ProbeError | null }> {
+    return rpc("probe_tool", { name });
+  },
+
   enableTool(name: string): Promise<{ tool: Tool }> {
     return rpc("enable_tool", { name });
   },
