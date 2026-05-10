@@ -130,7 +130,38 @@ User
   - `archive_stale_memory`
 - 检索
   - `search_memory`
-  - `list_memory_links`
+- `list_memory_links`
+
+## 自动捕获
+
+本阶段允许做最小自动捕获，但只做“从现有行为里提炼可复用事实”，不做训练型总结，也不做重型知识图谱。
+
+自动捕获的来源只限定在：
+
+- `conversation`：会话里反复出现的稳定偏好或边界。
+- `prompt trace`：某次 turn 已经被显式使用过的记忆线索。
+- `provider / tool`：和具体模型、工具使用相关的稳定约束。
+- `error / recovery`：失败后能指导后续行为的短句经验。
+
+自动捕获的输出只允许是：
+
+- 一条新的 `memory entry`
+- 或对已有 `memory entry` 的补充 / 归档 / 去重
+
+自动捕获的约束是：
+
+- 默认只写入显式可复用事实，不写长篇摘要。
+- 默认不覆盖用户手工录入的 memory。
+- 默认不自动激活大范围记忆，只把候选项写进 memory 层，由 `MemoryPolicy` 决定是否注入。
+- 如果无法明确归类，就先不写入。
+
+本阶段先把自动捕获挂在：
+
+- `conversation` 完成后
+- `prompt trace` 落库后
+- 以及明确的 tool / provider 异常后
+
+先做“少量、稳定、可解释”的自动捕获，再考虑后续 consolidation。
 
 ## 检索与注入规则
 
@@ -188,7 +219,7 @@ memory 收敛要支持：
 2. 再把当前已有的 `memories` 最小 CRUD 收口到统一 `MemoryRepo` 和 `MemoryService`。
 3. 接上 explicit memory 的创建、查看、删除、pin / archive。
 4. 接上 retrieval policy 和 injection policy。
-5. 接上从 conversation / trace 的自动捕获。
+5. 接上 conversation / prompt trace / tool / provider 的最小自动捕获。
 6. 补 CLI、sidecar 和桌面端的只读查看面。
 7. 最后补收敛、去重和 smoke demo。
 
@@ -199,6 +230,7 @@ memory 收敛要支持：
 - memory 的创建、删除、pin / archive 不会散落在多个模块里各自实现。
 - memory 检索和注入是显式 policy，不依赖隐式代码路径。
 - 自动捕获能解释一条 memory 为什么被写入。
+- 自动捕获默认是小步、可解释、可回退，不会吞掉用户手工 memory。
 - 收敛流程能解释重复 memory 为什么被合并。
 - 现有 `prompt`、`context`、`tool`、`provider` 的链路不回退。
 
@@ -208,6 +240,8 @@ memory 收敛要支持：
 
 ```powershell
 uv run pytest tests/platform/test_foundations.py -q
+uv run pytest tests/platform/test_memory_policy.py tests/platform/test_memory_capture.py -q
+uv run pytest tests/agent/test_memory_auto_capture.py tests/agent/test_memory_injection.py -q
 uv run pytest tests/cli/test_commands.py -q
 uv run pytest tests/sidecar/test_context_methods.py -q
 uv run pytest tests/sidecar/test_admin_methods.py -q
