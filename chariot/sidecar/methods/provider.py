@@ -67,6 +67,13 @@ class ProviderMethods(MethodBase):
             deleted = await self._service.delete_entry(session, name=name)
         return {"deleted": deleted}
 
+    async def use(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._session() as session:
+            provider = await self._service.set_default_entry(session, name=name)
+        return {"provider": provider}
+
     async def probe(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")

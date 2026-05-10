@@ -69,6 +69,7 @@ export interface Provider {
   options: Record<string, unknown>;
   params: Record<string, unknown>;
   capabilities: ProviderCapabilities;
+  health?: ProviderHealthSummary | null;
   default?: boolean;
 }
 
@@ -132,6 +133,16 @@ export interface ProviderStatusResponse {
   provider_count: number;
   known_types: string[];
   providers: Provider[];
+}
+
+export interface ProviderHealthSummary {
+  provider_name: string;
+  last_ok: boolean;
+  latency_ms: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  last_probe_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ToolsListResponse {
@@ -339,6 +350,10 @@ const apiCore = {
 
   deleteProvider(name: string): Promise<{ deleted: string }> {
     return rpc("delete_provider", { name });
+  },
+
+  useProvider(name: string): Promise<{ provider: Provider }> {
+    return rpc("use_provider", { name });
   },
 
   async duplicateProvider(name: string, as_?: string): Promise<{ provider: Provider }> {

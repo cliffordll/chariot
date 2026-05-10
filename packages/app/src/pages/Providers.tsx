@@ -247,6 +247,7 @@ export default function Providers() {
         onProbe={runProbe}
         onEdit={openEdit}
         onDuplicate={openDuplicate}
+        onUse={(name) => void api.useProvider(name).then(() => void load())}
         onDelete={(name) => setDel({ open: true, name })}
         onParamsSaved={() => void load()}
       />
@@ -284,6 +285,7 @@ function ProvidersCard({
   onProbe,
   onEdit,
   onDuplicate,
+  onUse,
   onDelete,
   onParamsSaved,
 }: {
@@ -294,6 +296,7 @@ function ProvidersCard({
   onProbe: (name: string) => void;
   onEdit: (name: string) => void;
   onDuplicate: (name: string) => void;
+  onUse: (name: string) => void;
   onDelete: (name: string) => void;
   onParamsSaved: () => void;
 }) {
@@ -339,6 +342,7 @@ function ProvidersCard({
                 onProbe={() => onProbe(entry.name)}
                 onEdit={() => onEdit(entry.name)}
                 onDuplicate={() => onDuplicate(entry.name)}
+                onUse={() => onUse(entry.name)}
                 onDelete={() => onDelete(entry.name)}
                 onParamsSaved={onParamsSaved}
               />
@@ -368,6 +372,7 @@ function ProviderRow({
   onProbe,
   onEdit,
   onDuplicate,
+  onUse,
   onDelete,
   onParamsSaved,
 }: {
@@ -378,6 +383,7 @@ function ProviderRow({
   onProbe: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
+  onUse: () => void;
   onDelete: () => void;
   onParamsSaved: () => void;
 }) {
@@ -402,6 +408,9 @@ function ProviderRow({
             <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
               {formatCapabilities(entry.capabilities)}
             </Badge>
+            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+              {formatHealth(entry.health)}
+            </Badge>
           </button>
           <ProbeStatus state={state} />
           <div className="ml-auto flex items-center gap-1">
@@ -421,6 +430,15 @@ function ProviderRow({
               onClick={onDuplicate}
             >
               Dup
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={onUse}
+              disabled={entry.default === true}
+            >
+              {entry.default === true ? "Current" : "Default"}
             </Button>
             <Button
               variant="outline"
@@ -466,8 +484,24 @@ function ProviderStatusBanner({ status }: { status: ProviderStatusResponse }) {
         <span className="text-muted-foreground">known types:</span>
         <span className="font-mono">{status.known_types.join(", ") || "(none)"}</span>
       </div>
+      {status.providers.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {status.providers.map((p) => (
+            <Badge key={p.name} variant={p.default ? "default" : "secondary"} className="text-[10px]">
+              {p.name}:{formatHealth(p.health)}
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function formatHealth(health: ProviderEntry["health"]): string {
+  if (!health) return "health: unknown";
+  const state = health.last_ok ? "healthy" : `degraded:${health.error_code ?? "unknown"}`;
+  const latency = health.latency_ms == null ? "n/a" : `${health.latency_ms}ms`;
+  return `${state} / ${latency}`;
 }
 
 /** 展开区 · options 主键只读展示(model / api_key 脱敏 / base_url)。 */

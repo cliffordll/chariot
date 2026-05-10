@@ -148,6 +148,7 @@ def register_methods(
     server.method("add_provider")(providers.add)
     server.method("update_provider")(providers.update)
     server.method("delete_provider")(providers.delete)
+    server.method("use_provider")(providers.use)
     server.method("probe_provider")(providers.probe)
     server.method("get_provider_status")(providers.status)
 

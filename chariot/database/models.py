@@ -20,6 +20,7 @@
 - v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
  - v9(0.7.1-prompt):`prompt_bundles / prompt_versions / prompt_traces`
  - v10(0.7.1-prompt):`prompt_bundles.is_active / prompt_versions.is_active`
+ - v11(0.7.1-context):`context_snapshots / context_traces`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -241,6 +242,20 @@ class SkillRow(Base):
     enabled: Mapped[int] = mapped_column(default=1)
     meta: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class ProviderHealthRow(Base):
+    """`provider_health` 表:v12 起的 provider 最近健康状态。"""
+
+    __tablename__ = "provider_health"
+
+    provider_name: Mapped[str] = mapped_column(primary_key=True)
+    last_ok: Mapped[int] = mapped_column(default=1)
+    latency_ms: Mapped[int | None] = mapped_column(default=None)
+    error_code: Mapped[str | None] = mapped_column(default=None)
+    error_message: Mapped[str | None] = mapped_column(default=None)
+    last_probe_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 

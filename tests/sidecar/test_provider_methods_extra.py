@@ -87,3 +87,36 @@ async def test_get_provider_status_returns_summary(server: JsonRpcServer) -> Non
     assert status["default_provider"] == "mock"
     assert status["provider_count"] == 1
     assert status["providers"][0]["name"] == "mock"
+
+
+@pytest.mark.asyncio
+async def test_use_provider_switches_default(server: JsonRpcServer) -> None:
+    line = await _call(
+        server,
+        "add_provider",
+        {"name": "mock2", "type": "mock", "options": {}, "params": {}},
+    )
+    assert line["result"]["provider"]["name"] == "mock2"
+
+    line = await _call(server, "use_provider", {"name": "mock2"})
+    provider = line["result"]["provider"]
+    assert provider["name"] == "mock2"
+    assert provider["default"] is True
+
+    status = await _call(server, "get_provider_status")
+    assert status["result"]["default_provider"] == "mock2"
+    assert any(
+        p["name"] == "mock2" and p["default"] is True
+        for p in status["result"]["providers"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_probe_provider_updates_health(server: JsonRpcServer) -> None:
+    line = await _call(server, "probe_provider", {"name": "mock"})
+    assert line["result"]["ok"] is True
+
+    status = await _call(server, "get_provider_status")
+    provider = next(p for p in status["result"]["providers"] if p["name"] == "mock")
+    assert provider["health"]["last_ok"] is True
+    assert provider["health"]["latency_ms"] is not None
