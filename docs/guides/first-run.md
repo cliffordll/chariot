@@ -1,4 +1,4 @@
-# 首次启动指南
+﻿# 首次启动指南
 
 > **面向**:克隆仓库后第一次把 chariot 跑起来。
 > **覆盖**:前置工具链 → 依赖安装 → CLI 跑通 → sidecar 打包 → Tauri 桌面 dev 验证。
@@ -87,6 +87,30 @@ ls packages/desktop/tauri/binaries/chariot-sidecar-*.exe         # sidecar 副�
 ```
 
 两个都在就行。
+
+---
+
+如果你要从零启动桌面端，完整顺序如下:
+
+```bash
+uv sync
+bun install
+uv run --group build python scripts/build.py --target sidecar --sync-sidecar
+cd packages/desktop/tauri
+bun run tauri dev
+```
+
+- `uv sync`:准备 Python 虚拟环境和后端依赖。
+- `bun install`:安装前端和 Tauri 依赖。
+- `uv run --group build python scripts/build.py --target sidecar --sync-sidecar`:构建 sidecar 并复制到 Tauri 目录。
+- `cd packages/desktop/tauri`:切到桌面壳目录。
+- `bun run tauri dev`:真正启动桌面程序。
+
+`bun run tauri dev` 会做三件事:
+
+1. 先起 `packages/app` 的 Vite dev server。
+2. 编译 Tauri Rust 壳。
+3. spawn `chariot-sidecar.exe`,然后打开桌面窗口。
 
 ---
 
