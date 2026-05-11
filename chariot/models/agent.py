@@ -52,5 +52,8 @@ class AgentProfile:
     # B4 wave 3:reflection 控制(透传给 ChatRequest.reflection_* 字段)
     reflection_enabled: bool = False
     reflection_max_retries: int = 2
+    # B6 wave 2:agent_profile 预绑 skill;chat 不显式 --skill 时透传给
+    # ChatRequest.skill;dangling reference(skill 不存在 / disabled)走 fallback。
+    default_skill: str | None = None
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)

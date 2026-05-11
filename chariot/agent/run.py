@@ -852,6 +852,10 @@ class AIAgent:
 
         binding.profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
         active bundle);profile 缺失 / 字段空 → 走 active bundle 兜底。
+
+        B6 wave 2:normalize 之后跑 SkillActivator —— 在 `_inject_default_tools`
+        已把 toolset filter 走完之后,skill.tool_filter 再过一次(取交集 - forbidden);
+        `<skill>` 块拼到 system 末尾(让 skill 是"最后一层提示")。
         """
         composed = req
         if self._sessionmaker is not None:
@@ -874,7 +878,36 @@ class AIAgent:
                         memory_policy=memory_policy.describe() if memory_policy is not None else None,
                     )
                     composed = dataclasses.replace(req, system=system)
-        return self._normalize_request(composed, provider, binding)
+        normalized = self._normalize_request(composed, provider, binding)
+        return self._maybe_activate_skill(normalized, binding)
+
+    def _maybe_activate_skill(self, req: ChatRequest, binding: _AgentBinding) -> ChatRequest:
+        """B6 wave 2:按 `req.skill` / `profile.default_skill` 决定是否注入 skill。
+
+        优先级:
+        - `req.skill == ""` → 显式清空(覆盖 profile.default_skill,不激活)
+        - `req.skill` 非空 → 用它
+        - `req.skill is None` + `profile.default_skill` 非空 → 用 profile 字段
+        - 都 None → 不激活
+
+        dangling reference / disabled skill / registry 未装 → 静默 skip(跟
+        prompt_bundle dangling 同款 fallback,不阻断 chat)。
+        """
+        if self._skill_registry is None:
+            return req
+        if req.skill is not None and req.skill == "":
+            return req
+        skill_name = req.skill
+        if skill_name is None and binding.profile is not None:
+            skill_name = binding.profile.default_skill
+        if not skill_name:
+            return req
+        skill = self._skill_registry.get(skill_name)
+        if skill is None or not skill.enabled:
+            return req
+        from chariot.skills import SkillActivator
+
+        return SkillActivator.activate(req, skill)
 
     async def _load_memory_entries(
         self,
