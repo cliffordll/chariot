@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from chariot.audit import AuditHookManager
     from chariot.checkpoints import CheckpointManager
     from chariot.guardrails import GuardrailEngine
+    from chariot.skills import SkillRegistry
 
 __all__ = ["register_methods"]
 
@@ -57,6 +58,9 @@ class SidecarAgent(Protocol):
 
     @property
     def checkpoint_manager(self) -> CheckpointManager | None: ...
+
+    @property
+    def skill_registry(self) -> SkillRegistry | None: ...
 
 
 class MethodBase:
@@ -171,6 +175,7 @@ def register_methods(
     from chariot.sidecar.methods.critic import CriticMethods
     from chariot.sidecar.methods.eval import EvalMethods
     from chariot.sidecar.methods.guardrail import GuardrailMethods
+    from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.job import JobMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.memory import MemoryMethods
@@ -242,6 +247,14 @@ def register_methods(
     capabilities = CapabilityMethods(runtime)
     server.method("list_capabilities")(capabilities.list_)
     server.method("set_capability")(capabilities.set_)
+
+    skills = SkillMethods(runtime)
+    server.method("list_skills")(skills.list_)
+    server.method("get_skill")(skills.show)
+    server.method("install_skill")(skills.install)
+    server.method("enable_skill")(skills.enable)
+    server.method("disable_skill")(skills.disable)
+    server.method("delete_skill")(skills.delete)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

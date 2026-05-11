@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from chariot.models.agent import AgentProfile
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.skills import SkillRegistry
     from chariot.tools.base import BaseTool
     from chariot.trace import TurnHandle
 
@@ -111,6 +112,7 @@ class AIAgent:
         audit_hooks: AuditHookManager | None = None,
         capabilities: Capabilities | None = None,
         checkpoint_manager: CheckpointManager | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         from chariot.agent.config import Capabilities as _Capabilities
         from chariot.audit import AuditHookManager as _AuditHookManager
@@ -144,6 +146,9 @@ class AIAgent:
         self._capabilities = capabilities or _Capabilities.default()
         # B5 wave 3:CheckpointManager 三件套 snapshot + rollback;无 sm 退化 None。
         self._checkpoint_manager = checkpoint_manager
+        # B6 wave 1:SkillRegistry(builtin YAML + DB skills union);bootstrap 默认
+        # 装,测试路径若没传 → None,activator/propose 等下游 None-check 后跳过。
+        self._skill_registry = skill_registry
 
     # ---- 装载 ----
 
@@ -261,6 +266,12 @@ class AIAgent:
             audit_hooks=audit_hooks,
         )
 
+        # B6 wave 1:装 SkillRegistry —— 扫 builtin/*.yaml + DB skills 表 union。
+        # 同名 DB 行覆盖 builtin;DB content 坏 YAML 单条 skip 不阻装载。
+        from chariot.skills import SkillRegistry
+
+        skill_registry = await SkillRegistry.load(sm)
+
         return cls(
             providers=providers,
             tools=tools,
@@ -273,6 +284,7 @@ class AIAgent:
             audit_hooks=audit_hooks,
             capabilities=capabilities,
             checkpoint_manager=checkpoint_manager,
+            skill_registry=skill_registry,
         )
 
     @staticmethod
@@ -341,6 +353,12 @@ class AIAgent:
         """已装载的 CheckpointManager(B5 wave 3)。bootstrap 默认装;测试路径
         若没传 sessionmaker 也没传 checkpoint_manager → None。"""
         return self._checkpoint_manager
+
+    @property
+    def skill_registry(self) -> SkillRegistry | None:
+        """已装载的 SkillRegistry(B6 wave 1)。bootstrap 默认装 builtin + DB 行 union;
+        测试路径若没传 → None,activator/propose 等下游需 None-check。"""
+        return self._skill_registry
 
     # ---- 主入口 ----
 
