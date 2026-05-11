@@ -20,7 +20,9 @@
 - v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
  - v9(0.7.1-prompt):`prompt_bundles / prompt_versions / prompt_traces`
  - v10(0.7.1-prompt):`prompt_bundles.is_active / prompt_versions.is_active`
- - v11(0.7.1-context):`context_snapshots / context_traces`
+- v11(0.7.1-context):`context_snapshots / context_traces`
+- v14(0.7.2-task):`agent_profiles / tasks / task_runs / scheduled_jobs`
+- v15(0.7.2-task):`job_runs`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -356,3 +358,76 @@ class ContextTraceRow(Base):
     policy: Mapped[str] = mapped_column(default="{}")
     selected_refs: Mapped[str] = mapped_column(default="[]")
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class AgentProfileRow(Base):
+    __tablename__ = "agent_profiles"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    role: Mapped[str] = mapped_column(index=True)
+    prompt_bundle: Mapped[str | None] = mapped_column(default=None)
+    tool_profile: Mapped[str | None] = mapped_column(default=None)
+    provider_profile: Mapped[str | None] = mapped_column(default=None)
+    budget: Mapped[str] = mapped_column(default="{}")
+    meta: Mapped[str] = mapped_column(default="{}")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class TaskRow(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    goal: Mapped[str]
+    kind: Mapped[str] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(index=True)
+    agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    parent_task_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    owner: Mapped[str | None] = mapped_column(default=None)
+    meta: Mapped[str] = mapped_column(default="{}")
+    artifacts: Mapped[str] = mapped_column(default="[]")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class TaskRunRow(Base):
+    __tablename__ = "task_runs"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    task_id: Mapped[str] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(index=True)
+    trigger: Mapped[str] = mapped_column(default="manual")
+    resume_from_run_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    result: Mapped[str] = mapped_column(default="{}")
+    error: Mapped[str | None] = mapped_column(default=None)
+    meta: Mapped[str] = mapped_column(default="{}")
+    started_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class ScheduledJobRow(Base):
+    __tablename__ = "scheduled_jobs"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    goal: Mapped[str]
+    cron: Mapped[str]
+    enabled: Mapped[int] = mapped_column(default=1)
+    agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    last_run_status: Mapped[str | None] = mapped_column(default=None)
+    last_run_at: Mapped[datetime | None] = mapped_column(default=None)
+    next_run_at: Mapped[datetime | None] = mapped_column(default=None)
+    meta: Mapped[str] = mapped_column(default="{}")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class JobRunRow(Base):
+    __tablename__ = "job_runs"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    job_name: Mapped[str] = mapped_column(index=True)
+    task_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    status: Mapped[str] = mapped_column(index=True)
+    error: Mapped[str | None] = mapped_column(default=None)
+    started_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)

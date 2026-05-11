@@ -265,6 +265,78 @@ export interface MemoryLink {
   created_at: string;
 }
 
+export interface AgentProfile {
+  name: string;
+  role: string;
+  prompt_bundle: string | null;
+  tool_profile: string | null;
+  provider_profile: string | null;
+  budget: Record<string, unknown>;
+  meta: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskRun {
+  id: string;
+  task_id: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  trigger: string;
+  resume_from_run_id: string | null;
+  result: Record<string, unknown>;
+  error: string | null;
+  meta: Record<string, unknown>;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface TaskEntry {
+  id: string;
+  goal: string;
+  kind: "interactive" | "background" | "delegated" | "scheduled";
+  status: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  agent_profile: string | null;
+  parent_task_id: string | null;
+  owner: string | null;
+  meta: Record<string, unknown>;
+  artifacts: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskDetail extends TaskEntry {
+  child_status_summary: Record<string, number>;
+  runs: TaskRun[];
+}
+
+export interface JobRunRecord {
+  id: string;
+  job_name: string;
+  task_id: string | null;
+  status: string;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface ScheduledJob {
+  name: string;
+  goal: string;
+  cron: string;
+  enabled: boolean;
+  agent_profile: string | null;
+  last_run_status: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledJobDetail extends ScheduledJob {
+  runs: JobRunRecord[];
+}
+
 export interface PromptBundleDetail extends PromptBundle {
   versions?: PromptVersion[];
 }
@@ -532,6 +604,132 @@ const apiCore = {
 
   activatePromptBundle(payload: PromptActivatePayload): Promise<{ bundle: PromptBundle; version: PromptVersion | null }> {
     return rpc("activate_prompt_bundle", payload as unknown as Record<string, unknown>);
+  },
+
+  listAgents(): Promise<{ agents: AgentProfile[] }> {
+    return rpc("list_agents");
+  },
+
+  getAgent(name: string): Promise<{ agent: AgentProfile }> {
+    return rpc("get_agent", { name });
+  },
+
+  createAgent(payload: {
+    name: string;
+    role: string;
+    prompt_bundle?: string | null;
+    tool_profile?: string | null;
+    provider_profile?: string | null;
+    budget?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
+  }): Promise<{ agent: AgentProfile }> {
+    return rpc("create_agent", payload as Record<string, unknown>);
+  },
+
+  listTasks(params: { parent_task_id?: string | null } = {}): Promise<{ tasks: TaskEntry[] }> {
+    return rpc("list_tasks", { ...params });
+  },
+
+  getTask(task_id: string): Promise<{ task: TaskDetail }> {
+    return rpc("get_task", { task_id });
+  },
+
+  createTask(payload: {
+    goal: string;
+    kind?: TaskEntry["kind"];
+    agent_profile?: string | null;
+    owner?: string | null;
+    meta?: Record<string, unknown>;
+  }): Promise<{ task: TaskEntry }> {
+    return rpc("create_task", payload as Record<string, unknown>);
+  },
+
+  pauseTask(task_id: string): Promise<{ task: TaskEntry }> {
+    return rpc("pause_task", { task_id });
+  },
+
+  resumeTask(task_id: string): Promise<{ task: TaskEntry }> {
+    return rpc("resume_task", { task_id });
+  },
+
+  cancelTask(task_id: string): Promise<{ task: TaskEntry }> {
+    return rpc("cancel_task", { task_id });
+  },
+
+  startTaskRun(payload: {
+    task_id: string;
+    trigger?: string;
+    resume_from_run_id?: string | null;
+    meta?: Record<string, unknown>;
+  }): Promise<{ run: TaskRun }> {
+    return rpc("start_task_run", payload as Record<string, unknown>);
+  },
+
+  completeTaskRun(payload: {
+    run_id: string;
+    result?: Record<string, unknown>;
+    error?: string | null;
+  }): Promise<{ run: TaskRun }> {
+    return rpc("complete_task_run", payload as Record<string, unknown>);
+  },
+
+  failTaskRun(payload: {
+    run_id: string;
+    error: string;
+    result?: Record<string, unknown>;
+  }): Promise<{ run: TaskRun }> {
+    return rpc("fail_task_run", payload as Record<string, unknown>);
+  },
+
+  cancelTaskRun(payload: {
+    run_id: string;
+    error?: string | null;
+    result?: Record<string, unknown>;
+  }): Promise<{ run: TaskRun }> {
+    return rpc("cancel_task_run", payload as Record<string, unknown>);
+  },
+
+  listJobs(): Promise<{ jobs: ScheduledJob[] }> {
+    return rpc("list_jobs");
+  },
+
+  showJob(name: string): Promise<{ job: ScheduledJobDetail }> {
+    return rpc("show_job", { name });
+  },
+
+  createJob(payload: {
+    name: string;
+    goal: string;
+    cron: string;
+    enabled?: boolean;
+    agent_profile?: string | null;
+    meta?: Record<string, unknown>;
+  }): Promise<{ job: ScheduledJob }> {
+    return rpc("create_job", payload as Record<string, unknown>);
+  },
+
+  updateJob(
+    name: string,
+    payload: {
+      goal?: string | null;
+      cron?: string | null;
+      agent_profile?: string | null;
+      meta?: Record<string, unknown>;
+    },
+  ): Promise<{ job: ScheduledJob }> {
+    return rpc("update_job", { name, ...payload });
+  },
+
+  enableJob(name: string): Promise<{ job: ScheduledJob }> {
+    return rpc("enable_job", { name });
+  },
+
+  disableJob(name: string): Promise<{ job: ScheduledJob }> {
+    return rpc("disable_job", { name });
+  },
+
+  runJobNow(name: string): Promise<{ task: TaskEntry; job_run: JobRunRecord }> {
+    return rpc("run_job_now", { name });
   },
 
   async status(): Promise<StatusResponse> {

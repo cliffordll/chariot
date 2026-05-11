@@ -115,6 +115,7 @@ def register_methods(
     from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
+    from chariot.sidecar.methods.task import TaskMethods
     from chariot.sidecar.methods.tool import ToolMethods
 
     server.method("chat")(ChatMethod(runtime))
@@ -164,6 +165,34 @@ def register_methods(
     server.method("use_provider")(providers.use)
     server.method("probe_provider")(providers.probe)
     server.method("get_provider_status")(providers.status)
+
+    tasks = TaskMethods(runtime)
+    server.method("list_agents")(tasks.list_agents)
+    server.method("get_agent")(tasks.get_agent)
+    server.method("create_agent")(tasks.create_agent)
+    server.method("update_agent")(tasks.update_agent)
+    server.method("delete_agent")(tasks.delete_agent)
+    server.method("list_tasks")(tasks.list_tasks)
+    server.method("get_task")(tasks.get_task)
+    server.method("get_task_run")(tasks.get_task_run)
+    server.method("list_task_runs")(tasks.list_task_runs)
+    server.method("list_jobs")(tasks.list_jobs)
+    server.method("show_job")(tasks.show_job)
+    server.method("create_job")(tasks.create_job)
+    server.method("update_job")(tasks.update_job)
+    server.method("enable_job")(tasks.enable_job)
+    server.method("disable_job")(tasks.disable_job)
+    server.method("delete_job")(tasks.delete_job)
+    server.method("run_job_now")(tasks.run_job_now)
+    server.method("create_task")(tasks.create)
+    server.method("pause_task")(tasks.pause)
+    server.method("resume_task")(tasks.resume)
+    server.method("cancel_task")(tasks.cancel)
+    server.method("start_task_run")(tasks.start_run)
+    server.method("complete_task_run")(tasks.complete_run)
+    server.method("fail_task_run")(tasks.fail_run)
+    server.method("cancel_task_run")(tasks.cancel_run)
+    server.method("delegate_task")(tasks.delegate)
 
     prompts = PromptMethods(runtime)
     server.method("list_prompt_bundles")(prompts.list_)

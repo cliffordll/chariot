@@ -17,6 +17,7 @@ from chariot.repos.prompt_repo import (
 )
 from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.skill_repo import SkillEntry, SkillRepo
+from chariot.repos.task_repo import TaskRepo
 from chariot.repos.tool_repo import ToolRepo
 
 __all__ = [
@@ -44,5 +45,6 @@ __all__ = [
     "ProviderRepo",
     "SkillEntry",
     "SkillRepo",
+    "TaskRepo",
     "ToolRepo",
 ]
