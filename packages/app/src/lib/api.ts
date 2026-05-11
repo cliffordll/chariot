@@ -281,6 +281,8 @@ export interface AgentProfile {
   provider_profile: string | null;
   budget: Record<string, unknown>;
   meta: Record<string, unknown>;
+  reflection_enabled: boolean;
+  reflection_max_retries: number;
   created_at: string;
   updated_at: string;
 }
@@ -896,6 +898,8 @@ const apiCore = {
     provider_profile?: string | null;
     budget?: Record<string, unknown>;
     meta?: Record<string, unknown>;
+    reflection_enabled?: boolean;
+    reflection_max_retries?: number;
   }): Promise<{ agent: AgentProfile }> {
     return rpc("create_agent", payload as Record<string, unknown>);
   },
@@ -909,6 +913,8 @@ const apiCore = {
       provider_profile?: string | null;
       budget?: Record<string, unknown>;
       meta?: Record<string, unknown>;
+      reflection_enabled?: boolean;
+      reflection_max_retries?: number;
     },
   ): Promise<{ agent: AgentProfile }> {
     return rpc("update_agent", { name, ...payload });

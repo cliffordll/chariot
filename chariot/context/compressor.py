@@ -24,11 +24,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from chariot.agent.auxiliary_client import AuxiliarySummarizeFailed
 from chariot.agent.chat_request import ChatRequest, Message, SystemBlock
-from chariot.providers.auxiliary_client import AuxiliarySummarizeFailed
 
 if TYPE_CHECKING:
-    from chariot.providers.auxiliary_client import AuxiliaryClient
+    from chariot.agent.auxiliary_client import AuxiliaryClient
 
 
 _DEFAULT_CONTEXT_LENGTH = 8192

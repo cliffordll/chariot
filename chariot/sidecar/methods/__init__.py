@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.agent.reflection import CriticAgent
+
 __all__ = ["register_methods"]
 
 
@@ -36,6 +38,9 @@ class SidecarAgent(Protocol):
 
     @property
     def session_maker(self) -> async_sessionmaker[AsyncSession]: ...
+
+    @property
+    def critic_agent(self) -> CriticAgent | None: ...
 
 
 class MethodBase:
@@ -144,6 +149,7 @@ def register_methods(
     from chariot.sidecar.methods.chat import ChatMethod
     from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
+    from chariot.sidecar.methods.critic import CriticMethods
     from chariot.sidecar.methods.eval import EvalMethods
     from chariot.sidecar.methods.job import JobMethods
     from chariot.sidecar.methods.log import LogMethods
@@ -193,6 +199,10 @@ def register_methods(
     server.method("add_auxiliary_client")(auxiliaries.add)
     server.method("update_auxiliary_client")(auxiliaries.update)
     server.method("delete_auxiliary_client")(auxiliaries.delete)
+
+    critics = CriticMethods(runtime)
+    server.method("critique_text")(critics.critique)
+    server.method("get_critic_config")(critics.config)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

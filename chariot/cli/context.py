@@ -93,6 +93,10 @@ class ChatContext:
     # profile.prompt_bundle 决定 prompt 注入,profile.tool_profile 做 toolset filter。
     # None = 不绑定 agent_profile(常态;走全局 active bundle + 全量 enabled tools)
     agent_profile: str | None = None
+    # B4 wave 3:CLI `--reflect` flag 承载;透传给 ChatRequest.reflection_*。
+    # agent_profile.reflection_enabled=True 时会自动透传,这里只对应"显式 --reflect"。
+    reflection_enabled: bool = False
+    reflection_max_retries: int = 2
 
     # ---------- 状态操作 ----------
 
@@ -203,6 +207,8 @@ class ChatContext:
             max_tokens=self.max_tokens,
             conversation_id=self.conversation_id,
             agent_profile=self.agent_profile,
+            reflection_enabled=self.reflection_enabled,
+            reflection_max_retries=self.reflection_max_retries,
         )
 
     def _messages_to_send(self) -> list[dict[str, Any]]:

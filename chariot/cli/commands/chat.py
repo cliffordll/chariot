@@ -103,6 +103,17 @@ def chat_cmd(
             ),
         ),
     ] = None,
+    reflect: Annotated[
+        bool,
+        typer.Option(
+            "--reflect/--no-reflect",
+            help="B4:开 reflect-then-retry(需 critic 装载;`chariot critic show` 看)",
+        ),
+    ] = False,
+    reflect_retries: Annotated[
+        int,
+        typer.Option("--reflect-retries", help="reflection 最多重试次数(--reflect 时生效)"),
+    ] = 2,
 ) -> None:
     conversation_id = _resolve_conversation_id(conversation)
     asyncio.run(
@@ -115,6 +126,8 @@ def chat_cmd(
             max_tokens=max_tokens,
             conversation_id=conversation_id,
             agent_profile=agent,
+            reflection_enabled=reflect,
+            reflection_max_retries=reflect_retries,
         )
     )
 
@@ -169,6 +182,8 @@ async def _run(
     max_tokens: int,
     conversation_id: str | None,
     agent_profile: str | None,
+    reflection_enabled: bool = False,
+    reflection_max_retries: int = 2,
 ) -> None:
     # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
     # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
@@ -192,6 +207,8 @@ async def _run(
                 conversation_id=conversation_id,
                 model_override=model,
                 agent_profile=agent_profile,
+                reflection_enabled=reflection_enabled,
+                reflection_max_retries=reflection_max_retries,
             )
             if text is None or not text.strip():
                 from chariot.cli.repl import ChatRepl

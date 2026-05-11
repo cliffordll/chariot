@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from chariot.agent.auxiliary_client import AuxiliaryClient, AuxiliarySummarizeFailed
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.context.compressor import CompressionResult, ContextCompressor
 from chariot.models.auxiliary import AuxiliaryClientEntry
-from chariot.providers.auxiliary_client import AuxiliaryClient, AuxiliarySummarizeFailed
 
 
 class _StubAuxOk(AuxiliaryClient):

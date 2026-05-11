@@ -371,6 +371,9 @@ class AgentProfileRow(Base):
     provider_profile: Mapped[str | None] = mapped_column(default=None)
     budget: Mapped[str] = mapped_column(default="{}")
     meta: Mapped[str] = mapped_column(default="{}")
+    # B4 wave 3:reflection 开关 + retry 预算(默认关,跟 ChatRequest 默认对齐)
+    reflection_enabled: Mapped[int] = mapped_column(default=0)
+    reflection_max_retries: Mapped[int] = mapped_column(default=2)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

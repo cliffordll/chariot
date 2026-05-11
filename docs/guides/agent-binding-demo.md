@@ -329,6 +329,91 @@ agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silen
 
 ---
 
+## 7.10 Critic 基建(B4 wave 1)
+
+Critic 是一个"裁判 LLM",对主 agent 的产出强制输出 `VERDICT: PASS|FAIL|UNSURE`
+一行 + reason。复用 B3 wave 2 的 `auxiliary_clients` 表 —— 加一行 `name='critic'`
+就装好。
+
+```powershell
+# 推荐用一个独立 budget 的 critic(便宜 + 受控温度)
+uv run chariot auxiliary add --name critic --provider claude `
+    --model claude-haiku-4-5-20251001 --param max_tokens=512 --param temperature=0.2
+uv run chariot auxiliary add --name critic --provider ollama-qwen --model qwen2.5:1.5b --param max_tokens=512 --param temperature=0.2
+
+# 手动跑一次 critique:看 prompt / verdict 解析效果
+uv run chariot critic try "写一个排序函数" --produced "def sort(x): return x"
+# 期望输出:
+#   verdict: FAIL
+#   reason:  没有实现实际排序,直接返了入参
+```
+
+VERDICT parser 兜底:critic 输出**不符合契约**时 → verdict=UNSURE,reason 记原始
+输出前 200 char(给人复盘 critic prompt 是不是要调)。
+
+---
+
+## 7.11 Reflect-then-retry(B4 wave 2)
+
+工具失败 / 主 agent 自报 fail / 流式 error → critic 介入 → 把 verdict + reason
+作为 `[REFLECTION]` 块追加到对话末尾 → 主 agent 重试,直到 PASS / UNSURE /
+retry 预算用尽 / circuit breaker 触发。
+
+```powershell
+# 显式开 reflection 跑一次任务(reflect 是 chat 的 flag,不是子命令)
+uv run chariot chat --reflect --reflect-retries 3 "写一个 O(n log n) 排序"
+
+# 看 trace:每一次 retry 跑一个独立的 trace_turn,第二轮起 meta 含 reflection_iteration
+uv run chariot trace list --limit 5
+uv run chariot trace view <turn-id>
+# 期望第二条 trace turn 的 meta 形如:
+# {
+#   "reflection_iteration": 1,
+#   "reflection_trigger": "self_report_fail",   // 或 tool_failure / error_event
+#   "reflection_previous_verdict": "FAIL",
+#   "reflection_previous_reason": "缺实现细节..."
+# }
+```
+
+**触发优先级**:`error_event` > `tool_failure` > `self_report_fail`(同一轮多
+信号命中时,只记最高优先级一个)。
+
+**双层防护**:
+- `--reflect-retries`(默认 2):本次任务最多反思几次;0 = 关
+- circuit breaker:连续 3 轮拿到 FAIL → 跳出,避免反思死循环耗预算
+
+**UNSURE 不消耗 retry**:critic 给不了明确信号(产出格式不符 / 输出为空)→
+直接停止,不浪费预算。
+
+---
+
+## 7.12 agent_profile reflection 开关 + 桌面 UI(B4 wave 3)
+
+reflection 默认**关**(全局 + per-agent);要开,在 agent_profile 上显式打开:
+
+```powershell
+# 全局先确保 critic aux client 装好(7.10 已建);然后给特定 agent 开 reflection
+uv run chariot agent update trace_demo --reflection-on --reflect-retries 3
+
+# 跑该 agent,reflection 自动生效(无需再加 --reflect)
+uv run chariot chat --agent trace_demo "写一个 O(n log n) 排序"
+
+# 关掉
+uv run chariot agent update trace_demo --reflection-off
+```
+
+字段优先级:`req.reflection_enabled=True`(CLI `--reflect`)> agent_profile
+`reflection_enabled=True`。两者都关 → 单轮路径。
+
+**Agents 桌面页**新增字段:
+- `reflection_enabled` 复选框
+- `reflection_max_retries` 输入框
+
+**Traces 桌面详情页**:trace_turns.meta 含 `reflection_iteration` 字段时,在
+turn 详情下方插 "Reflection" panel,显示触发原因 + 上一轮 verdict + reason。
+
+---
+
 ## 8. flag 冲突 / 优先级速查
 
 | flag 组合 | 行为 |

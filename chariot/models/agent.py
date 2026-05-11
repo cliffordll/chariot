@@ -49,5 +49,8 @@ class AgentProfile:
     provider_profile: str | None = None
     budget: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
+    # B4 wave 3:reflection 控制(透传给 ChatRequest.reflection_* 字段)
+    reflection_enabled: bool = False
+    reflection_max_retries: int = 2
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)

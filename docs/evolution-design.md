@@ -333,10 +333,13 @@ uv run chariot eval --no-save                # 不落盘
 
 ### B4 Reflection & Critic(补 phalanx §2.8.c)
 
-- **AuxiliaryClient** — 副 model 路径,模型 / temperature / budget 跟主独立
-- **Critic role** — `delegate_task --role critic` 派生子 agent,强制 `VERDICT: PASS|FAIL|UNSURE` 一行 + reason
-- **Reflect-then-retry** — 工具失败 / verifier fail 时,主 agent 先调 critic 拿 critique,再重写计划
-- **`chariot/reflection/`** 新模块
+- **AuxiliaryClient** — 副 model 路径,模型 / temperature / budget 跟主独立(B3 wave 2 已落地)
+- **Critic role** — 复用 `auxiliary_clients.name='critic'`,`CriticAgent` 强制 `VERDICT: PASS|FAIL|UNSURE` 一行 + reason;parser 兜底 UNSURE
+- **Reflect-then-retry** — 工具失败 / agent 自报 fail 时,critic 给 critique,append 为 user 消息后重跑;max_retries + circuit breaker 双层防护
+- **模块归属**:不开新顶层目录,落 `chariot/agent/reflection/` 子包(reflection 是 AIAgent 行为)
+- **agent_profile 集成**:v20 migration 加 `reflection_enabled` / `reflection_max_retries` 字段,默认关
+
+**详细设计**:`docs/B4-reflection-design.md`(3 wave 拆分 + critic prompt 契约 + critique 注入格式)。
 
 ### B5 Guardrails + Checkpoint + Audit(补 phalanx §2.8.d)
 

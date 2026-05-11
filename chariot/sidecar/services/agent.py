@@ -37,6 +37,8 @@ class AgentApi:
         provider_profile: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        reflection_enabled: bool = False,
+        reflection_max_retries: int = 2,
     ) -> dict[str, Any]:
         entry = await AgentService(TaskRepo(session)).create_agent(
             name=name,
@@ -46,6 +48,8 @@ class AgentApi:
             provider_profile=provider_profile,
             budget=budget,
             meta=meta,
+            reflection_enabled=reflection_enabled,
+            reflection_max_retries=reflection_max_retries,
         )
         return self._agent_to_dict(entry)
 
@@ -60,6 +64,8 @@ class AgentApi:
         provider_profile: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        reflection_enabled: bool | None = None,
+        reflection_max_retries: int | None = None,
     ) -> dict[str, Any]:
         try:
             entry = await AgentService(TaskRepo(session)).update_agent(
@@ -70,6 +76,8 @@ class AgentApi:
                 provider_profile=provider_profile,
                 budget=budget,
                 meta=meta,
+                reflection_enabled=reflection_enabled,
+                reflection_max_retries=reflection_max_retries,
             )
         except ValueError as e:
             self._raise_rpc_error(e)
@@ -99,6 +107,8 @@ class AgentApi:
             "provider_profile": entry.provider_profile,
             "budget": entry.budget,
             "meta": entry.meta,
+            "reflection_enabled": entry.reflection_enabled,
+            "reflection_max_retries": entry.reflection_max_retries,
             "created_at": entry.created_at.isoformat(),
             "updated_at": entry.updated_at.isoformat(),
         }

@@ -37,6 +37,8 @@ class AgentMethods(MethodBase):
         provider_profile = self._optional_str(params, "provider_profile")
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
+        reflection_enabled = bool(params.get("reflection_enabled", False))
+        reflection_max_retries = self._optional_int(params, "reflection_max_retries", default=2) or 2
         async with self._session() as session:
             agent = await self._api.create_agent(
                 session,
@@ -47,6 +49,8 @@ class AgentMethods(MethodBase):
                 provider_profile=provider_profile,
                 budget=budget,
                 meta=meta,
+                reflection_enabled=reflection_enabled,
+                reflection_max_retries=reflection_max_retries,
             )
         return {"agent": agent}
 
@@ -60,6 +64,8 @@ class AgentMethods(MethodBase):
         provider_profile = self._clearable_str(params, "provider_profile")
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
+        reflection_enabled = bool(params["reflection_enabled"]) if "reflection_enabled" in params else None
+        reflection_max_retries = self._optional_int(params, "reflection_max_retries", default=None)
         async with self._session() as session:
             agent = await self._api.update_agent(
                 session,
@@ -70,8 +76,23 @@ class AgentMethods(MethodBase):
                 provider_profile=provider_profile,
                 budget=budget,
                 meta=meta,
+                reflection_enabled=reflection_enabled,
+                reflection_max_retries=reflection_max_retries,
             )
         return {"agent": agent}
+
+    @staticmethod
+    def _optional_int(params: dict[str, Any], key: str, *, default: int | None) -> int | None:
+        from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+
+        if key not in params:
+            return default
+        val = params[key]
+        if val is None:
+            return default
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, f"{key!r} must be an integer")
+        return val
 
     async def delete_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx

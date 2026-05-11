@@ -6,10 +6,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 
+from chariot.agent.auxiliary_client import AuxiliaryClient, AuxiliarySummarizeFailed
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.models.auxiliary import AuxiliaryClientEntry
-from chariot.providers.auxiliary_client import AuxiliaryClient, AuxiliarySummarizeFailed
 from chariot.providers.base import BaseProvider, BaseProviderConfig
 from chariot.providers.builtin.mock import MockProvider
 
