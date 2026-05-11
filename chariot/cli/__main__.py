@@ -12,6 +12,7 @@ from chariot.cli.commands import chat as chat_mod
 from chariot.cli.commands import checkpoint as checkpoint_mod
 from chariot.cli.commands import context as context_mod
 from chariot.cli.commands import conversation as conversation_mod
+from chariot.cli.commands import critic as critic_mod
 from chariot.cli.commands import evals as eval_mod
 from chariot.cli.commands import job as job_mod
 from chariot.cli.commands import logs as logs_mod
@@ -69,6 +70,7 @@ for mod in (
     context_mod,
     trace_mod,
     auxiliary_mod,
+    critic_mod,
 ):
     mod.register(app)
 

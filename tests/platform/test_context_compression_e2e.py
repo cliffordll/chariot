@@ -47,8 +47,8 @@ async def _seed_long_conversation(sm: async_sessionmaker[AsyncSession], conv_id:
 async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], agent: AIAgent) -> None:
     """agent bootstrap 时已用默认 threshold=0.7;为了在 mock + 8K context_length
     下稳定触发,我们换个低 threshold 的 compressor(直接 monkey-patch agent._context_compressor)。"""
+    from chariot.agent.auxiliary_client import AuxiliaryClient
     from chariot.context.compressor import ContextCompressor
-    from chariot.providers.auxiliary_client import AuxiliaryClient
 
     async with sm() as session:
         aux_entry = await AuxiliaryRepo(session).get_entry("summarizer")

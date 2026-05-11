@@ -329,6 +329,77 @@ agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silen
 
 ---
 
+## 7.10 Critic 基建(B4 wave 1)
+
+Critic 是一个"裁判 LLM",对主 agent 的产出强制输出 `VERDICT: PASS|FAIL|UNSURE`
+一行 + reason。复用 B3 wave 2 的 `auxiliary_clients` 表 —— 加一行 `name='critic'`
+就装好。
+
+```powershell
+# 推荐用一个独立 budget 的 critic(便宜 + 受控温度)
+uv run chariot auxiliary add --name critic --provider claude `
+    --model claude-haiku-4-5-20251001 --param max_tokens=512 --param temperature=0.2
+
+# 手动跑一次 critique:看 prompt / verdict 解析效果
+uv run chariot critic try "写一个排序函数" --produced "def sort(x): return x"
+# 期望输出:
+#   verdict: FAIL
+#   reason:  没有实现实际排序,直接返了入参
+```
+
+VERDICT parser 兜底:critic 输出**不符合契约**时 → verdict=UNSURE,reason 记原始
+输出前 200 char(给人复盘 critic prompt 是不是要调)。
+
+---
+
+## 7.11 Reflect-then-retry(B4 wave 2)
+
+工具失败 / 主 agent 自报 fail → critic 介入 → 把 verdict + reason 当 user 消息
+追加到对话末尾 → 主 agent 重试,直到 PASS 或 retry 用完。
+
+```powershell
+# CLI 显式开 reflection 跑一次任务,详细打印每次 retry 的 verdict
+uv run chariot reflect run "写一个 O(n log n) 排序" --max-retries 3
+
+# 看哪轮触发了 reflection:trace_turns.meta.reflection 有完整记录
+uv run chariot trace list --limit 5
+uv run chariot trace view <turn-id>
+# 期望在 meta 里看到:
+# {
+#   "reflection": [
+#     {"iteration": 1, "verdict": "FAIL", "reason": "...", "retry_count": 1, "max_retries": 3},
+#     {"iteration": 2, "verdict": "PASS", "reason": "...", "retry_count": 2, "max_retries": 3}
+#   ]
+# }
+```
+
+**双层防护**:
+- `--max-retries`(默认 2):本次任务最多反思几次
+- circuit breaker:连续 3 轮拿到 FAIL 但 retry 后仍 FAIL → 跳出,避免反思死循环耗预算
+
+---
+
+## 7.12 agent_profile reflection 开关 + 桌面 UI(B4 wave 3)
+
+reflection 默认**关**(全局 + per-agent);要开,在 agent_profile 上显式打开:
+
+```powershell
+# 全局先确保 critic aux client 装好(7.10 已建);然后给特定 agent 开 reflection
+uv run chariot agent edit alpha-coder --reflection-on --reflect-retries 3
+
+# 跑该 agent,reflection 自动生效
+uv run chariot chat --agent alpha-coder "写一个 O(n log n) 排序"
+```
+
+**Agents 桌面页**新增字段:
+- `reflection_enabled` 复选框
+- `reflection_max_retries` 输入框
+
+**Traces 桌面详情页**:trace_turns.meta 含 `reflection` 字段时,在 turn 详情
+下方插 "Reflection" panel,逐轮列 verdict / reason / retry_count。
+
+---
+
 ## 8. flag 冲突 / 优先级速查
 
 | flag 组合 | 行为 |

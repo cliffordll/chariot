@@ -36,6 +36,7 @@ from chariot.providers.contract import normalize_request
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.agent.reflection import CriticAgent
     from chariot.context.compressor import ContextCompressor
     from chariot.context.references import ReferenceExpander
     from chariot.models.agent import AgentProfile
@@ -99,6 +100,7 @@ class AIAgent:
         sessionmaker: async_sessionmaker[AsyncSession] | None = None,
         context_compressor: ContextCompressor | None = None,
         reference_expander: ReferenceExpander | None = None,
+        critic_agent: CriticAgent | None = None,
     ) -> None:
         from chariot.trace import TraceWriter
 
@@ -113,6 +115,9 @@ class AIAgent:
         self._context_compressor = context_compressor
         # B3 wave 3:可选 @reference 解析器;bootstrap 默认装。
         self._reference_expander = reference_expander
+        # B4 wave 1:可选 critic 副 LLM;auxiliary_clients.name='critic' 行装上。
+        # 装上不等于自动跑 reflection — wave 3 起 agent_profile.reflection_enabled 才触发。
+        self._critic_agent = critic_agent
 
     # ---- 装载 ----
 
@@ -144,10 +149,10 @@ class AIAgent:
         典型由 `AgentRegistry.reserve` 调用;直接调也 OK(测试或 single-session
         场景)。
         """
+        from chariot.agent.auxiliary_client import AuxiliaryClient
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.context.compressor import ContextCompressor
         from chariot.database.session import init_db
-        from chariot.providers.auxiliary_client import AuxiliaryClient
         from chariot.providers.registry import ProviderRegistry
         from chariot.repos.auxiliary_repo import AuxiliaryRepo
         from chariot.repos.prompt_repo import PromptRepo
@@ -198,12 +203,19 @@ class AIAgent:
             sessionmaker=sm,
         )
 
+        # B4 wave 1:装 CriticAgent —— auxiliary_clients 表里有 'critic' 行就装上,
+        # dangling provider_entry / 找不到行 → None(reflection 路径退化 noop)。
+        from chariot.agent.reflection import CriticAgent
+
+        critic = CriticAgent.from_auxiliary_clients(aux_entries, providers)
+
         return cls(
             providers=providers,
             tools=tools,
             sessionmaker=sm,
             context_compressor=compressor,
             reference_expander=expander,
+            critic_agent=critic,
         )
 
     @staticmethod
@@ -243,6 +255,12 @@ class AIAgent:
     def tools(self) -> dict[str, BaseTool]:
         """已装载的 tool 字典(只读视图;surface 仅用于 status / 列表展示)。"""
         return dict(self._tools)
+
+    @property
+    def critic_agent(self) -> CriticAgent | None:
+        """已装载的 CriticAgent(B4 wave 1)。未装载 = auxiliary_clients 里无
+        `name='critic'` 行或 provider entry dangling;调用方需 None-check。"""
+        return self._critic_agent
 
     # ---- 主入口 ----
 
