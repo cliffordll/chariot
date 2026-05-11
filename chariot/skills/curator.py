@@ -125,8 +125,15 @@ class SkillCurator:
             if not isinstance(name, str):
                 continue
             is_error = bool(ev.payload.get("is_error") or ev.status == "error")
-            out.setdefault(name, []).append((ev.created_at, is_error))
+            out.setdefault(name, []).append((self._to_utc(ev.created_at), is_error))
         return out
+
+    @staticmethod
+    def _to_utc(dt: datetime) -> datetime:
+        """SQLAlchemy 默认存的是 naive UTC;统一附 tz 让跟 _now() 可比。"""
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
     # ---- bucket 算法 ----
 
