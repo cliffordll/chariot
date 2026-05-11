@@ -55,6 +55,7 @@ class ChatRequestDecoder:
         "thinking",
         "conversation_id",
         "agent_id",
+        "agent_profile",
     )
 
     @classmethod

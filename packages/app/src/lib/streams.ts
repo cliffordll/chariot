@@ -149,6 +149,10 @@ export interface ChatRequest {
   api_key?: string | null;
   max_tokens?: number;
   conversation_id?: string | null;
+  /** 0.7.2-tool+ agent_profile name;非空时 sidecar AIAgent 解析:
+   *  profile.provider_profile 覆盖 provider_name / profile.prompt_bundle 决定 system /
+   *  profile.tool_profile 过滤 tools。dangling reference 走 fallback,不阻断。 */
+  agent_profile?: string | null;
   temperature?: number | null;
   top_p?: number | null;
   [key: string]: unknown;
