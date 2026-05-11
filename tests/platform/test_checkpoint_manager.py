@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from chariot.audit.hooks import AuditHookManager
 from chariot.checkpoints import CheckpointManager
-from chariot.database.session import dispose_db, init_db
+from chariot.database.session import CURRENT_SCHEMA_VERSION, dispose_db, init_db
 from chariot.repos.audit_repo import AuditRepo
 
 
@@ -53,7 +53,8 @@ async def test_create_no_git_no_config_just_db_backup(
     try:
         cur = conn.execute("PRAGMA user_version")
         version = cur.fetchone()[0]
-        assert version == 21
+        # 用常量,避免后续 migration bump 时这条断言又过期
+        assert version == CURRENT_SCHEMA_VERSION
     finally:
         conn.close()
     assert payload["git_ok"] is True
