@@ -111,7 +111,5 @@ class ChatRequestDecoder:
             )
         return Message(
             role=role_raw,
-            content=content_raw
-            if isinstance(content_raw, str)
-            else cast("list[dict[str, Any]]", content_raw),
+            content=content_raw if isinstance(content_raw, str) else cast("list[dict[str, Any]]", content_raw),
         )

@@ -19,7 +19,20 @@ def test_memory_help_has_expected_commands() -> None:
     result = runner.invoke(app, ["memory", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "add", "update", "delete", "pin", "unpin", "archive", "restore", "events", "links", "search"):
+    for sub in (
+        "list",
+        "show",
+        "add",
+        "update",
+        "delete",
+        "pin",
+        "unpin",
+        "archive",
+        "restore",
+        "events",
+        "links",
+        "search",
+    ):
         assert sub in out
 
 

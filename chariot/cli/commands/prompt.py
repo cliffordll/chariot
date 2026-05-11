@@ -147,7 +147,7 @@ def _parse_layer_item(raw: str) -> Any:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             Renderer.die(f"layer 不是合法 JSON: {raw!r}\n{exc}")
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
     return _parse_layer_mapping(raw)
 
 
@@ -157,7 +157,7 @@ def _parse_layer_mapping(raw: str) -> dict[str, Any]:
     if not parts:
         Renderer.die(
             "layer 不能为空。\n"
-            "模板: --layer '{\"name\":\"base_system\",\"source\":\"user\",\"content\":\"...\"}'\n"
+            '模板: --layer \'{"name":"base_system","source":"user","content":"..."}\'\n'
             "或: --layer 'name=base_system,source=user,content=...'",
         )
         raise SystemExit(1)
@@ -168,8 +168,7 @@ def _parse_layer_mapping(raw: str) -> dict[str, Any]:
             key, _, value = part.partition(":")
         else:
             Renderer.die(
-                "layer 必须是 JSON 对象，或 key=value / key:value 形式。\n"
-                f"收到: {raw!r}",
+                f"layer 必须是 JSON 对象，或 key=value / key:value 形式。\n收到: {raw!r}",
             )
             raise SystemExit(1)
         key = key.strip()
@@ -252,7 +251,11 @@ async def _versions(name: str | None) -> None:
         )
         for entry in versions
     ]
-    Renderer.table(["version", "active", "layers", "created_at", "updated_at"], rows, title=f"versions of {bundle.name}")
+    Renderer.table(
+        ["version", "active", "layers", "created_at", "updated_at"],
+        rows,
+        title=f"versions of {bundle.name}",
+    )
 
 
 @prompt_app.command("version", help="查看某个 bundle 的指定版本")
@@ -398,7 +401,7 @@ def update_cmd(
     description: Annotated[
         str,
         typer.Option("--description", "-d", help="新的 bundle 说明"),
-    ] = _MISSING,
+    ] = _MISSING,  # type: ignore[assignment]
     layers: Annotated[
         list[str],
         typer.Option(

@@ -14,7 +14,7 @@ from chariot.sidecar.methods import MethodBase
 
 
 class ConversationMethods(MethodBase):
-    """conversation CRUD method handlers(list_conversations / get_conversation / rename_conversation / delete_conversation)。"""
+    """conversation CRUD method handlers(list_conversations / get_conversation / rename_conversation / delete_conversation)。"""  # noqa: E501
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`list_conversations`:按 created_at 降序列所有 conversation(简略字段)。

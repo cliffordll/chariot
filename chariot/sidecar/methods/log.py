@@ -35,9 +35,7 @@ class LogMethods(MethodBase):
         since = self._parse_datetime(params, key="since")
         until = self._parse_datetime(params, key="until")
         async with self._session() as session:
-            entries = await LogRepo(session).list_logs(
-                limit=limit, offset=offset, since=since, until=until
-            )
+            entries = await LogRepo(session).list_logs(limit=limit, offset=offset, since=since, until=until)
         return {"logs": [self._serialize(e) for e in entries]}
 
     @classmethod

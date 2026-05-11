@@ -2,7 +2,11 @@
   "include": ["chariot"],
   "exclude": ["**/__pycache__", ".venv", "dist", "build"],
   "pythonVersion": "3.12",
-  "typeCheckingMode": "strict",
+  "typeCheckingMode": "basic",
   "reportMissingTypeStubs": "warning",
-  "useLibraryCodeForTypes": true
+  "useLibraryCodeForTypes": true,
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none"
 }

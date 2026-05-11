@@ -36,10 +36,9 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from ulid import ULID
-
 from sqlalchemy import Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from ulid import ULID
 
 LogStatus = Literal["ok", "error", "timeout"]
 

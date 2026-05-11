@@ -29,7 +29,9 @@ def entry() -> ToolEntry:
 
 
 @pytest.mark.asyncio
-async def test_list_show_probe_tool_methods(service: ToolService, entry: ToolEntry, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_show_probe_tool_methods(
+    service: ToolService, entry: ToolEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def fake_list_entries(self):  # type: ignore[no-untyped-def]
         return [entry]
 
@@ -50,4 +52,3 @@ async def test_list_show_probe_tool_methods(service: ToolService, entry: ToolEnt
     probed = await service.probe_entry(object(), name="http_get")
     assert probed["ok"] is True
     assert probed["error"] is None
-

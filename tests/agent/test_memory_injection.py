@@ -59,7 +59,4 @@ async def test_memory_is_injected_into_context_and_prompt(agent: AIAgent) -> Non
     assert memory_state["entries"][0]["text"] == "Reply in Chinese."
     assert memory_state["policy"]["name"] == "default_memory_policy"
     assert prompt_trace is not None
-    assert any(
-        ref["layer"] == "memory" and ref["present"] is True
-        for ref in prompt_trace.source_refs
-    )
+    assert any(ref["layer"] == "memory" and ref["present"] is True for ref in prompt_trace.source_refs)

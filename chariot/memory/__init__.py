@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Static-checker visibility for the names served lazily by __getattr__.
+    from chariot.memory.capture import MemoryCaptureCandidate, MemoryCaptureService
+    from chariot.memory.policy import MemoryPolicy
+    from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
+    from chariot.repos.memory_repo import MemoryRepo
 
 __all__ = [
     "MemoryCaptureCandidate",
@@ -27,13 +34,16 @@ def __getattr__(name: str) -> Any:
             "MemoryCaptureCandidate": MemoryCaptureCandidate,
             "MemoryCaptureService": MemoryCaptureService,
         }[name]
-    if name in {"MemoryEntry", "MemoryEventEntry", "MemoryLinkEntry", "MemoryRepo"}:
-        from chariot.repos.memory_repo import MemoryEntry, MemoryEventEntry, MemoryLinkEntry, MemoryRepo
+    if name in {"MemoryEntry", "MemoryEventEntry", "MemoryLinkEntry"}:
+        from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
 
         return {
             "MemoryEntry": MemoryEntry,
             "MemoryEventEntry": MemoryEventEntry,
             "MemoryLinkEntry": MemoryLinkEntry,
-            "MemoryRepo": MemoryRepo,
         }[name]
+    if name == "MemoryRepo":
+        from chariot.repos.memory_repo import MemoryRepo
+
+        return MemoryRepo
     raise AttributeError(name)

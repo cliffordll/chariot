@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from chariot.memory.policy import MemoryPolicy
-from chariot.repos.memory_repo import MemoryEntry
+from chariot.models.memory import MemoryEntry
 
 
 def _entry(entry_id: str, text: str, *, pinned: bool = False) -> MemoryEntry:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return MemoryEntry(
         id=entry_id,
         kind="preference",

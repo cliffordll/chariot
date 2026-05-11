@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -200,19 +199,21 @@ class TestRequestNormalization:
 
 
 class TestStatelessPath:
-    async def test_no_session_opened(self) -> None:
-        """无 conversation_id → AIAgent.run_chat 不调 sessionmaker。"""
+    async def test_no_sessionmaker_still_runs(self) -> None:
+        """无 conversation_id + sessionmaker=None → stateless 路径仍能正常跑通。
+
+        早期设计是"stateless = 不调 sessionmaker",后来引入 prompt bundle /
+        memory / trace 后 stateless 在 sessionmaker 存在时也会用它(只是不进
+        conversation lock)。这条测试只验证 sessionmaker=None 时核心流不挂。
+        """
         provider = _CapturingProvider("p")
-        sm_mock = AsyncMock()  # 任何调用都失败/记录
-        agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=sm_mock)
+        agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=None)
 
         req = ChatRequest(
             provider_name="p",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
-        # sessionmaker 没被调
-        assert sm_mock.call_count == 0
         # 流正常收尾(stream_done 或 message_stop 末尾)
         kinds = [ev.kind for ev in events]
         assert "stream_done" in kinds or "message_stop" in kinds
@@ -257,9 +258,7 @@ class TestBootstrapProviderOverrides:
     """
 
     @pytest.fixture(autouse=True)
-    async def _seed_anthropic_entry(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> AsyncIterator[Path]:
+    async def _seed_anthropic_entry(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Path]:
         """tmp DB 装一个 anthropic entry,yield db_path。"""
         from chariot.database.session import dispose_db
         from chariot.repos.provider_repo import ProviderRepo
@@ -309,9 +308,7 @@ class TestBootstrapProviderOverrides:
         provider = agent.providers["claude"]
         assert provider._spec.base_url == "https://override.api"  # type: ignore[attr-defined]
 
-    async def test_overrides_keyed_by_other_provider_ignored(
-        self, _seed_anthropic_entry: Path
-    ) -> None:
+    async def test_overrides_keyed_by_other_provider_ignored(self, _seed_anthropic_entry: Path) -> None:
         """overrides keyed 到不存在的 entry → 被忽略,不影响现有 entry。"""
         agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,

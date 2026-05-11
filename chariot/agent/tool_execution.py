@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from chariot.agent.chat_event import ChatEvent
 
-if False:  # pragma: no cover
+if TYPE_CHECKING:
     from chariot.tools.base import BaseTool
 
 
 class ToolExecutionService:
     """Execute tool calls behind one stable call-site."""
 
-    def __init__(self, tools: dict[str, "BaseTool"]) -> None:
+    def __init__(self, tools: dict[str, BaseTool]) -> None:
         self._tools = tools
 
     async def execute_tool_call(
@@ -38,9 +38,7 @@ class ToolExecutionService:
                 is_error=True,
             )
 
-        safe_input: dict[str, Any] = (
-            cast(dict[str, Any], tool_input) if isinstance(tool_input, dict) else {}
-        )
+        safe_input: dict[str, Any] = cast(dict[str, Any], tool_input) if isinstance(tool_input, dict) else {}
         try:
             result_block = await tool.execute(safe_input)
         except Exception as e:

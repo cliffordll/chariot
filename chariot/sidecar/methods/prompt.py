@@ -6,7 +6,7 @@ from typing import Any
 
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
-from chariot.sidecar.services import PromptService
+from chariot.sidecar.services import PromptApi
 
 _MISSING = object()
 
@@ -14,7 +14,7 @@ _MISSING = object()
 class PromptMethods(MethodBase):
     def __init__(self, runtime) -> None:  # type: ignore[no-untyped-def]
         super().__init__(runtime)
-        self._service = PromptService(runtime)
+        self._service = PromptApi(runtime)
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx

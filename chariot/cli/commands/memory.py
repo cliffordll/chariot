@@ -36,10 +36,10 @@ def _parse_meta(raw: str) -> dict[str, Any] | None:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         Renderer.die(f"meta must be valid JSON: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if not isinstance(data, dict):
         Renderer.die("meta must be a JSON object")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     return data
 
 
@@ -162,14 +162,14 @@ def restore_cmd(
 
 @memory_app.command("events", help="列出 memory events")
 def events_cmd(
-    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory") ] = "",
+    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory")] = "",
 ) -> None:
     asyncio.run(_events(memory_id or None))
 
 
 @memory_app.command("links", help="列出 memory links")
 def links_cmd(
-    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory") ] = "",
+    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory")] = "",
 ) -> None:
     asyncio.run(_links(memory_id or None))
 
@@ -352,10 +352,7 @@ async def _events(memory_id: str | None) -> None:
     if not entries:
         Renderer.out("(没有 memory events)")
         return
-    rows = [
-        (event.memory_id, event.event_type, _fmt_dt(event.created_at))
-        for event in entries
-    ]
+    rows = [(event.memory_id, event.event_type, _fmt_dt(event.created_at)) for event in entries]
     Renderer.table(["memory", "event", "created_at"], rows, title="memory events")
 
 
@@ -365,10 +362,7 @@ async def _links(memory_id: str | None) -> None:
     if not entries:
         Renderer.out("(没有 memory links)")
         return
-    rows = [
-        (link.memory_id, link.link_type, link.link_value, _fmt_dt(link.created_at))
-        for link in entries
-    ]
+    rows = [(link.memory_id, link.link_type, link.link_value, _fmt_dt(link.created_at)) for link in entries]
     Renderer.table(["memory", "type", "value", "created_at"], rows, title="memory links")
 
 
@@ -378,10 +372,7 @@ async def _search(query: str) -> None:
     if not entries:
         Renderer.out("(没有匹配的 memory)")
         return
-    rows = [
-        (entry.id, entry.kind, "yes" if entry.pinned else "no", _truncate(entry.text, 72))
-        for entry in entries
-    ]
+    rows = [(entry.id, entry.kind, "yes" if entry.pinned else "no", _truncate(entry.text, 72)) for entry in entries]
     Renderer.table(["id", "kind", "pinned", "text"], rows, title=f"memory search: {query}")
 
 

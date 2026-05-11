@@ -22,6 +22,4 @@ def test_parse_option_value_accepts_empty_array() -> None:
 
 
 def test_parse_kv_uses_array_fallback() -> None:
-    assert _parse_kv(["allowed_domains=[example.com]"]) == {
-        "allowed_domains": ["example.com"]
-    }
+    assert _parse_kv(["allowed_domains=[example.com]"]) == {"allowed_domains": ["example.com"]}

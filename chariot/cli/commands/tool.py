@@ -73,7 +73,12 @@ async def _show(name: str) -> None:
         rows.append((f"options.{k}", _stringify(v)))
 
     schema = _tool_schema(entry)
-    rows.append(("schema", json.dumps(schema, ensure_ascii=False, indent=2) if schema else "(invalid config)"))
+    rows.append(
+        (
+            "schema",
+            json.dumps(schema, ensure_ascii=False, indent=2) if schema else "(invalid config)",
+        )
+    )
     Renderer.table(["field", "value"], rows, title=f"tool {entry.name}")
 
 
@@ -191,7 +196,7 @@ def _parse_option_value(raw: str) -> Any:
 def _kv_error_message(raw: str, *, json_like: bool = False) -> str:
     msg = (
         f"-o must be key=value or comma-separated key:value pairs: {raw!r}\n"
-        "template: chariot tool config http_get -o allowed_domains=[\"example.com\"]\n"
+        'template: chariot tool config http_get -o allowed_domains=["example.com"]\n'
         "compat: -o key:value,key:value,..."
     )
     if json_like:

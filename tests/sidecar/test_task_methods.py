@@ -14,11 +14,11 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
+from chariot.models.task import TaskCreate, TaskRunCreate
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.task import TaskService
 from chariot.sidecar.methods import register_methods
-from chariot.tasks.models import TaskCreate, TaskRunCreate
-from chariot.tasks.service import TaskService
 
 
 def _make_reader(data: bytes) -> asyncio.StreamReader:
@@ -42,9 +42,7 @@ class _Writer:
         return [json.loads(line) for line in self.buf.split(b"\n") if line.strip()]
 
 
-async def _call(
-    server: JsonRpcServer, method: str, params: dict[str, Any] | None = None
-) -> dict[str, Any]:
+async def _call(server: JsonRpcServer, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "method": method}
     if params is not None:
         body["params"] = params
@@ -132,9 +130,7 @@ async def test_update_and_delete_agent(server: JsonRpcServer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_and_get_task_include_runs_and_children(
-    server: JsonRpcServer, agent: AIAgent
-) -> None:
+async def test_list_tasks_and_get_task_include_runs_and_children(server: JsonRpcServer, agent: AIAgent) -> None:
     async with agent.session_maker() as session:
         repo = TaskRepo(session)
         await repo.create_agent_profile(name="planner", role="planner")

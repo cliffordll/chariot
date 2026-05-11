@@ -25,10 +25,10 @@ async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
 async def test_memory_migration_v13_tables_exist(session: AsyncSession) -> None:
     names = {"memories", "memory_events", "memory_links"}
     rows = (
-        await session.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-        )
-    ).scalars().all()
+        (await session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")))
+        .scalars()
+        .all()
+    )
     assert names.issubset(set(rows))
 
 

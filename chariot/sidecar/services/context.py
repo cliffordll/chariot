@@ -1,15 +1,16 @@
-"""Context service for sidecar context-query methods."""
+"""Context API surface for sidecar context-query methods."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+from chariot.models.context import ContextSnapshotEntry, ContextTraceEntry
 from chariot.repos.context_repo import ContextRepo
+from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
-class ContextService:
+class ContextApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
@@ -56,7 +57,7 @@ class ContextService:
         return entry
 
     @staticmethod
-    def _snapshot_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _snapshot_to_dict(entry: ContextSnapshotEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "conversation_id": entry.conversation_id,
@@ -70,7 +71,7 @@ class ContextService:
         }
 
     @staticmethod
-    def _trace_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _trace_to_dict(entry: ContextTraceEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "snapshot_id": entry.snapshot_id,

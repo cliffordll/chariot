@@ -73,9 +73,7 @@ class AnthropicProvider(BaseProvider):
     # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发);
     # `provider_name` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
     # 用 `self.config.model` 显式写入)
-    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"provider_name", "conversation_id", "agent_id"}
-    )
+    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"provider_name", "conversation_id", "agent_id"})
 
     def __init__(
         self,
@@ -246,9 +244,7 @@ class AnthropicProvider(BaseProvider):
         """
         full = dataclasses.asdict(req)
         body: dict[str, Any] = {
-            k: v
-            for k, v in full.items()
-            if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
+            k: v for k, v in full.items() if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
         }
         body["model"] = req.model or self.config.model
         body["stream"] = True

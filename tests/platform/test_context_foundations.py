@@ -11,7 +11,7 @@ import pytest_asyncio
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
-from chariot.context.composer import build_snapshot
+from chariot.context.composer import ContextComposer
 from chariot.database.session import dispose_db
 from chariot.repos.context_repo import ContextRepo
 
@@ -46,7 +46,7 @@ async def test_context_repo_records_snapshot_and_trace(agent: AIAgent) -> None:
 
     async with agent.session_maker() as session:
         repo = ContextRepo(session)
-        snapshot = build_snapshot(
+        snapshot = ContextComposer.build_snapshot(
             req,
             provider_name="mock",
             model="mock-1",

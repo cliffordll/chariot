@@ -341,14 +341,14 @@ class TestProviderError:
 
 
 class TestProviderContractValidation:
-    async def test_invalid_event_sequence_yields_contract_error(
-        self, req: ChatRequest
-    ) -> None:
+    async def test_invalid_event_sequence_yields_contract_error(self, req: ChatRequest) -> None:
         loop = _make_loop(
-            [[
-                ChatEvent.message_start(message_id="msg_bad", model="scripted-1"),
-                ChatEvent.text_delta("oops", index=0),
-            ]]
+            [
+                [
+                    ChatEvent.message_start(message_id="msg_bad", model="scripted-1"),
+                    ChatEvent.text_delta("oops", index=0),
+                ]
+            ]
         )
 
         events = [ev async for ev in loop.stream_chat(req)]

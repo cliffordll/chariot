@@ -1,13 +1,10 @@
 """Context snapshot composition helpers."""
 
-from chariot.context.composer import (
-    ContextSlice,
-    ContextSnapshot,
-    build_snapshot,
-)
+from chariot.context.composer import ContextComposer
+from chariot.models.context import ContextSlice, ContextSnapshot
 
 __all__ = [
+    "ContextComposer",
     "ContextSlice",
     "ContextSnapshot",
-    "build_snapshot",
 ]

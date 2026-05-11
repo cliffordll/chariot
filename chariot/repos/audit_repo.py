@@ -30,11 +30,7 @@ class AuditRepo:
         self.session = session
 
     async def list_events(self, *, limit: int = 50) -> list[AuditEvent]:
-        stmt = (
-            select(AuditEventRow)
-            .order_by(AuditEventRow.created_at.desc(), AuditEventRow.id.desc())
-            .limit(limit)
-        )
+        stmt = select(AuditEventRow).order_by(AuditEventRow.created_at.desc(), AuditEventRow.id.desc()).limit(limit)
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self._row_to_event(row) for row in rows]
 

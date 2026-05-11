@@ -51,7 +51,10 @@ def test_parse_kv_rejects_json_blob(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(render.Renderer, "die", fake_die)
 
     with pytest.raises(RuntimeError):
-        _parse_kv(['{"model":"qwen2.5:1.5b","base_url":"http://127.0.0.1:52806","api_key":"EMPTY"}'], label='-o')
+        _parse_kv(
+            ['{"model":"qwen2.5:1.5b","base_url":"http://127.0.0.1:52806","api_key":"EMPTY"}'],
+            label="-o",
+        )
 
     assert seen
     assert "do not pass a whole JSON blob" in seen[0]

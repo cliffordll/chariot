@@ -88,9 +88,7 @@ class TestGenerateFieldShape:
         assert starts[0].content_block == {"type": "text", "text": ""}
         assert starts[0].index == 0
 
-    async def test_message_delta_stop_reason(
-        self, provider: MockProvider, req: ChatRequest
-    ) -> None:
+    async def test_message_delta_stop_reason(self, provider: MockProvider, req: ChatRequest) -> None:
         events = [ev async for ev in provider.generate(req)]
         deltas = [e for e in events if e.kind == "message_delta"]
         assert len(deltas) == 1

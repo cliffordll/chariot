@@ -165,8 +165,6 @@ class TestReleaseAndClear:
 class TestConcurrent:
     async def test_concurrent_same_session_key_no_double_build(self, db_path: Path) -> None:
         """N coroutine 并发 reserve(same key)→ 全部拿到同一实例。"""
-        results = await asyncio.gather(
-            *(AgentRegistry.reserve("shared", db_path=db_path) for _ in range(15))
-        )
+        results = await asyncio.gather(*(AgentRegistry.reserve("shared", db_path=db_path) for _ in range(15)))
         assert all(r is results[0] for r in results)
         assert AgentRegistry.size() == 1

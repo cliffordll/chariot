@@ -143,6 +143,7 @@ def test_request_passes_conversation_id_through() -> None:
     req = ctx._build_request()
     assert req.conversation_id == ulid
 
+
 @pytest.mark.asyncio
 async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
     db_path = tmp_path / "chariot.db"
@@ -165,4 +166,3 @@ async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
     assert logs[0].status == "ok"
     assert logs[0].input_tokens == 3
     assert logs[0].output_tokens == 7
-

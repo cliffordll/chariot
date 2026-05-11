@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +54,14 @@ export default function Jobs() {
   const [state, setState] = useState<JobsState>({ kind: "loading" });
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [createOpen, setCreateOpen] = useState(false);
+  const [removeJob, setRemoveJob] = useState<ScheduledJob | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const detailRef = useRef(detail);
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   const loadJobDetail = useCallback(async (name: string) => {
     setDetail({ kind: "loading", name });
@@ -62,11 +79,12 @@ export default function Jobs() {
     try {
       const [{ jobs }, { agents }] = await Promise.all([api.listJobs(), api.listAgents()]);
       setState({ kind: "ok", jobs, agents });
-      const selected =
-        preferredJob ??
-        (detail.kind === "ok" ? detail.job.name : detail.kind === "loading" || detail.kind === "err" ? detail.name : null) ??
-        jobs[0]?.name ??
+      const d = detailRef.current;
+      const currentSelected =
+        d.kind === "ok" ? d.job.name :
+        d.kind === "loading" || d.kind === "err" ? d.name :
         null;
+      const selected = preferredJob ?? currentSelected ?? jobs[0]?.name ?? null;
       if (selected) {
         void loadJobDetail(selected);
       } else {
@@ -77,7 +95,7 @@ export default function Jobs() {
       setState({ kind: "err", message });
       setDetail({ kind: "idle" });
     }
-  }, [detail, loadJobDetail]);
+  }, [loadJobDetail]);
 
   const runJobAction = useCallback(async (name: string, action: "enable" | "disable" | "run") => {
     setNotice(null);
@@ -118,7 +136,12 @@ export default function Jobs() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
         <JobsListCard state={state} selectedName={detail.kind === "ok" ? detail.job.name : detail.kind === "loading" || detail.kind === "err" ? detail.name : null} onSelect={loadJobDetail} />
-        <JobDetailCard detail={detail} onAction={runJobAction} onSaved={(name) => void load(name)} />
+        <JobDetailCard
+          detail={detail}
+          onAction={runJobAction}
+          onSaved={(name) => void load(name)}
+          onRemove={(job) => setRemoveJob(job)}
+        />
       </div>
 
       {createOpen && (
@@ -131,6 +154,43 @@ export default function Jobs() {
           }}
         />
       )}
+
+      <AlertDialog open={!!removeJob} onOpenChange={(open) => { if (!open && !removing) setRemoveJob(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove scheduled job</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeJob ? `Permanently delete job "${removeJob.name}"? This cannot be undone.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={removing}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!removeJob) return;
+                setRemoving(true);
+                try {
+                  await api.deleteJob(removeJob.name);
+                  const name = removeJob.name;
+                  detailRef.current = { kind: "idle" };
+                  setDetail({ kind: "idle" });
+                  setRemoveJob(null);
+                  setNotice(`Removed job ${name}.`);
+                  void load();
+                } catch (err) {
+                  setNotice(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setRemoving(false);
+                }
+              }}
+            >
+              {removing ? "Removing..." : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -185,10 +245,12 @@ function JobDetailCard({
   detail,
   onAction,
   onSaved,
+  onRemove,
 }: {
   detail: DetailState;
   onAction: (name: string, action: "enable" | "disable" | "run") => void;
   onSaved: (name: string) => void;
+  onRemove: (job: ScheduledJob) => void;
 }) {
   if (detail.kind === "idle") return <Panel title="Job Detail">Select a job to inspect runs and settings.</Panel>;
   if (detail.kind === "loading") return <Panel title="Job Detail">Loading {detail.name}...</Panel>;
@@ -215,6 +277,7 @@ function JobDetailCard({
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => onAction(job.name, "enable")}>Enable</Button>
             <Button variant="outline" size="sm" onClick={() => onAction(job.name, "disable")}>Disable</Button>
+            <Button variant="outline" size="sm" onClick={() => onRemove(job)}>Remove</Button>
             <Button size="sm" onClick={() => onAction(job.name, "run")}>Run now</Button>
           </div>
         </div>

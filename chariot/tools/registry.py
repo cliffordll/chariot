@@ -75,9 +75,7 @@ class ToolRegistry:
             builder = cls._builders[entry.type]
         except KeyError as e:
             known = ", ".join(cls.known_types()) or "(空)"
-            raise ConfigError(
-                f"未知 tool type: {entry.type!r} (tool name={entry.name!r});已注册:{known}"
-            ) from e
+            raise ConfigError(f"未知 tool type: {entry.type!r} (tool name={entry.name!r});已注册:{known}") from e
         return builder(entry)
 
     @classmethod

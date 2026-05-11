@@ -128,9 +128,7 @@ class AgentLoop:
                 target["input"] = {"_invalid_input_json": json_str}
 
     @staticmethod
-    def _find_block_by_index(
-        blocks: list[dict[str, Any]], index: int | None
-    ) -> dict[str, Any] | None:
+    def _find_block_by_index(blocks: list[dict[str, Any]], index: int | None) -> dict[str, Any] | None:
         if index is None:
             return None
         for entry in blocks:
@@ -181,9 +179,7 @@ class AgentLoop:
             block["is_error"] = True
         return block
 
-    async def _execute_tool_calls(
-        self, assistant_blocks: list[dict[str, Any]]
-    ) -> list[ChatEvent]:
+    async def _execute_tool_calls(self, assistant_blocks: list[dict[str, Any]]) -> list[ChatEvent]:
         results: list[ChatEvent] = []
         for entry in assistant_blocks:
             block = entry["block"]

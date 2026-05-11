@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.agent.config import ConfigError
 from chariot.agent.chat_request import ChatRequest
+from chariot.agent.config import ConfigError
 from chariot.database.models import PromptBundleRow, PromptTraceRow, PromptVersionRow
-from chariot.prompt.composer import build_snapshot
-
+from chariot.models.prompt import PromptBundleEntry, PromptTraceEntry, PromptVersionEntry
+from chariot.prompt.composer import PromptComposer
 
 DEFAULT_BUNDLE_NAME = "default"
 DEFAULT_VERSION = "v1"
@@ -42,47 +40,6 @@ DEFAULT_BUNDLE_LAYERS: list[dict[str, Any]] = [
     {"name": "tool_choice", "source": "ChatRequest.tool_choice", "content": None},
     {"name": "thinking", "source": "ChatRequest.thinking", "content": None},
 ]
-
-
-@dataclass(frozen=True)
-class PromptBundleEntry:
-    id: str
-    name: str
-    description: str | None
-    layers: list[dict[str, Any]]
-    is_active: bool
-    version_count: int
-    active_version: str | None
-    created_at: datetime
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class PromptVersionEntry:
-    id: str
-    bundle_id: str
-    bundle_name: str
-    version: str
-    spec: dict[str, Any]
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class PromptTraceEntry:
-    id: str
-    bundle_id: str
-    bundle_name: str
-    version_id: str
-    version: str
-    conversation_id: str | None
-    provider_name: str
-    model: str | None
-    request: dict[str, Any]
-    source_refs: list[dict[str, Any]]
-    prompt_size: int
-    created_at: datetime
 
 
 class PromptRepo:
@@ -180,7 +137,9 @@ class PromptRepo:
         )
 
     async def get_active_version(self, bundle_name: str | None = None) -> PromptVersionEntry | None:
-        bundle = await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self.get_active_bundle()
+        bundle = (
+            await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self.get_active_bundle()
+        )
         if bundle is None:
             return None
         stmt = select(PromptVersionRow).where(
@@ -338,7 +297,9 @@ class PromptRepo:
         memory_policy: dict[str, Any] | None = None,
     ) -> PromptTraceEntry:
         await self.seed_if_empty()
-        bundle = await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self._active_bundle_row()
+        bundle = (
+            await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self._active_bundle_row()
+        )
         if bundle is None:
             bundle = await self._bundle_row_by_name(DEFAULT_BUNDLE_NAME)
         if bundle is None:
@@ -350,7 +311,7 @@ class PromptRepo:
         if ver is None:
             version_name = version or self.DEFAULT_VERSION
             ver = await self._create_version(bundle.id, bundle.name, version_name)
-        snapshot = build_snapshot(
+        snapshot = PromptComposer.build_snapshot(
             req,
             provider_name=provider_name,
             model=model,
@@ -388,7 +349,11 @@ class PromptRepo:
             version=version,
             spec=self._serialize_json(
                 "spec",
-                {"bundle": bundle_name, "version": version, "layers": layers or DEFAULT_BUNDLE_LAYERS},
+                {
+                    "bundle": bundle_name,
+                    "version": version,
+                    "layers": layers or DEFAULT_BUNDLE_LAYERS,
+                },
             ),
             is_active=1 if activate else 0,
         )
@@ -401,9 +366,7 @@ class PromptRepo:
         stmt = select(PromptVersionRow.version).where(PromptVersionRow.bundle_id == bundle_id)
         versions = [row[0] for row in (await self.session.execute(stmt)).all()]
         numbers = [
-            int(v[1:])
-            for v in versions
-            if isinstance(v, str) and len(v) > 1 and v[0] == "v" and v[1:].isdigit()
+            int(v[1:]) for v in versions if isinstance(v, str) and len(v) > 1 and v[0] == "v" and v[1:].isdigit()
         ]
         return f"v{(max(numbers) if numbers else 0) + 1}"
 
@@ -456,33 +419,6 @@ class PromptRepo:
             raise ConfigError(f"prompt version {bundle_id!r}:{version!r} not found")
         target.is_active = 1
         return target
-
-    @staticmethod
-    def render_layers_text(
-        layers: list[dict[str, Any]],
-        *,
-        existing_system: str | None = None,
-        memory_entries: list[dict[str, Any]] | None = None,
-        memory_policy: dict[str, Any] | None = None,
-    ) -> str | None:
-        parts: list[str] = []
-        for layer in layers:
-            content = layer.get("content")
-            if layer.get("name") == "memory" and memory_entries is not None:
-                content = {
-                    "policy": memory_policy or {"version": "v1", "name": "default_memory_policy"},
-                    "entries": memory_entries,
-                }
-            if content is None:
-                continue
-            if not isinstance(content, str):
-                content = json.dumps(content, ensure_ascii=False)
-            parts.append(f"[{layer.get('name', 'layer')}]\n{content}")
-        if existing_system:
-            parts.append(f"[request.system]\n{existing_system}")
-        if not parts:
-            return existing_system
-        return "\n\n".join(parts)
 
     @staticmethod
     def _bundle_to_entry(

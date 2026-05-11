@@ -21,7 +21,7 @@ class _StubTool(BaseTool):
         self.last_input: dict[str, Any] | None = None
 
     @classmethod
-    def create(cls, entry: Any) -> "_StubTool":
+    def create(cls, entry: Any) -> _StubTool:
         return cls("stub")
 
     def schema(self) -> dict[str, Any]:

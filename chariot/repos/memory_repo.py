@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
-from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import delete as sa_delete
@@ -14,36 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chariot.agent.config import ConfigError
 from chariot.database.models import MemoryEventRow, MemoryLinkRow, MemoryRow
 from chariot.memory.policy import MemoryPolicy
-
-
-@dataclass(frozen=True)
-class MemoryEntry:
-    id: str
-    kind: str
-    text: str
-    meta: dict[str, Any]
-    pinned: bool
-    archived: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class MemoryEventEntry:
-    id: str
-    memory_id: str
-    event_type: str
-    payload: dict[str, Any]
-    created_at: datetime
-
-
-@dataclass(frozen=True)
-class MemoryLinkEntry:
-    id: str
-    memory_id: str
-    link_type: str
-    link_value: str
-    created_at: datetime
+from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
 
 
 class MemoryRepo:
@@ -313,9 +282,7 @@ class MemoryRepo:
             link_value = str(link.get("link_value") or link.get("value") or "").strip()
             if not link_type or not link_value:
                 raise ConfigError("memory link requires link_type and link_value")
-            self.session.add(
-                MemoryLinkRow(memory_id=memory_id, link_type=link_type, link_value=link_value)
-            )
+            self.session.add(MemoryLinkRow(memory_id=memory_id, link_type=link_type, link_value=link_value))
         await self.session.flush()
 
     async def _record_event(self, memory_id: str, event_type: str, payload: dict[str, Any]) -> None:

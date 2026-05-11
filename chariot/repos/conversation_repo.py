@@ -274,18 +274,14 @@ class ConversationRepo:
         数组),tool_use / tool_result 嵌在对应 role 的 content blocks 里。
         Agent 把这个数组 prepend 到客户端这次发的 body.messages 前再调 Model。
         """
-        stmt = (
-            select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
-        )
+        stmt = select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
         rows = (await self.session.execute(stmt)).scalars().all()
         return [{"role": r.role, "content": self._deserialize_content(r.content)} for r in rows]
 
     async def list_messages(self, conversation_id: str) -> list[MessageRow]:
         """返原始 ORM rows(给 admin/conversations/{id} 详情用 —— 需要 seq /
         provider_name / created_at 等元数据)。"""
-        stmt = (
-            select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
-        )
+        stmt = select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
     # ---- 内部 ----

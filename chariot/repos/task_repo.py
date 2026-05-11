@@ -12,15 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
 from chariot.database.models import AgentProfileRow, JobRunRow, ScheduledJobRow, TaskRow, TaskRunRow
-from chariot.tasks.models import (
-    AgentProfile,
-    JobRunRecord,
-    ScheduledJob,
-    Task,
-    TaskCreate,
-    TaskRun,
-    TaskRunCreate,
-)
+from chariot.models.agent import AgentProfile
+from chariot.models.job import JobRunRecord, ScheduledJob
+from chariot.models.task import Task, TaskCreate, TaskRun, TaskRunCreate
 
 
 class TaskRepo:
@@ -375,7 +369,7 @@ class TaskRepo:
 
     @classmethod
     def _row_to_task(cls, row: TaskRow) -> Task:
-        from chariot.tasks.models import TaskKind, TaskStatus
+        from chariot.models.task import TaskKind, TaskStatus
 
         return Task(
             id=row.id,
@@ -393,7 +387,7 @@ class TaskRepo:
 
     @classmethod
     def _row_to_run(cls, row: TaskRunRow) -> TaskRun:
-        from chariot.tasks.models import TaskRunStatus
+        from chariot.models.task import TaskRunStatus
 
         return TaskRun(
             id=row.id,

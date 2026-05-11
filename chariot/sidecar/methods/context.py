@@ -6,13 +6,14 @@ from typing import Any
 
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
-from chariot.sidecar.services import ContextService
+from chariot.sidecar.runtime import SidecarRuntime
+from chariot.sidecar.services import ContextApi
 
 
 class ContextMethods(MethodBase):
-    def __init__(self, runtime) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, runtime: SidecarRuntime) -> None:
         super().__init__(runtime)
-        self._service = ContextService(runtime)
+        self._service = ContextApi(runtime)
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx

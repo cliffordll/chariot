@@ -72,7 +72,11 @@ async def _list() -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["id", "conversation", "provider", "model", "size", "created_at"], rows, title="context snapshots")
+    Renderer.table(
+        ["id", "conversation", "provider", "model", "size", "created_at"],
+        rows,
+        title="context snapshots",
+    )
 
 
 async def _traces(conversation_id: str | None, *, limit: int, offset: int) -> None:
@@ -116,8 +120,12 @@ async def _inspect(context_id: str) -> None:
         {
             "snapshot": snapshot["id"] if snapshot is not None else "-",
             "trace": trace["id"] if trace is not None else "-",
-            "conversation": snapshot["conversation_id"] if snapshot is not None else (trace["conversation_id"] if trace is not None else "-"),
-            "provider": snapshot["provider_name"] if snapshot is not None else (trace["provider_name"] if trace is not None else "-"),
+            "conversation": snapshot["conversation_id"]
+            if snapshot is not None
+            else (trace["conversation_id"] if trace is not None else "-"),
+            "provider": snapshot["provider_name"]
+            if snapshot is not None
+            else (trace["provider_name"] if trace is not None else "-"),
             "model": snapshot["model"] if snapshot is not None else (trace["model"] if trace is not None else "-"),
             "size": snapshot["context_size"] if snapshot is not None else "-",
         }

@@ -114,8 +114,8 @@ class AIAgent:
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
-        from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.prompt_repo import PromptRepo
+        from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
 
@@ -135,9 +135,7 @@ class AIAgent:
             )
             for entry in cfg.providers
         }
-        tools: dict[str, BaseTool] = {
-            entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
-        }
+        tools: dict[str, BaseTool] = {entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools}
 
         return cls(providers=providers, tools=tools, sessionmaker=sm)
 
@@ -183,8 +181,7 @@ class AIAgent:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
                 error_message=(
-                    f"unknown provider entry {req.provider_name!r}; "
-                    f"known: {sorted(self._providers.keys())}"
+                    f"unknown provider entry {req.provider_name!r}; known: {sorted(self._providers.keys())}"
                 ),
             )
             return
@@ -196,9 +193,7 @@ class AIAgent:
             async for event in self._run_stateless_chat(req, provider):
                 yield event
 
-    async def _run_stateless_chat(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
+    async def _run_stateless_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
@@ -212,6 +207,8 @@ class AIAgent:
                     memory_entries,
                     memory_policy,
                 )
+        else:
+            req = self._normalize_request(req, provider)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
@@ -240,13 +237,12 @@ class AIAgent:
                     session,
                     req=req,
                     provider=provider,
+                    memory_policy=memory_policy,
                     error_event=last_error_event,
                     prompt_trace_id=prompt_trace.id,
                 )
 
-    async def _run_stateful_chat(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
+    async def _run_stateful_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
         """有 conversation_id:开 session + 进 conversation lock + load history + AgentLoop。
 
         约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
@@ -265,9 +261,7 @@ class AIAgent:
         async with self._sessionmaker() as session:
             try:
                 async with ConversationLockManager.acquire(conversation_id, db_session=session):
-                    async for event in self._run_stateful_turn(
-                        req, conversation_id, provider, session
-                    ):
+                    async for event in self._run_stateful_turn(req, conversation_id, provider, session):
                         yield event
             except ConversationLockTimeout as e:
                 yield ChatEvent.error_event(
@@ -284,9 +278,9 @@ class AIAgent:
     ) -> AsyncIterator[ChatEvent]:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
-        from chariot.context.composer import build_snapshot as build_context_snapshot
-        from chariot.repos.conversation_repo import ConversationRepo
+        from chariot.context.composer import ContextComposer
         from chariot.repos.context_repo import ContextRepo
+        from chariot.repos.conversation_repo import ConversationRepo
 
         repo = ConversationRepo(session)
         await repo.ensure_exists(conversation_id)
@@ -296,7 +290,7 @@ class AIAgent:
         memory_policy = MemoryPolicy()
         memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
         context_snapshot = await context_repo.record_snapshot(
-            build_context_snapshot(
+            ContextComposer.build_snapshot(
                 req,
                 provider_name=provider.config.name,
                 model=provider.config.model,
@@ -364,11 +358,7 @@ class AIAgent:
         for msg in req.messages:
             if msg.role != "user":
                 continue
-            content = (
-                msg.content
-                if isinstance(msg.content, list)
-                else [{"type": "text", "text": msg.content}]
-            )
+            content = msg.content if isinstance(msg.content, list) else [{"type": "text", "text": msg.content}]
             await repo.append_message(conversation_id, role="user", content=content)
 
     @staticmethod
@@ -416,14 +406,16 @@ class AIAgent:
         """Compose the active prompt bundle into `system`, then normalize request fields."""
         composed = req
         if self._sessionmaker is not None:
+            from chariot.prompt.composer import PromptComposer
             from chariot.repos.prompt_repo import PromptRepo
 
             async with self._sessionmaker() as session:
                 active_bundle = await PromptRepo(session).get_active_bundle()
                 if active_bundle is not None:
-                    system = PromptRepo.render_layers_text(
+                    existing_system = req.system if isinstance(req.system, str) else None
+                    system = PromptComposer.render_layers_text(
                         active_bundle.layers,
-                        existing_system=req.system,
+                        existing_system=existing_system,
                         memory_entries=memory_entries,
                         memory_policy=memory_policy.describe() if memory_policy is not None else None,
                     )

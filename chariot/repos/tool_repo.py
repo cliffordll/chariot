@@ -55,11 +55,7 @@ class ToolRepo:
 
     async def list_enabled(self) -> list[ToolEntry]:
         """只取 enabled=1 的 entries(Agent 装载时调)。"""
-        stmt = (
-            select(ToolRow)
-            .where(ToolRow.enabled == 1)
-            .order_by(ToolRow.created_at.asc(), ToolRow.id.asc())
-        )
+        stmt = select(ToolRow).where(ToolRow.enabled == 1).order_by(ToolRow.created_at.asc(), ToolRow.id.asc())
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self._row_to_entry(r) for r in rows]
 

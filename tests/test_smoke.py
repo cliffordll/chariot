@@ -12,7 +12,5 @@ from pathlib import Path
 def test_chariot_version() -> None:
     import chariot
 
-    pyproject = tomllib.loads(
-        (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
-    )
+    pyproject = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8"))
     assert chariot.__version__ == pyproject["project"]["version"]

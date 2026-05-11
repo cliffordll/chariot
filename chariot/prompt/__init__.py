@@ -1,5 +1,9 @@
-"""Prompt system helpers."""
+"""Prompt composition layer.
 
-from chariot.prompt.composer import PromptLayer, PromptSnapshot, build_snapshot
+Stateless composer utilities; business dataclasses live in
+`chariot.models.prompt`.
+"""
 
-__all__ = ["PromptLayer", "PromptSnapshot", "build_snapshot"]
+from chariot.prompt.composer import PromptComposer
+
+__all__ = ["PromptComposer"]

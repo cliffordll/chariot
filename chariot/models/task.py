@@ -1,7 +1,8 @@
-"""Core object model for task management.
+"""Task domain model.
 
-This module intentionally defines stable Python-side contracts first. The SQL
-schema and repo implementation can follow without changing the service surface.
+Stable Python-side contracts for tasks and task runs. SQL schema and repo
+implementation may evolve under these contracts without changing the
+service surface.
 """
 
 from __future__ import annotations
@@ -58,19 +59,6 @@ class TaskRunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-@dataclass(frozen=True)
-class AgentProfile:
-    name: str
-    role: str
-    prompt_bundle: str | None = None
-    tool_profile: str | None = None
-    provider_profile: str | None = None
-    budget: dict[str, Any] = field(default_factory=dict)
-    meta: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=_utcnow)
-    updated_at: datetime = field(default_factory=_utcnow)
 
 
 @dataclass(frozen=True)
@@ -145,27 +133,27 @@ class TaskRun:
         )
 
 
+# Delegation: 用 TaskService.delegate() 把"创建一组子 task 并保留父子关系"做成一次显式动作。
+# 不引入新执行能力 —— 实际创建子 task 仍走 TaskService.create_child_task。
 @dataclass(frozen=True)
-class ScheduledJob:
-    name: str
+class DelegatedTaskSpec:
     goal: str
-    cron: str
-    enabled: bool = True
     agent_profile: str | None = None
-    last_run_status: str | None = None
-    last_run_at: datetime | None = None
-    next_run_at: datetime | None = None
+    owner: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=_utcnow)
-    updated_at: datetime = field(default_factory=_utcnow)
 
 
 @dataclass(frozen=True)
-class JobRunRecord:
-    id: str
-    job_name: str
-    task_id: str | None = None
-    status: str = "queued"
-    error: str | None = None
-    started_at: datetime = field(default_factory=_utcnow)
-    finished_at: datetime | None = None
+class DelegationRequest:
+    parent_task_id: str
+    tasks: tuple[DelegatedTaskSpec, ...]
+    reason: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DelegationResult:
+    parent_task_id: str
+    child_task_ids: tuple[str, ...]
+    requested: int
+    created: int

@@ -1,25 +1,25 @@
-# Task Management Demo
+# 任务管理演示
 
-> Scope: `Milestone A6: Agent and task management`
-> Goal: provide a copy-pasteable test and demo flow for `agent profile`, `task`, `task run`, `delegation`, and `scheduled job`.
+> 范围:`Milestone A6: Agent and task management`
+> 目标:为 `agent profile`、`task`、`task run`、`delegation`、`scheduled job` 提供一份可直接复制粘贴的测试与演示流程。
 
-## Prerequisites
+## 前置准备
 
-Run from repo root:
+从仓库根目录运行:
 
 ```powershell
 uv sync
 ```
 
-If you want a clean local database for the CLI demo, remove the previous demo DB first:
+若需要为 CLI 演示准备一个干净的本地数据库,先清掉上次的 demo DB:
 
 ```powershell
 Remove-Item .tmp\chariot-a6-demo.db -ErrorAction SilentlyContinue
 ```
 
-## Automated Checks
+## 自动化检查
 
-Current A6 coverage is concentrated in these suites:
+当前 A6 覆盖集中在这几个测试套件:
 
 ```powershell
 uv run pytest tests/platform/test_foundations.py -q
@@ -27,20 +27,20 @@ uv run pytest tests/sidecar/test_task_methods.py -q
 uv run pytest tests/cli/test_task_commands.py tests/cli/test_commands.py -q
 ```
 
-If you want the main regression slice in one command:
+如果想用一条命令跑主回归切片:
 
 ```powershell
 uv run pytest tests/platform/test_foundations.py tests/sidecar/test_task_methods.py tests/cli/test_task_commands.py tests/cli/test_commands.py -q
 ```
 
-Expected result:
+期望结果:
 
-- All tests pass.
-- The suite covers agent CRUD, task CRUD, task run lifecycle, delegation, job CRUD, and manual job trigger.
+- 全部用例通过。
+- 套件覆盖 agent CRUD、task CRUD、task run 生命周期、delegation、job CRUD,以及 job 手工触发。
 
-## CLI Demo
+## CLI 演示
 
-Use a dedicated DB so the demo does not pollute your normal local state:
+用独立的 DB 走演示,避免污染日常本地状态:
 
 ```powershell
 $env:CHARIOT_DB_PATH = (Resolve-Path .).Path + "\.tmp\chariot-a6-demo.db"
@@ -49,7 +49,7 @@ New-Item -ItemType Directory -Force .tmp | Out-Null
 
 ### 1. Agent profile
 
-Create, inspect, update, and remove an agent profile:
+创建、查看、更新、删除一个 agent profile:
 
 ```powershell
 uv run chariot agent add --name planner --role planner --tool-profile default --provider-profile mock --budget '{"max_steps": 5}' --meta '{"team":"demo"}'
@@ -59,22 +59,22 @@ uv run chariot agent update planner --role executor --tool-profile default --met
 uv run chariot agent show planner
 ```
 
-Checkpoints:
+验收点:
 
-- `agent list` shows `planner`
-- `agent show planner` shows role, tool profile, provider profile, `budget`, and `meta`
-- after `update`, role becomes `executor`
+- `agent list` 能看到 `planner`。
+- `agent show planner` 能看到 role、tool profile、provider profile、`budget`、`meta`。
+- 执行 `update` 之后,role 变成 `executor`。
 
-### 2. Task and task runs
+### 2. Task 与 task run
 
-Create a task and walk through its run lifecycle:
+创建一个 task,走一遍 run 生命周期:
 
 ```powershell
 uv run chariot task create --goal "prepare release checklist" --agent-profile planner --owner user --meta '{"source":"demo"}'
 uv run chariot task list
 ```
 
-Pick the task id from the output, then:
+从输出里挑一个 task id,然后:
 
 ```powershell
 uv run chariot task show <task_id>
@@ -85,7 +85,7 @@ uv run chariot task fail-run <run_id> --error "demo failure"
 uv run chariot task show <task_id>
 ```
 
-Create a second task to exercise cancel flow:
+再建第二个 task,走 cancel 路径:
 
 ```powershell
 uv run chariot task create --goal "cancel me" --agent-profile planner
@@ -94,7 +94,7 @@ uv run chariot task cancel-run <run_id_2> --error "user requested"
 uv run chariot task show <task_id_2>
 ```
 
-Create a third task to exercise pause/resume/complete:
+再建第三个 task,走 pause / resume / complete 路径:
 
 ```powershell
 uv run chariot task create --goal "complete me" --agent-profile planner
@@ -105,17 +105,17 @@ uv run chariot task complete-run <run_id_3> --result '{"ok": true}'
 uv run chariot task show <task_id_3>
 ```
 
-Checkpoints:
+验收点:
 
-- `task runs` lists the run rows for the task
-- `show-run` returns trigger, status, result, error, and timestamps
-- `fail-run` moves both run and task to `failed`
-- `cancel-run` moves both run and task to `cancelled`
-- `complete-run` moves both run and task to `completed`
+- `task runs` 能列出该 task 的 run 行。
+- `show-run` 返回 trigger、status、result、error、时间戳。
+- `fail-run` 把 run 和 task 同时推到 `failed`。
+- `cancel-run` 把 run 和 task 同时推到 `cancelled`。
+- `complete-run` 把 run 和 task 同时推到 `completed`。
 
 ### 3. Delegation
 
-Create a parent task and delegate children from it:
+创建一个父任务并派生子任务:
 
 ```powershell
 uv run chariot task create --goal "parent orchestration" --agent-profile planner
@@ -124,15 +124,15 @@ uv run chariot task list --parent-task-id <parent_task_id>
 uv run chariot task show <parent_task_id>
 ```
 
-Checkpoints:
+验收点:
 
-- `task list --parent-task-id ...` returns the child tasks
-- `task show` on the parent includes `child status summary`
-- each child task has `parent_task_id = <parent_task_id>`
+- `task list --parent-task-id ...` 返回子任务。
+- `task show` 父任务时能看到 `child status summary`。
+- 每个子任务的 `parent_task_id` 等于 `<parent_task_id>`。
 
-### 4. Scheduled jobs
+### 4. 定时任务
 
-Create, inspect, update, trigger, disable, enable, and remove a job:
+创建、查看、更新、手工触发、禁用、启用、删除一个 job:
 
 ```powershell
 uv run chariot job add --name cleanup --goal "cleanup stale state" --cron "0 * * * *" --agent-profile planner --meta '{"scope":"demo"}'
@@ -146,34 +146,34 @@ uv run chariot job enable cleanup
 uv run chariot job remove cleanup
 ```
 
-Checkpoints:
+验收点:
 
-- `job list` shows `cleanup`
-- `job show cleanup` shows `goal`, `cron`, `enabled`, `meta`, and `runs`
-- `job run-now cleanup` creates a scheduled task and a job run record
-- after `run-now`, `last_run_status` becomes `queued`
-- `job remove cleanup` deletes the job definition
+- `job list` 能看到 `cleanup`。
+- `job show cleanup` 显示 `goal`、`cron`、`enabled`、`meta`、`runs`。
+- `job run-now cleanup` 同时建出一个 scheduled task 和一条 job run 记录。
+- `run-now` 后,`last_run_status` 变成 `queued`。
+- `job remove cleanup` 删除 job 定义。
 
-### 5. Agent cleanup
+### 5. Agent 清理
 
-When the demo is done:
+演示结束:
 
 ```powershell
 uv run chariot agent remove planner
 Remove-Item Env:CHARIOT_DB_PATH -ErrorAction SilentlyContinue
 ```
 
-## Sidecar RPC Smoke
+## Sidecar RPC 烟测
 
-If you want to validate the same surfaces through RPC rather than CLI, these are the main method groups now exposed:
+如果要直接走 RPC 而不是 CLI 验证,目前对外的方法分组如下:
 
-- Agent:
+- Agent
   - `list_agents`
   - `get_agent`
   - `create_agent`
   - `update_agent`
   - `delete_agent`
-- Task:
+- Task
   - `list_tasks`
   - `get_task`
   - `create_task`
@@ -187,7 +187,7 @@ If you want to validate the same surfaces through RPC rather than CLI, these are
   - `get_task_run`
   - `list_task_runs`
   - `delegate_task`
-- Job:
+- Job
   - `list_jobs`
   - `show_job`
   - `create_job`
@@ -197,63 +197,63 @@ If you want to validate the same surfaces through RPC rather than CLI, these are
   - `delete_job`
   - `run_job_now`
 
-The sidecar regression source of truth is:
+sidecar 回归测试源:
 
 ```powershell
 uv run pytest tests/sidecar/test_task_methods.py -q
 ```
 
-## Expected A6 Outcome
+## 预期的 A6 产出
 
-After running this guide, you should be able to verify all of the following:
+跑完本指南后,应能验证以下事项:
 
-- agent profiles are no longer static config fragments; they are queryable and manageable objects
-- tasks can be created, inspected, paused, resumed, cancelled, and delegated
-- task runs can be listed and individually inspected
-- run termination paths are explicit: complete, fail, cancel
-- scheduled jobs are manageable objects, not just hard-coded timer ideas
-- manual trigger creates both a scheduled task and a job run record
+- agent profile 不再是静态配置片段,而是可查询、可管理的对象。
+- task 可以被创建、检视、暂停、恢复、取消、派生。
+- task run 可以被列出和单独检视。
+- run 终态路径明确:complete、fail、cancel。
+- scheduled job 是可管理的对象,而不是写死的定时器想法。
+- 手工触发同时建出一条 scheduled task 和一条 job run 记录。
 
-## Current Boundary
+## 当前边界
 
-What A6 now gives you:
+A6 已经具备的:
 
-- a complete minimum management surface for `agent profile`, `task`, `task run`, `delegation`, and `scheduled job`
-- persistent records in SQLite for the main lifecycle objects
-- CLI and sidecar RPC surfaces that let you inspect and manually control those objects
+- `agent profile`、`task`、`task run`、`delegation`、`scheduled job` 的完整最小管理面。
+- 主要生命周期对象都有 SQLite 持久化。
+- CLI 和 sidecar RPC 两条 surface 都可以检视并手工控制这些对象。
 
-What A6 does not yet give you:
+A6 还没有给出的:
 
-- a real long-running background worker that automatically picks queued tasks and executes them
-- an automatic scheduler loop that evaluates cron expressions and fires jobs on its own
-- full checkpoint/resume recovery for task execution beyond the current minimal manual run controls
-- approval gates for sensitive task transitions or delegation actions
-- richer artifact persistence and artifact browsing; that belongs with the later artifact milestone
-- advanced multi-agent autonomy such as negotiation, dynamic replanning, or distributed worker pools
+- 真正常驻的后台 worker,可以自动 claim 队列任务并执行。
+- 自动调度 loop,根据 cron 表达式自动触发 job。
+- 完整的 checkpoint / resume 恢复能力,当前只有手工 run 切换。
+- 风险任务或 delegation 的审批拦截。
+- 更完整的 artifact 持久化与浏览;这部分留给后续 artifact milestone。
+- 高级多 agent 自治,例如协商、动态重规划、分布式 worker 池。
 
-## Remaining Work
+## 剩余工作
 
-The main unfinished items after the current A6 implementation are:
+当前 A6 实现之后,主要的未完成项是:
 
-- Background execution loop:
-  - add a worker inside sidecar or runtime that claims queued tasks, starts runs, and updates terminal state
-- Automatic scheduled execution:
-  - add a scheduler that scans enabled jobs, evaluates `cron`, and calls `run_job_now` automatically
-- Better execution recovery:
-  - persist enough checkpoint metadata to support restart-safe resume, not only manual run state toggles
-- Delegation diagnostics:
-  - make delegation failure reasons and lineage inspection more explicit in `task` and `task run` records
-- Approval and policy controls:
-  - add optional approval state for risky tasks, delegation, or high-cost profiles
-- Artifact integration:
-  - attach task outputs to a formal artifact model instead of leaving result payloads as the only durable output
+- 后台执行 loop
+  - 在 sidecar 或 runtime 内加一个 worker,自动 claim 队列任务、推进 run、收敛终态。
+- 自动调度
+  - 加一个 scheduler,扫描启用的 job,解析 `cron`,自动调用 `run_job_now`。
+- 更好的恢复机制
+  - 落库足够多的 checkpoint 元数据,支持 restart-safe 的 resume,而不仅仅是手工切 run 状态。
+- Delegation 诊断
+  - 在 task / task run 记录里把 delegation 失败原因和血缘信息更显式地暴露出来。
+- 审批与策略
+  - 给高风险 task、delegation、高成本 profile 加可选的 approval 状态。
+- Artifact 接入
+  - 把 task 输出挂到正式的 artifact 模型上,而不是只把 result payload 当唯一持久产物。
 
-## Recommended Next Backend Steps
+## 推荐的后端推进顺序
 
-If you continue backend-first, the highest-value order is:
+如果继续走 backend-first,优先级最高的顺序是:
 
-1. Add the background worker loop.
-2. Add automatic job scheduling on top of the existing `scheduled_jobs` and `job_runs` tables.
-3. Add execution checkpoint and resume metadata for crash-safe recovery.
-4. Tighten delegation diagnostics and approval hooks.
-5. Integrate artifacts when the artifact milestone starts.
+1. 加后台 worker loop。
+2. 在现有 `scheduled_jobs` / `job_runs` 表之上加自动调度。
+3. 加执行 checkpoint 与 resume 元数据,支持崩溃恢复。
+4. 加强 delegation 诊断与审批钩子。
+5. artifact milestone 启动时再接入 artifact。

@@ -76,9 +76,7 @@ class _MockAgent:
 
 def _chat_request_frame(rid: int, params: dict[str, Any]) -> bytes:
     """拼一帧 chat request(带换行)。"""
-    return (
-        json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n"
-    ).encode()
+    return (json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n").encode()
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +220,7 @@ class TestParamsValidation:
         assert "provider_name" in line["error"]["message"]
 
     async def test_provider_name_empty_string(self) -> None:
-        line = await self._send(
-            {"provider_name": "", "messages": [{"role": "user", "content": "x"}]}
-        )
+        line = await self._send({"provider_name": "", "messages": [{"role": "user", "content": "x"}]})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
     async def test_missing_messages(self) -> None:
