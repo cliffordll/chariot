@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.context_repo import ContextRepo
+from chariot.repos.context_repo import ContextRepo, ContextSnapshotEntry, ContextTraceEntry
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
@@ -56,7 +56,7 @@ class ContextService:
         return entry
 
     @staticmethod
-    def _snapshot_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _snapshot_to_dict(entry: ContextSnapshotEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "conversation_id": entry.conversation_id,
@@ -70,7 +70,7 @@ class ContextService:
         }
 
     @staticmethod
-    def _trace_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _trace_to_dict(entry: ContextTraceEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "snapshot_id": entry.snapshot_id,

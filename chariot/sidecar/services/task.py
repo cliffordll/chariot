@@ -6,7 +6,7 @@ from typing import Any
 
 from chariot.delegation.models import DelegatedTaskSpec, DelegationRequest
 from chariot.delegation.service import DelegationService
-from chariot.models.task import TaskCreate, TaskKind, TaskRunCreate
+from chariot.models.task import Task, TaskCreate, TaskKind, TaskRun, TaskRunCreate
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.task import TaskService
@@ -209,7 +209,7 @@ class TaskApi:
         raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, message) from exc
 
     @staticmethod
-    def _task_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _task_to_dict(entry: Task) -> dict[str, Any]:
         return {
             "id": entry.id,
             "goal": entry.goal,
@@ -225,7 +225,7 @@ class TaskApi:
         }
 
     @staticmethod
-    def _run_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _run_to_dict(entry: TaskRun) -> dict[str, Any]:
         return {
             "id": entry.id,
             "task_id": entry.task_id,

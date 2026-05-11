@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chariot.models.agent import AgentProfile
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.agent import AgentService
@@ -89,7 +90,7 @@ class AgentApi:
         raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, message) from exc
 
     @staticmethod
-    def _agent_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _agent_to_dict(entry: AgentProfile) -> dict[str, Any]:
         return {
             "name": entry.name,
             "role": entry.role,

@@ -401,7 +401,7 @@ def update_cmd(
     description: Annotated[
         str,
         typer.Option("--description", "-d", help="新的 bundle 说明"),
-    ] = _MISSING,
+    ] = _MISSING,  # type: ignore[assignment]
     layers: Annotated[
         list[str],
         typer.Option(

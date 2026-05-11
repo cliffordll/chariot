@@ -207,9 +207,7 @@ class ContextRepo:
         }
 
     @staticmethod
-    def _snapshot_to_entry(row: ContextSnapshotRow | None) -> ContextSnapshotEntry | None:
-        if row is None:
-            return None
+    def _snapshot_to_entry(row: ContextSnapshotRow) -> ContextSnapshotEntry:
         return ContextSnapshotEntry(
             id=row.id,
             conversation_id=row.conversation_id,
@@ -223,9 +221,7 @@ class ContextRepo:
         )
 
     @staticmethod
-    def _trace_to_entry(row: ContextTraceRow | None) -> ContextTraceEntry | None:
-        if row is None:
-            return None
+    def _trace_to_entry(row: ContextTraceRow) -> ContextTraceEntry:
         return ContextTraceEntry(
             id=row.id,
             snapshot_id=row.snapshot_id,

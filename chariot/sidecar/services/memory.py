@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.memory_repo import MemoryRepo
+from chariot.repos.memory_repo import MemoryEntry, MemoryEventEntry, MemoryLinkEntry, MemoryRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
@@ -149,7 +149,7 @@ class MemoryService:
         return [self._entry_to_dict(entry) for entry in entries]
 
     @staticmethod
-    def _entry_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _entry_to_dict(entry: MemoryEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "kind": entry.kind,
@@ -162,7 +162,7 @@ class MemoryService:
         }
 
     @staticmethod
-    def _event_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _event_to_dict(entry: MemoryEventEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "memory_id": entry.memory_id,
@@ -172,7 +172,7 @@ class MemoryService:
         }
 
     @staticmethod
-    def _link_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _link_to_dict(entry: MemoryLinkEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "memory_id": entry.memory_id,

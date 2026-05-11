@@ -237,6 +237,7 @@ class AIAgent:
                     session,
                     req=req,
                     provider=provider,
+                    memory_policy=memory_policy,
                     error_event=last_error_event,
                     prompt_trace_id=prompt_trace.id,
                 )
@@ -411,9 +412,10 @@ class AIAgent:
             async with self._sessionmaker() as session:
                 active_bundle = await PromptRepo(session).get_active_bundle()
                 if active_bundle is not None:
+                    existing_system = req.system if isinstance(req.system, str) else None
                     system = PromptComposer.render_layers_text(
                         active_bundle.layers,
-                        existing_system=req.system,
+                        existing_system=existing_system,
                         memory_entries=memory_entries,
                         memory_policy=memory_policy.describe() if memory_policy is not None else None,
                     )

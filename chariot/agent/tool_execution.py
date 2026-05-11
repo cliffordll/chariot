@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from chariot.agent.chat_event import ChatEvent
 
-if False:  # pragma: no cover
+if TYPE_CHECKING:
     from chariot.tools.base import BaseTool
 
 

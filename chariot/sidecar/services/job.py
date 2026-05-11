@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chariot.models.job import JobRunRecord, ScheduledJob
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.job import JobService
@@ -122,7 +123,7 @@ class JobApi:
         raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, message) from exc
 
     @staticmethod
-    def _job_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _job_to_dict(entry: ScheduledJob) -> dict[str, Any]:
         return {
             "name": entry.name,
             "goal": entry.goal,
@@ -138,7 +139,7 @@ class JobApi:
         }
 
     @staticmethod
-    def _job_run_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _job_run_to_dict(entry: JobRunRecord) -> dict[str, Any]:
         return {
             "id": entry.id,
             "job_name": entry.job_name,

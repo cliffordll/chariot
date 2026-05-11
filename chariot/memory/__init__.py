@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Static-checker visibility for the names served lazily by __getattr__.
+    from chariot.memory.capture import MemoryCaptureCandidate, MemoryCaptureService
+    from chariot.memory.policy import MemoryPolicy
+    from chariot.repos.memory_repo import (
+        MemoryEntry,
+        MemoryEventEntry,
+        MemoryLinkEntry,
+        MemoryRepo,
+    )
 
 __all__ = [
     "MemoryCaptureCandidate",

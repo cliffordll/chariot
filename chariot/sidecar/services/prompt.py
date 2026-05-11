@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chariot.models.prompt import PromptBundleEntry, PromptTraceEntry, PromptVersionEntry
 from chariot.repos.prompt_repo import PromptRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
@@ -133,7 +134,7 @@ class PromptApi:
         }
 
     @staticmethod
-    def _bundle_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _bundle_to_dict(entry: PromptBundleEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "name": entry.name,
@@ -147,7 +148,7 @@ class PromptApi:
         }
 
     @staticmethod
-    def _version_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _version_to_dict(entry: PromptVersionEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "bundle_id": entry.bundle_id,
@@ -160,7 +161,7 @@ class PromptApi:
         }
 
     @staticmethod
-    def _trace_to_dict(entry) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def _trace_to_dict(entry: PromptTraceEntry) -> dict[str, Any]:
         return {
             "id": entry.id,
             "bundle_id": entry.bundle_id,
