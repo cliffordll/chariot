@@ -230,9 +230,7 @@ class CheckpointManager:
         rc, _, _ = await self._run(["git", "-C", str(self._cwd), "stash", "push", "-u", "-m", message])
         if rc != 0:
             return False, None
-        rc, out, _ = await self._run(
-            ["git", "-C", str(self._cwd), "stash", "list", "-n", "1", "--format=%gd %gs"]
-        )
+        rc, out, _ = await self._run(["git", "-C", str(self._cwd), "stash", "list", "-n", "1", "--format=%gd %gs"])
         if rc != 0:
             return True, None
         first = out.strip().splitlines()[0] if out.strip() else ""

@@ -154,7 +154,7 @@ async def test_rollback_no_stash_no_files_is_noop_ok(
     assert entry.payload["db_path"] is not None
     result = await mgr.rollback(entry.id)
     assert result.git_ok is True  # 无 stash → no-op
-    assert result.db_ok is True   # backup 存在 → copy 回来
+    assert result.db_ok is True  # backup 存在 → copy 回来
     assert result.config_ok is True  # 无 tarball → no-op
 
 
