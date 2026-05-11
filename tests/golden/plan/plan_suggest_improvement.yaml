@@ -1,0 +1,10 @@
+task_id: plan_suggest_improvement
+prompt: "看一下 README.md 的内容,给我提一条具体可执行的改进建议(只需一条)。"
+verifier_type: tool_called
+expected:
+  tool: read_file
+  args_subset:
+    path: README.md
+category: plan
+description: 提建议前必须先 read_file README.md,不能脱稿凭印象
+max_iterations: 6

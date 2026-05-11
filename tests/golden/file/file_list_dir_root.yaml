@@ -1,0 +1,10 @@
+task_id: file_list_dir_root
+prompt: "看一下当前仓库根目录(.)下都有哪些文件和子目录。"
+verifier_type: tool_called
+expected:
+  tool: list_dir
+  args_subset:
+    path: "."
+category: file
+description: agent 该用 list_dir 工具列目录,不要靠猜
+max_iterations: 6

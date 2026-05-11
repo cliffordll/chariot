@@ -1,0 +1,10 @@
+task_id: file_read_pyproject
+prompt: "看一下 pyproject.toml 的内容,告诉我 project.name 字段是什么。"
+verifier_type: tool_called
+expected:
+  tool: read_file
+  args_subset:
+    path: pyproject.toml
+category: file
+description: agent 该用 read_file 工具拿 pyproject.toml,而不是凭印象瞎答
+max_iterations: 6

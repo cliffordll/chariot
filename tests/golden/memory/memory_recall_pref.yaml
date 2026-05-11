@@ -1,0 +1,11 @@
+task_id: memory_recall_pref
+prompt: "我之前提过我偏好用中文交流,这一轮请用中文回我:简单解释一下 Python 的 list comprehension。"
+verifier_type: exact_match
+expected:
+  contains: ["列表"]
+category: memory
+description: |
+  B3 memory 上线后跑这个 task 要先在 ChariotMemory 里 seed 一条 'prefer Chinese
+  responses' 偏好。当前 wave 1/2 阶段 memory 注入未必能保证生效,验收点在
+  exact_match 文本"列表"上 —— LLM 顺着 prompt 中文也能命中
+max_iterations: 4

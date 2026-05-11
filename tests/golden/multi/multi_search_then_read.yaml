@@ -1,0 +1,10 @@
+task_id: multi_search_then_read
+prompt: "我想知道 chariot 这个项目用的是什么协议跟 Tauri 主进程通讯。请先列 docs/ 目录看看哪个文档可能讲这个,然后读那个文档,把答案告诉我。"
+verifier_type: tool_called
+expected:
+  tool: list_dir
+  args_subset:
+    path: docs
+category: multi
+description: 多步链路 —— 先 list_dir docs/ 找入口,再 read_file 读具体文档;wave 3 verifier 只检 list_dir 一项,read_file 跟进步骤留给 agent 自由发挥
+max_iterations: 10

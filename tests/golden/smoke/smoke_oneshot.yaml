@@ -1,0 +1,9 @@
+task_id: smoke_oneshot
+prompt: "请回一个 'hello' 即可,不需要调任何工具。"
+verifier_type: exact_match
+expected:
+  contains: [hello]
+  case_insensitive: true
+category: smoke
+description: agent 跑通最小 loop —— 不调工具,直接出文本响应
+max_iterations: 2
