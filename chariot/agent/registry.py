@@ -11,7 +11,7 @@
 Surface 各自决定 session_key 语义:
 - CLI:`"process"`(单一 session,整个进程一份 AIAgent)
 - sidecar(S.8):JSON-RPC 拿到的 session_id
-- Gateway(0.8.0):`f"{user_id}:{convo_id}"` 之类
+- Gateway(0.8.0):`f"{user_id}:{conversation_id}"` 之类
 
 并发安全:
 - 全局 asyncio.Lock 包查 / 建 / 缓存写。临界区只有 dict op + 一次
@@ -50,7 +50,7 @@ class AgentRegistry:
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": "...", "api_key": "..."}},
         )
-        async for ev in agent.run(req):
+        async for ev in agent.run_chat(req):
             ...
 
         # session 结束:
@@ -123,6 +123,14 @@ class AgentRegistry:
         """
         async with cls._lock:
             cls._agents.clear()
+
+    @classmethod
+    async def release_prefix(cls, prefix: str) -> None:
+        """Release every cached agent whose session key starts with ``prefix``."""
+
+        async with cls._lock:
+            for key in [key for key in cls._agents if key.startswith(prefix)]:
+                cls._agents.pop(key, None)
 
     @classmethod
     def size(cls) -> int:

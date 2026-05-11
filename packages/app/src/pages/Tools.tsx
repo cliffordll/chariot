@@ -24,10 +24,17 @@ type ToolsState =
   | { kind: "ok"; data: ToolsListResponse }
   | { kind: "err"; message: string };
 
+type ProbeState =
+  | { kind: "idle" }
+  | { kind: "probing" }
+  | { kind: "ok"; latency: number }
+  | { kind: "fail"; latency: number; code: string; message: string };
+
 export default function Tools() {
   const [state, setState] = useState<ToolsState>({ kind: "loading" });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pendingEnable, setPendingEnable] = useState<Set<string>>(new Set());
+  const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -70,6 +77,30 @@ export default function Tools() {
     [load],
   );
 
+  const onProbe = useCallback(async (name: string) => {
+    setProbeStates((cur) => ({ ...cur, [name]: { kind: "probing" } }));
+    try {
+      const result = await api.probeTool(name);
+      setProbeStates((cur) => ({
+        ...cur,
+        [name]: result.ok
+          ? { kind: "ok", latency: result.latency_ms }
+          : {
+              kind: "fail",
+              latency: result.latency_ms,
+              code: result.error?.code ?? "unknown",
+              message: result.error?.message ?? "(no detail)",
+            },
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setProbeStates((cur) => ({
+        ...cur,
+        [name]: { kind: "fail", latency: 0, code: "request_failed", message: msg },
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -87,8 +118,10 @@ export default function Tools() {
         state={state}
         expanded={expanded}
         pendingEnable={pendingEnable}
+        probeStates={probeStates}
         onToggleExpand={toggleExpand}
         onToggleEnabled={onToggleEnabled}
+        onProbe={onProbe}
         onOptionsSaved={() => void load()}
       />
     </section>
@@ -99,15 +132,19 @@ function ToolsCard({
   state,
   expanded,
   pendingEnable,
+  probeStates,
   onToggleExpand,
   onToggleEnabled,
+  onProbe,
   onOptionsSaved,
 }: {
   state: ToolsState;
   expanded: Set<string>;
   pendingEnable: Set<string>;
+  probeStates: Record<string, ProbeState>;
   onToggleExpand: (name: string) => void;
   onToggleEnabled: (name: string, enabled: boolean) => void | Promise<void>;
+  onProbe: (name: string) => void | Promise<void>;
   onOptionsSaved: () => void;
 }) {
   if (state.kind === "loading") {
@@ -139,8 +176,10 @@ function ToolsCard({
             tool={tool}
             isExpanded={expanded.has(tool.name)}
             isPending={pendingEnable.has(tool.name)}
+            probeState={probeStates[tool.name] ?? { kind: "idle" }}
             onToggleExpand={() => onToggleExpand(tool.name)}
             onToggleEnabled={(v) => void onToggleEnabled(tool.name, v)}
+            onProbe={() => void onProbe(tool.name)}
             onOptionsSaved={onOptionsSaved}
           />
         ))}
@@ -163,15 +202,19 @@ function ToolRow({
   tool,
   isExpanded,
   isPending,
+  probeState,
   onToggleExpand,
   onToggleEnabled,
+  onProbe,
   onOptionsSaved,
 }: {
   tool: Tool;
   isExpanded: boolean;
   isPending: boolean;
+  probeState: ProbeState;
   onToggleExpand: () => void;
   onToggleEnabled: (v: boolean) => void;
+  onProbe: () => void;
   onOptionsSaved: () => void;
 }) {
   return (
@@ -203,6 +246,20 @@ function ToolRow({
           </button>
           <div className="ml-auto flex items-center gap-2">
             <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={onProbe}
+            >
+              {probeState.kind === "probing"
+                ? "Probing..."
+                : probeState.kind === "ok"
+                  ? `Probe ${probeState.latency}ms`
+                  : probeState.kind === "fail"
+                    ? "Probe failed"
+                    : "Probe"}
+            </Button>
+            <Button
               variant={tool.enabled ? "default" : "outline"}
               size="sm"
               className="h-7 px-3 text-xs"
@@ -219,6 +276,16 @@ function ToolRow({
         <>
           <OptionsEditor tool={tool} onSaved={onOptionsSaved} />
           <SchemaBlock tool={tool} />
+          {probeState.kind === "ok" && (
+            <div className="border-t border-border bg-muted/10 px-3 py-2 text-xs text-emerald-700">
+              Probe OK in {probeState.latency}ms
+            </div>
+          )}
+          {probeState.kind === "fail" && (
+            <div className="border-t border-border bg-muted/10 px-3 py-2 text-xs text-destructive">
+              Probe failed in {probeState.latency}ms [{probeState.code}] {probeState.message}
+            </div>
+          )}
         </>
       )}
     </li>

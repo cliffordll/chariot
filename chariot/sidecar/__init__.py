@@ -9,7 +9,7 @@
 - `__main__.py`:进程入口(`python -m chariot.sidecar`),装载 + 起 server + cleanup
 - `methods/`:业务 method handlers + register_methods 集中注册
   - `__init__.py`:`SidecarAgent` Protocol + `MethodBase` 共享基 + `register_methods()`
-  - `chat.py` / `convo.py` / `tool.py` / `provider.py` / `log.py`:每文件一个 noun
+  - `chat.py` / `conversation.py` / `tool.py` / `provider.py` / `log.py`:每文件一个 noun
 
 帧 / dispatch / 错误码框架不在这 —— 在 `chariot.rpc.jsonrpc`(给后续
 ACP / MCP 共享)。

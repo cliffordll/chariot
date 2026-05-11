@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 15
 
 
 def _db_url(db_path: Path) -> str:
@@ -72,9 +72,7 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
     current = int(row[0]) if row else 0
 
     if current > CURRENT_SCHEMA_VERSION:
-        raise RuntimeError(
-            f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动"
-        )
+        raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
     if current == CURRENT_SCHEMA_VERSION:
         return
 

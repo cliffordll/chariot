@@ -1,17 +1,17 @@
 """chat 会话上下文 —— REPL / once / batch 共用的轻量协调器。
 
 0.6.0 起持有 `AIAgent` 实例(进程内直调,撤 SDK ProxyClient),不走 HTTP / SSE。
-`run_turn` 调 `agent.run(req)` 消费 `ChatEvent` 流,本地累积 assistant 文本 +
+`run_turn` 调 `agent.run_chat(req)` 消费 `ChatEvent` 流,本地累积 assistant 文本 +
 usage 统计,把每个 event 透传给 caller 的 `on_event` 回调(REPL 下是
 `Renderer.render_event`)。
 
 stateful / stateless body.messages 契约
 ---------------------------------------
-- **stateless**(`convo_id is None`):req.messages = 整段本地历史。
+- **stateless**(`conversation_id is None`):req.messages = 整段本地历史。
   AIAgent 不持久化,Provider 看到的就是这里发的全部
-- **stateful**(`convo_id` 是 ULID):req.messages = **只发本轮新增 user
+- **stateful**(`conversation_id` 是 ULID):req.messages = **只发本轮新增 user
   message**(`self.messages[-1:]`)。AIAgent 内部 load DB 历史 prepend,把
-  req.messages 里的 user 消息 append 到 messages 表(详见 `AIAgent._run_stateful`)
+  req.messages 里的 user 消息 append 到 messages 表(详见 `AIAgent._run_stateful_chat`)
   → 所以 client 必须只送"新增"的部分,否则会重复 persist
 
 本地 `self.messages` 累积所有轮(给 REPL 失败 `pop_last` 回退用,以及 stateless
@@ -34,6 +34,7 @@ from typing import Any
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.run import AIAgent
+from chariot.repos.log_writer import log_writer
 
 
 def _empty_messages() -> list[dict[str, Any]]:
@@ -78,11 +79,11 @@ class ChatContext:
     provider_name: str = ""
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
-    # 0.4.0:可选 convo id(ULID)。给了则 ChatRequest.convo_id 透传给 AIAgent,
+    # 0.4.0:可选 conversation id(ULID)。给了则 ChatRequest.conversation_id 透传给 AIAgent,
     # 走 stateful 路径(DB load history + persist new turn)。CLI 本地
     # self.messages 仍累积本进程内的轮(便于 REPL 打印 / 撤回);发请求时
     # stateful 模式只送"这一轮新增"避免双 persist
-    convo_id: str | None = None
+    conversation_id: str | None = None
     # 0.6.5+:CLI `--model` flag 的承载;每轮 req 透传给 `ChatRequest.model`,
     # Provider 内部用 `req.model or self.config.model` 决定 wire body["model"]。
     # None = 不覆盖,沿用 entry.options.model(常态)
@@ -102,7 +103,7 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(provider_name / max_tokens / convo_id)。"""
+        """清空对话历史,保留会话配置(provider_name / max_tokens / conversation_id)。"""
         self.messages.clear()
 
     def set_provider(self, name: str) -> None:
@@ -111,17 +112,7 @@ class ChatContext:
     # ---------- 核心:一轮请求 ----------
 
     async def run_turn(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
-        """构造 ChatRequest → 调 `agent.run(req)` → 流式 ChatEvent → 收尾。
-
-        - 每个 ChatEvent 透传给 `on_event`(REPL 下是 `Renderer.render_event`)
-        - 内部累积 assistant 文本(只取最末轮 message_stop 前的 text_delta)
-        - 累积 usage 字段(message_start.input_tokens + message_delta.output_tokens)
-        - 流里出现 `kind="error"` event → 流结束后抛 `ChatError`
-
-        TurnResult.text 取**最后一个 message 的 text 块**(stop_reason=end_turn 那轮),
-        中间轮(stop_reason=tool_use)的 text 算"过程文本",用户已经通过 on_event
-        看到流式输出,不进 TurnResult。
-        """
+        """?? ChatRequest -> ? `agent.run_chat(req)` -> ?? ChatEvent -> ???"""
         req = self._build_request()
         current_text: list[str] = []
         last_message_text: list[str] = []
@@ -130,11 +121,10 @@ class ChatContext:
         error_event: ChatEvent | None = None
         t0 = time.monotonic()
 
-        async for ev in self.agent.run(req):
+        async for ev in self.agent.run_chat(req):
             on_event(ev)
             self._accumulate_text(ev, current_text)
             if ev.kind == "message_stop":
-                # 一个 message 收尾 —— snapshot;下一轮(若有)从空起
                 last_message_text = current_text
                 current_text = []
             input_tokens, output_tokens = self._accumulate_usage(ev, input_tokens, output_tokens)
@@ -142,17 +132,34 @@ class ChatContext:
                 error_event = ev
 
         if error_event is not None:
+            await log_writer.record(
+                provider=self.provider_name,
+                status="error",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=error_event.error_message or error_event.error_type or "",
+            )
             raise ChatError(
                 error_type=error_event.error_type or "unknown",
                 error_message=error_event.error_message or "",
             )
 
-        return TurnResult(
+        result = TurnResult(
             text="".join(last_message_text),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+        await log_writer.record(
+            provider=self.provider_name,
+            status="ok",
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=result.latency_ms,
+            error=None,
+        )
+        return result
 
     @staticmethod
     def _accumulate_text(ev: ChatEvent, sink: list[str]) -> None:
@@ -189,18 +196,18 @@ class ChatContext:
             messages=[self._to_message(m) for m in self._messages_to_send()],
             model=self.model_override,
             max_tokens=self.max_tokens,
-            convo_id=self.convo_id,
+            conversation_id=self.conversation_id,
         )
 
     def _messages_to_send(self) -> list[dict[str, Any]]:
         """决定 req.messages 装什么。
 
-        - stateful(有 convo_id):只发末尾那条(本轮新增 user msg);AIAgent
+        - stateful(有 conversation_id):只发末尾那条(本轮新增 user msg);AIAgent
           自己从 DB prepend 历史。这条规则避免 AIAgent 把已 persist 的老消息
           重复 append(详见模块 docstring 契约段)
         - stateless:发全量本地历史,AIAgent 不持久化
         """
-        if self.convo_id is not None:
+        if self.conversation_id is not None:
             return self.messages[-1:] if self.messages else []
         return list(self.messages)
 

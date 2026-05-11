@@ -26,7 +26,7 @@ from typing import Any, Self
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
-from chariot.providers.base import BaseProvider, BaseProviderConfig
+from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 
 
 class MockProvider(BaseProvider):
@@ -38,6 +38,12 @@ class MockProvider(BaseProvider):
     """
 
     _MODEL_ID = "mock-1"
+    capabilities = BaseProviderCapabilities(
+        supports_system=False,
+        supports_tools=False,
+        supports_tool_choice=False,
+        supports_thinking=False,
+    )
 
     def __init__(self, config: BaseProviderConfig) -> None:
         self.config = config

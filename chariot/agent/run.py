@@ -3,7 +3,7 @@
 职责:
 1. 持有 `name → BaseProvider` 实例字典(从 DB providers 表装载)
 2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
-3. `run(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
+3. `run_chat(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
 
 接口契约:
 - 输入:`ChatRequest`(typed,跟 Claude API 1:1)
@@ -21,19 +21,22 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
-from chariot.agent.convo_lock import ConvoLockManager
-from chariot.agent.exceptions import ConvoLockTimeout
+from chariot.agent.conversation_lock import ConversationLockManager
+from chariot.agent.exceptions import ConversationLockTimeout
 from chariot.agent.loop import AgentLoop
+from chariot.agent.provider_contract import normalize_request
+from chariot.memory.capture import MemoryCaptureService
+from chariot.memory.policy import MemoryPolicy
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.providers.base import BaseProvider
-    from chariot.repos.convo_repo import ConvoRepo
+    from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
 
 
@@ -49,7 +52,7 @@ class AIAgent:
             db_path=Path("~/.chariot/chariot.db"),
             provider_overrides={"claude": {"base_url": X, "api_key": Y}} or None,
         )
-        async for event in agent.run(req):
+        async for event in agent.run_chat(req):
             # 消费 ChatEvent
 
         # 测试路径(直接注入 mock providers / tools)
@@ -111,6 +114,7 @@ class AIAgent:
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
+        from chariot.repos.prompt_repo import PromptRepo
         from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
@@ -119,6 +123,7 @@ class AIAgent:
         async with sm() as session:
             await ProviderRepo(session).seed_if_empty()
             await ToolRepo(session).seed_if_empty()
+            await PromptRepo(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
 
@@ -130,9 +135,7 @@ class AIAgent:
             )
             for entry in cfg.providers
         }
-        tools: dict[str, BaseTool] = {
-            entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
-        }
+        tools: dict[str, BaseTool] = {entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools}
 
         return cls(providers=providers, tools=tools, sessionmaker=sm)
 
@@ -145,7 +148,7 @@ class AIAgent:
         典型用法::
 
             async with agent.session_maker() as session:
-                repo = ConvoRepo(session)
+                repo = ConversationRepo(session)
                 entries = await repo.list_entries()
         """
         if self._sessionmaker is None:
@@ -164,13 +167,13 @@ class AIAgent:
 
     # ---- 主入口 ----
 
-    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
         路由:按 `req.provider_name`(entry name)找 Provider 实例;缺失 →
         yield error event 退出。
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
-        stateful(`req.convo_id` 非空)→ 在 convo lock 内开 session 跑;
+        stateful(`req.conversation_id` 非空)→ 在 conversation lock 内开 session 跑;
         stateless → 直接跑 AgentLoop 不开 session。
         """
         provider = self._providers.get(req.provider_name)
@@ -178,38 +181,69 @@ class AIAgent:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
                 error_message=(
-                    f"unknown provider entry {req.provider_name!r}; "
-                    f"known: {sorted(self._providers.keys())}"
+                    f"unknown provider entry {req.provider_name!r}; known: {sorted(self._providers.keys())}"
                 ),
             )
             return
 
-        effective_req = self._inject_default_tools(req)
-
         if req.is_stateful():
-            async for event in self._run_stateful(effective_req, provider):
+            async for event in self._run_stateful_chat(req, provider):
                 yield event
         else:
-            async for event in self._run_stateless(effective_req, provider):
+            async for event in self._run_stateless_chat(req, provider):
                 yield event
 
-    async def _run_stateless(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
-        """无 convo_id:直接跑 AgentLoop,不锁不持久化。"""
+    async def _run_stateless_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
+        """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
+        if self._sessionmaker is not None:
+            async with self._sessionmaker() as session:
+                memory_policy = MemoryPolicy()
+                memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
+                req = await self._prepare_request(req, provider, memory_entries, memory_policy)
+                prompt_trace = await self._record_prompt_trace(
+                    session,
+                    req,
+                    provider,
+                    memory_entries,
+                    memory_policy,
+                )
+        else:
+            req = self._normalize_request(req, provider)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
             repo=None,
-            convo_id=None,
+            conversation_id=None,
         )
-        async for event in loop.run(req):
+        last_event_kind = None
+        last_error_event: ChatEvent | None = None
+        async for event in loop.stream_chat(req):
+            last_event_kind = event.kind
+            if event.kind == "error":
+                last_error_event = event
             yield event
+        if self._sessionmaker is not None and last_event_kind == "stream_done":
+            async with self._sessionmaker() as session:
+                await self._capture_memory(
+                    session,
+                    req=req,
+                    provider=provider,
+                    memory_policy=memory_policy,
+                    prompt_trace_id=prompt_trace.id,
+                )
+        elif self._sessionmaker is not None and last_error_event is not None:
+            async with self._sessionmaker() as session:
+                await self._capture_error_memory(
+                    session,
+                    req=req,
+                    provider=provider,
+                    memory_policy=memory_policy,
+                    error_event=last_error_event,
+                    prompt_trace_id=prompt_trace.id,
+                )
 
-    async def _run_stateful(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
-        """有 convo_id:开 session + 进 convo lock + load history + AgentLoop。
+    async def _run_stateful_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
+        """有 conversation_id:开 session + 进 conversation lock + load history + AgentLoop。
 
         约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
         server 端 load 历史 prepend。stateful 调用方不发完整对话历史。
@@ -221,50 +255,100 @@ class AIAgent:
             )
             return
 
-        convo_id = req.convo_id
-        assert convo_id is not None  # is_stateful() 保证
+        conversation_id = req.conversation_id
+        assert conversation_id is not None  # is_stateful() 保证
 
         async with self._sessionmaker() as session:
             try:
-                async with ConvoLockManager.acquire(convo_id, db_session=session):
-                    async for event in self._stateful_critical_section(
-                        req, convo_id, provider, session
-                    ):
+                async with ConversationLockManager.acquire(conversation_id, db_session=session):
+                    async for event in self._run_stateful_turn(req, conversation_id, provider, session):
                         yield event
-            except ConvoLockTimeout as e:
+            except ConversationLockTimeout as e:
                 yield ChatEvent.error_event(
-                    error_type=f"convo_busy_{e.layer}",
+                    error_type=f"conversation_busy_{e.layer}",
                     error_message=str(e),
                 )
 
-    async def _stateful_critical_section(
+    async def _run_stateful_turn(
         self,
         req: ChatRequest,
-        convo_id: str,
+        conversation_id: str,
         provider: BaseProvider,
         session: AsyncSession,
     ) -> AsyncIterator[ChatEvent]:
-        """convo lock 内的实际工作:ensure convo / persist new user / load history /
+        """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
-        from chariot.repos.convo_repo import ConvoRepo
+        from chariot.context.composer import ContextComposer
+        from chariot.repos.context_repo import ContextRepo
+        from chariot.repos.conversation_repo import ConversationRepo
 
-        repo = ConvoRepo(session)
-        await repo.ensure_exists(convo_id)
-        await self._persist_new_user_messages(repo, convo_id, req)
-        history = await self._load_history_as_messages(repo, convo_id)
+        repo = ConversationRepo(session)
+        await repo.ensure_exists(conversation_id)
+        await self._persist_new_user_messages(repo, conversation_id, req)
+        history = await self._load_history_as_messages(repo, conversation_id)
+        context_repo = ContextRepo(session)
+        memory_policy = MemoryPolicy()
+        memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
+        context_snapshot = await context_repo.record_snapshot(
+            ContextComposer.build_snapshot(
+                req,
+                provider_name=provider.config.name,
+                model=provider.config.model,
+                history=[{"role": msg.role, "content": msg.content} for msg in history],
+                memory_entries=memory_entries,
+                memory_policy=memory_policy.describe(),
+                provider_capabilities=dataclasses.asdict(provider.capabilities),
+            )
+        )
         full_req = dataclasses.replace(req, messages=history)
+        full_req = await self._prepare_request(full_req, provider, memory_entries, memory_policy)
+        prompt_trace = await self._record_prompt_trace(
+            session,
+            full_req,
+            provider,
+            memory_entries,
+            memory_policy,
+        )
+        await context_repo.record_trace(
+            context_snapshot.id,
+            prompt_trace_id=prompt_trace.id,
+        )
 
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
             repo=repo,
-            convo_id=convo_id,
+            conversation_id=conversation_id,
         )
-        async for event in loop.run(full_req):
+        last_event_kind = None
+        last_error_event: ChatEvent | None = None
+        async for event in loop.stream_chat(full_req):
+            last_event_kind = event.kind
+            if event.kind == "error":
+                last_error_event = event
             yield event
+        if last_event_kind == "stream_done":
+            await self._capture_memory(
+                session,
+                req=req,
+                provider=provider,
+                memory_policy=memory_policy,
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
+        elif last_error_event is not None:
+            await self._capture_error_memory(
+                session,
+                req=req,
+                provider=provider,
+                memory_policy=memory_policy,
+                error_event=last_error_event,
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
 
     @staticmethod
-    async def _persist_new_user_messages(repo: ConvoRepo, convo_id: str, req: ChatRequest) -> None:
+    async def _persist_new_user_messages(repo: ConversationRepo, conversation_id: str, req: ChatRequest) -> None:
         """req.messages 里新增的 user 消息(末尾若干条 role='user')落库。
 
         简化策略:把 req.messages 整体当"新增"持久化(假设 client 在 stateful
@@ -274,20 +358,22 @@ class AIAgent:
         for msg in req.messages:
             if msg.role != "user":
                 continue
-            content = (
-                msg.content
-                if isinstance(msg.content, list)
-                else [{"type": "text", "text": msg.content}]
-            )
-            await repo.append_message(convo_id, role="user", content=content)
+            content = msg.content if isinstance(msg.content, list) else [{"type": "text", "text": msg.content}]
+            await repo.append_message(conversation_id, role="user", content=content)
 
     @staticmethod
-    async def _load_history_as_messages(repo: ConvoRepo, convo_id: str) -> list[Message]:
+    async def _load_history_as_messages(repo: ConversationRepo, conversation_id: str) -> list[Message]:
         """SELECT messages → list[Message](Claude 形态,直接喂 Provider)。"""
-        rows = await repo.load_messages_as_anthropic(convo_id)
+        rows = await repo.load_messages_as_anthropic(conversation_id)
         return [Message(role=row["role"], content=row["content"]) for row in rows]
 
     # ---- default tools 注入 ----
+
+    def _normalize_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+        """Apply agent-side defaults, then trim fields unsupported by the provider."""
+
+        req_with_tools = self._inject_default_tools(req)
+        return normalize_request(req_with_tools, provider.capabilities)
 
     def _inject_default_tools(self, req: ChatRequest) -> ChatRequest:
         """req.tools 是 None → 挂当前装载的所有 tool schema;
@@ -308,4 +394,122 @@ class AIAgent:
             name=raw.get("name", tool.name),
             description=raw.get("description", ""),
             input_schema=raw.get("input_schema", {}),
+        )
+
+    async def _prepare_request(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: MemoryPolicy | None = None,
+    ) -> ChatRequest:
+        """Compose the active prompt bundle into `system`, then normalize request fields."""
+        composed = req
+        if self._sessionmaker is not None:
+            from chariot.prompt.composer import PromptComposer
+            from chariot.repos.prompt_repo import PromptRepo
+
+            async with self._sessionmaker() as session:
+                active_bundle = await PromptRepo(session).get_active_bundle()
+                if active_bundle is not None:
+                    existing_system = req.system if isinstance(req.system, str) else None
+                    system = PromptComposer.render_layers_text(
+                        active_bundle.layers,
+                        existing_system=existing_system,
+                        memory_entries=memory_entries,
+                        memory_policy=memory_policy.describe() if memory_policy is not None else None,
+                    )
+                    composed = dataclasses.replace(req, system=system)
+        return self._normalize_request(composed, provider)
+
+    async def _load_memory_entries(
+        self,
+        session: AsyncSession,
+        req: ChatRequest,
+        provider: BaseProvider,
+        policy: MemoryPolicy,
+    ) -> list[dict[str, Any]] | None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        entries = await MemoryRepo(session).list_relevant_entries(
+            conversation_id=req.conversation_id,
+            provider_name=provider.config.name,
+            limit=policy.max_items,
+            policy=policy,
+        )
+        entries = [
+            {
+                "id": entry.id,
+                "kind": entry.kind,
+                "text": entry.text,
+                "meta": entry.meta,
+                "pinned": entry.pinned,
+                "archived": entry.archived,
+            }
+            for entry in entries
+        ]
+        return entries or None
+
+    @staticmethod
+    async def _record_prompt_trace(
+        session: AsyncSession,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_entries: list[dict[str, Any]] | None = None,
+        memory_policy: MemoryPolicy | None = None,
+    ) -> Any:
+        from chariot.repos.prompt_repo import PromptRepo
+
+        return await PromptRepo(session).record_trace(
+            req,
+            provider_name=provider.config.name,
+            model=provider.config.model,
+            memory_entries=memory_entries,
+            memory_policy=memory_policy.describe() if memory_policy is not None else None,
+        )
+
+    async def _capture_memory(
+        self,
+        session: AsyncSession,
+        *,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_policy: MemoryPolicy,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        capture = MemoryCaptureService(MemoryRepo(session))
+        await capture.capture_turn(
+            req=req,
+            provider_name=provider.config.name,
+            policy=memory_policy,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
+        )
+
+    async def _capture_error_memory(
+        self,
+        session: AsyncSession,
+        *,
+        req: ChatRequest,
+        provider: BaseProvider,
+        memory_policy: MemoryPolicy,
+        error_event: ChatEvent,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        from chariot.repos.memory_repo import MemoryRepo
+
+        capture = MemoryCaptureService(MemoryRepo(session))
+        if error_event.error_type is None or error_event.error_message is None:
+            return
+        await capture.capture_error(
+            conversation_id=req.conversation_id,
+            provider_name=provider.config.name,
+            error_type=error_event.error_type,
+            error_message=error_event.error_message,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
         )

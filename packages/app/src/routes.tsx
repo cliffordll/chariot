@@ -1,31 +1,62 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
 
-import Chat from "@/pages/Chat";
-import Dashboard from "@/pages/Dashboard";
-import Logs from "@/pages/Logs";
-import Providers from "@/pages/Providers";
-import Tools from "@/pages/Tools";
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Agents = lazy(() => import("@/pages/Agents"));
+const Tasks = lazy(() => import("@/pages/Tasks"));
+const Jobs = lazy(() => import("@/pages/Jobs"));
+const Providers = lazy(() => import("@/pages/Providers"));
+const Tools = lazy(() => import("@/pages/Tools"));
+const Memory = lazy(() => import("@/pages/Memory"));
+const Prompt = lazy(() => import("@/pages/Prompt"));
+const Context = lazy(() => import("@/pages/Context"));
+const Logs = lazy(() => import("@/pages/Logs"));
+const Chat = lazy(() => import("@/pages/Chat"));
 
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
+  { path: "/agents", label: "Agents" },
+  { path: "/tasks", label: "Tasks" },
+  { path: "/jobs", label: "Jobs" },
   { path: "/providers", label: "Providers" },
   { path: "/tools", label: "Tools" },
+  { path: "/memory", label: "Memory" },
+  { path: "/prompt", label: "Prompt" },
+  { path: "/context", label: "Context" },
   { path: "/logs", label: "Logs" },
   { path: "/chat", label: "Chat" },
 ] as const;
 
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/dashboard" element={<Dashboard />} />
-      <Route path="/providers" element={<Providers />} />
-      {/* /models 旧路径保留兼容(0.5.0 收藏 / 用户记忆),自动跳到新地址 */}
-      <Route path="/models" element={<Navigate to="/providers" replace />} />
-      <Route path="/tools" element={<Tools />} />
-      <Route path="/logs" element={<Logs />} />
-      <Route path="/chat" element={<Chat />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+    <Suspense fallback={<RouteSkeleton />}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/agents" element={<Agents />} />
+        <Route path="/tasks" element={<Tasks />} />
+        <Route path="/jobs" element={<Jobs />} />
+        <Route path="/providers" element={<Providers />} />
+        <Route path="/tools" element={<Tools />} />
+        <Route path="/memory" element={<Memory />} />
+        <Route path="/prompt" element={<Prompt />} />
+        <Route path="/context" element={<Context />} />
+        <Route path="/logs" element={<Logs />} />
+        <Route path="/chat" element={<Chat />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+function RouteSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="h-10 w-48 animate-pulse rounded-full bg-muted/70" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="h-64 animate-pulse rounded-3xl border border-border bg-card/60" />
+        <div className="h-64 animate-pulse rounded-3xl border border-border bg-card/60" />
+      </div>
+    </div>
   );
 }

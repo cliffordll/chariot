@@ -112,9 +112,9 @@ class JsonRpcServer:
             await ctx.notify("chat_event", {"kind": "message_start"})
             return {"stream_id": "..."}
 
-        @server.method("list_convos")
-        async def list_convos(params, ctx):
-            return {"convos": [...]}
+        @server.method("list_conversations")
+        async def list_conversations(params, ctx):
+            return {"conversations": [...]}
 
         # 接 stdio:
         reader, writer = await _stdio_pair()  # 见 chariot/sidecar/__main__.py
@@ -216,9 +216,7 @@ class JsonRpcServer:
         params_raw = req.get("params")
 
         if not isinstance(method_name, str) or not method_name:
-            await self._write_error(
-                rid, self.ERR_INVALID_REQUEST, "method must be a non-empty string"
-            )
+            await self._write_error(rid, self.ERR_INVALID_REQUEST, "method must be a non-empty string")
             return
 
         if params_raw is None:
@@ -232,9 +230,7 @@ class JsonRpcServer:
         # 3. 路由 method
         handler = self._methods.get(method_name)
         if handler is None:
-            await self._write_error(
-                rid, self.ERR_METHOD_NOT_FOUND, f"method not found: {method_name!r}"
-            )
+            await self._write_error(rid, self.ERR_METHOD_NOT_FOUND, f"method not found: {method_name!r}")
             return
 
         # 4. 跑 handler

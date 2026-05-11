@@ -10,8 +10,8 @@
 - `ConfigError`:配置层错(startup 装 ChariotConfig 时 / DB schema 错时)
 - `ToolExecutionError`:工具执行错;**作为 ChatEvent 的输入**(被 AgentLoop
   捕获后转 `tool_result(is_error=True)` 而非直接抛给 surface)
-- `ConvoLockTimeout`:双层锁等待超时(进程内 30s / DB 锁重试 3 次失败);
-  surface 层映射为 `ChatEvent(kind="error", error_type="convo_busy_*")`
+- `ConversationLockTimeout`:双层锁等待超时(进程内 30s / DB 锁重试 3 次失败);
+  surface 层映射为 `ChatEvent(kind="error", error_type="conversation_busy_*")`
 
 模块级零自由函数。所有异常都是 Exception 子类,不放 dataclass 风格(异常用
 class 风更直接;dataclass 异常 frozen 跟 raise / __init__ 串签名冲突)。
@@ -69,12 +69,12 @@ class ToolNotFound(ConfigError):  # noqa: N818 — 同上
     """指定 tool name 在 `tools` 表里找不到。"""
 
 
-class ConvoNotFound(ConfigError):  # noqa: N818 — 同上
-    """指定 convo id 在 `convos` 表里找不到。"""
+class ConversationNotFound(ConfigError):  # noqa: N818 — 同上
+    """指定 conversation id 在 `conversations` 表里找不到。"""
 
 
-class DuplicateConvoId(ConfigError):  # noqa: N818 — 同上
-    """convo id 已存在(显式 create 路径撞已用 id)。"""
+class DuplicateConversationId(ConfigError):  # noqa: N818 — 同上
+    """conversation id 已存在(显式 create 路径撞已用 id)。"""
 
 
 class ToolExecutionError(Exception):
@@ -92,14 +92,14 @@ class ToolExecutionError(Exception):
         super().__init__(message)
 
 
-class ConvoLockTimeout(Exception):  # noqa: N818 — 'Timeout' 后缀语义同 'Error',不重复加
+class ConversationLockTimeout(Exception):  # noqa: N818 — 'Timeout' 后缀语义同 'Error',不重复加
     """双层锁等待超时。
 
     两个触发场景:
     - 进程内 asyncio.Lock 等 > 30s
     - DB advisory lock 等 > busy_timeout * 3 次重试
 
-    AIAgent 捕获后转 `ChatEvent(kind="error", error_type="convo_busy_*")`
+    AIAgent 捕获后转 `ChatEvent(kind="error", error_type="conversation_busy_*")`
     给 surface(local / db 用 layer 字段区分)。
     """
 

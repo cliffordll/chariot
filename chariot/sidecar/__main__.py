@@ -135,7 +135,7 @@ async def serve_stdio() -> None:
         )
 
         server = JsonRpcServer()
-        register_methods(server, agent, db_path=DEFAULT_DB_PATH)
+        register_methods(server, agent, db_path=DEFAULT_DB_PATH, session_key=_SESSION_KEY)
         log.info("registered RPC methods: %s", sorted(server.known_methods()))
 
         bridge = StdioBridge()

@@ -4,9 +4,10 @@
 由 `ProviderRepo` 持久化。
 0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
 0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
-`ProviderEntry` / `ChariotConfig` 同结构。本模块汇总:
+`ChariotConfig` 同结构。本模块汇总:
 
-- `ProviderEntry` / `ChariotConfig`:Provider 配置(0.3.x;0.6.0 起 ModelEntry → ProviderEntry)
+- `ChariotConfig`:Provider 集合(0.3.x;`ProviderEntry` 0.7.2 起迁到
+  `chariot/models/provider.py`)
 - `ToolEntry` / `ToolConfig`:tool 配置(0.4.0);`from_db(session)` 从 ToolRepo 装载
 
 异常类型(`ConfigError` 及子类)0.6.0 起统一在 `chariot/agent/exceptions.py`;
@@ -22,14 +23,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 # 异常类型 0.6.0 起 re-export 自 exceptions.py,本模块不重复定义
 from chariot.agent.exceptions import (
     ConfigError,
-    ConvoNotFound,
-    DuplicateConvoId,
+    ConversationNotFound,
+    DuplicateConversationId,
     DuplicateProviderName,
     ProviderNotFound,
     ToolNotFound,
@@ -38,42 +39,20 @@ from chariot.agent.exceptions import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from chariot.models.provider import ProviderEntry
+
 
 __all__ = [
     "ChariotConfig",
     "ConfigError",
-    "ConvoNotFound",
-    "DuplicateConvoId",
+    "ConversationNotFound",
+    "DuplicateConversationId",
     "DuplicateProviderName",
-    "ProviderEntry",
     "ProviderNotFound",
     "ToolConfig",
     "ToolEntry",
     "ToolNotFound",
 ]
-
-
-def _empty_params() -> dict[str, Any]:
-    """frozen dataclass 默认值工厂;内联 lambda pyright 推断不出 dict[str, Any]。"""
-    return {}
-
-
-@dataclass(frozen=True)
-class ProviderEntry:
-    """单条 Provider 配置条目(0.6.0 起;0.3.x ~ 0.5.x 时叫 ModelEntry)。
-
-    - `options`:build Provider 实例所需(model / api_key / base_url ...);
-      `options.model` 字段(LLM model id)是 Anthropic SDK 透传字段,不在 v6
-      rename 范围
-    - `params`:0.3.1 加。runtime sampling 默认值(temperature / top_p / max_tokens),
-      给前端发请求时填默认 body 字段用。**server 不主动注入 body**,只通过 API
-      暴露给 client。
-    """
-
-    name: str  # 用户面名称(`chariot provider list` 列出来 / client 在 body.model 写)
-    type: str  # builder 类型 key(mock / anthropic / llama_local 等)
-    options: dict[str, Any]
-    params: dict[str, Any] = field(default_factory=_empty_params)
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 """`chariot provider <subcmd>` —— Provider entry CRUD + 默认切换。
 
-子命令:list / show / use / probe / add / edit / rm / copy。
+子命令:list / show / status / use / probe / add / update / delete / copy。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ProviderRepo + ProviderProber。
 0.6.0 起 `chariot model` rename 成 `chariot provider`(跟 ProviderRegistry /
@@ -12,6 +12,7 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
 - `chariot provider list`:列出 entries(name / type / default 标记)+ 已注册 type
 - `chariot provider show [<name>]`:不带参数 = 当前默认;带参数 = 指定 entry 详情
   (api_key 本体打码,只显示来源标识)
+- `chariot provider status`:默认 provider + capabilities 概览
 - `chariot provider probe <name>`:发 1 条最小请求验通断(**~1 token 费用**;mock 零费用)
 
 切换:
@@ -19,12 +20,15 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
   时走它
 
 CRUD:
-- `chariot provider add --name X --type Y [-o k=v] [-p k=v]`:新建 entry
-- `chariot provider edit <name> [--type T] [-o k=v] [-p k=v]`:改 entry
-- `chariot provider rm <name>`:删 entry
-- `chariot provider copy <name> [--as new-name]`:复制(碰撞自动 _copy_N)
+- `chariot provider add --name X --type Y -o k=v -o k=v ... [-p k=v]`: ?? entry
+  ?: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b
+        -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY`
+- `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`: ?? entry
+- `chariot provider delete <name>`: ?? entry
+- `chariot provider rm <name>`: ?? entry ??(??)
+- `chariot provider copy <name> [--as new-name]`: ??(???? _copy_N)
 
-`-o key=value` / `-p key=value` 都可重复;value 全部按字符串处理。
+`-o key=value` / `-p key=value` ????;value ?????????
 """
 
 from __future__ import annotations
@@ -66,8 +70,8 @@ async def _list() -> None:
     if not entries:
         Renderer.out("(DB 里没有 entry — `chariot provider add` 加一条)")
     else:
-        rows = [(e.name, e.type, "*" if e.name == default_name else "") for e in entries]
-        Renderer.table(["name", "type", "default"], rows, title="entries")
+        rows = [(e.name, e.type, "*" if e.name == default_name else "", _caps_short(e.type)) for e in entries]
+        Renderer.table(["name", "type", "default", "capabilities"], rows, title="entries")
 
     types = sorted(ProviderRegistry.known_types())
     Renderer.out(f"已注册 type:{', '.join(types)}")
@@ -114,6 +118,7 @@ async def _show(name: str | None) -> None:
         ("name", entry.name),
         ("type", entry.type),
         ("default", "yes" if is_default else "no"),
+        ("capabilities", _caps_short(entry.type)),
     ]
     # options:api_key 单独打码,其余字段原样展示
     for k, v in entry.options.items():
@@ -121,6 +126,36 @@ async def _show(name: str | None) -> None:
     for k, v in entry.params.items():
         rows.append((f"params.{k}", str(v)))
     Renderer.table(["field", "value"], rows, title=f"provider {entry.name}")
+
+
+@provider_app.command("status", help="查看 provider 概览(默认 provider / capabilities / 列表)")
+def status_cmd() -> None:
+    asyncio.run(_status())
+
+
+async def _status() -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        repo = ProviderRepo(session)
+        entries = await repo.list_entries()
+        default = await repo.get_default()
+
+    rows = [
+        ("provider count", str(len(entries))),
+        ("default provider", default.name if default is not None else "(none)"),
+        ("registered types", ", ".join(sorted(ProviderRegistry.known_types()))),
+    ]
+    Renderer.table(["field", "value"], rows, title="provider status")
+    if entries:
+        table_rows = [
+            (
+                entry.name,
+                entry.type,
+                "*" if default is not None and entry.name == default.name else "",
+                _caps_short(entry.type),
+            )
+            for entry in entries
+        ]
+        Renderer.table(["name", "type", "default", "capabilities"], table_rows, title="providers")
 
 
 def _redact(key: str, value: object) -> str:
@@ -134,6 +169,20 @@ def _redact(key: str, value: object) -> str:
             return "(empty)"
         return f"(set, len={len(value)})"
     return str(value)
+
+
+def _caps_short(type_name: str) -> str:
+    caps = ProviderRegistry.capabilities_for(type_name)
+    parts: list[str] = []
+    if caps.get("supports_system"):
+        parts.append("system")
+    if caps.get("supports_tools"):
+        parts.append("tools")
+    if caps.get("supports_tool_choice"):
+        parts.append("choice")
+    if caps.get("supports_thinking"):
+        parts.append("thinking")
+    return " / ".join(parts) if parts else "(none)"
 
 
 # ---------- use ----------
@@ -218,18 +267,52 @@ async def _probe(
 
 
 def _parse_kv(items: list[str], *, label: str) -> dict[str, Any]:
-    """`-x key=value` 重复 → dict;value 拆第一个 `=` 后保留(支持值含 `=`)。"""
+    """`-x key=value` ?? ? dict;value ???? `=` ???(???? `=`)?"""
     result: dict[str, Any] = {}
     for raw in items:
-        if "=" not in raw:
-            Renderer.die(f"{label} 必须是 key=value 形式: {raw!r}")
+        raw_text = raw.strip()
+        if _looks_like_json(raw_text):
+            Renderer.die(_kv_error_message(label, raw, json_like=True))
             return {}
-        k, _, v = raw.partition("=")
-        if not k:
-            Renderer.die(f"{label} key 不能为空: {raw!r}")
-            return {}
-        result[k] = v
+
+        parts = [raw]
+        if "=" not in raw and "," in raw:
+            parts = [part.strip() for part in raw.split(",") if part.strip()]
+
+        for part in parts:
+            if "=" in part:
+                k, _, v = part.partition("=")
+            elif ":" in part:
+                k, _, v = part.partition(":")
+            else:
+                Renderer.die(_kv_error_message(label, raw))
+                return {}
+            k = k.strip()
+            if not k or not _is_valid_kv_key(k):
+                Renderer.die(_kv_error_message(label, raw))
+                return {}
+            result[k] = v.strip()
     return result
+
+
+def _looks_like_json(raw: str) -> bool:
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
+
+
+def _is_valid_kv_key(key: str) -> bool:
+    return all(ch.isalnum() or ch in {"_", ".", "-"} for ch in key)
+
+
+def _kv_error_message(label: str, raw: str, *, json_like: bool = False) -> str:
+    base = (
+        f"{label} must be key=value, or comma-separated key:value pairs: {raw!r}\n"
+        f"template: chariot provider add --name NAME --type TYPE "
+        f"{label} key=value {label} key=value ...\n"
+        f"compat: {label} key:value,key:value,..."
+    )
+    if json_like:
+        return base + "\nnote: do not pass a whole JSON blob to provider add"
+    return base
 
 
 # ---------- add ----------
@@ -244,14 +327,12 @@ def add_cmd(
         typer.Option(
             "-o",
             "--option",
-            help="options key=value;可重复(build Provider 所需,如 model / api_key)",
+            help="options key=value;可重复(兼容 key:value,key:value 逗号形式)",
         ),
     ] = None,
     params: Annotated[
         list[str] | None,
-        typer.Option(
-            "-p", "--param", help="params key=value;可重复(runtime 默认值,如 temperature)"
-        ),
+        typer.Option("-p", "--param", help="params key=value;可重复(runtime 默认值,如 temperature)"),
     ] = None,
 ) -> None:
     asyncio.run(_add(name, type, options or [], params or []))
@@ -278,11 +359,11 @@ async def _add(name: str, type_: str, options: list[str], params: list[str]) -> 
     Renderer.out(f"+ {entry.name} (type={entry.type})")
 
 
-# ---------- edit ----------
+# ---------- update ----------
 
 
-@provider_app.command("edit", help="编辑现有 entry(改 type / options / params)")
-def edit_cmd(
+@provider_app.command("update", help="更新现有 entry(改 type / options / params)")
+def update_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
     type: Annotated[
         str | None,
@@ -293,7 +374,7 @@ def edit_cmd(
         typer.Option(
             "-o",
             "--option",
-            help="options key=value;可重复(整体替换 options,非 merge)",
+            help="options key=value;???(?: -o model=qwen2.5:1.5b -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY)",
         ),
     ] = None,
     params: Annotated[
@@ -305,10 +386,10 @@ def edit_cmd(
         ),
     ] = None,
 ) -> None:
-    asyncio.run(_edit(name, type, options, params))
+    asyncio.run(_update(name, type, options, params))
 
 
-async def _edit(
+async def _update(
     name: str,
     type_: str | None,
     options: list[str] | None,
@@ -337,10 +418,11 @@ async def _edit(
     Renderer.out(f"~ {entry.name} (type={entry.type})")
 
 
-# ---------- rm ----------
+# ---------- delete / rm ----------
 
 
-@provider_app.command("rm", help="删除 entry")
+@provider_app.command("delete", help="删除 entry")
+@provider_app.command("rm", help="删除 entry; `delete` 的兼容别名")
 def rm_cmd(
     name: Annotated[str, typer.Argument(help="要删的 entry 名")],
 ) -> None:

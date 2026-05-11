@@ -93,7 +93,7 @@ script 跑时这个条件满足,main 被触发。
 - **开发期还没装包**(或 editable install 没生效)
 - **调试 entry point 错误**(跳过 shim 层)
 - **手测 sidecar JSON-RPC**(终端喂帧:
-  `echo '{"id":1,"method":"list_convos","params":{}}' | uv run python -m chariot.sidecar`)
+  `echo '{"id":1,"method":"list_conversations","params":{}}' | uv run python -m chariot.sidecar`)
 
 ### 注意
 

@@ -30,8 +30,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from chariot.agent.chat_request import ChatRequest, Message
-from chariot.agent.config import ProviderEntry
 from chariot.agent.exceptions import ConfigError, ProviderError
+from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider
 from chariot.providers.registry import ProviderRegistry
 

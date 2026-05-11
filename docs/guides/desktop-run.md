@@ -1,4 +1,4 @@
-# 桌面端启动与本地运行指南
+﻿# 桌面端启动与本地运行指南
 
 > 覆盖"**不走 NSIS installer**"的几种跑桌面端方式:开发模式、产 exe 直接双击、跨机分发。
 > 面向:开发调试、内部 smoke、给同事发一份能立刻用的 exe。
@@ -14,6 +14,26 @@
 | 产 exe 自己双击 | `bun run tauri build --no-bundle --debug` | `target/debug/chariot-desktop.exe`(~150 MB) | ~1-2 min |
 | 产 exe 分发给别人 | `bun run tauri build --no-bundle` | `target/release/chariot-desktop.exe`(~50 MB) | ~3-8 min |
 | 底层 Rust 编译 | `cargo build --release` | 同上 | 同上,但不含 frontend dist 自动拷贝 |
+
+---
+
+## 0. 完整启动链路
+
+```powershell
+uv sync
+bun install
+uv run --group build python scripts/build.py --target sidecar --sync-sidecar
+cd packages/desktop/tauri
+bun run tauri dev
+```
+
+每条命令的作用:
+
+- `uv sync`:准备 Python 虚拟环境和后端依赖,CLI / sidecar / 测试都靠它。
+- `bun install`:安装前端、Tauri CLI 和桌面壳依赖。
+- `uv run --group build python scripts/build.py --target sidecar --sync-sidecar`:把 Python sidecar 打成 `chariot-sidecar.exe`,再复制到 `packages/desktop/tauri/binaries/`,这是 `tauri dev` 能正常 spawn sidecar 的前提。
+- `cd packages/desktop/tauri`:切到 Tauri Rust 工程目录,后续 `bun run tauri ...` 都在这里执行。
+- `bun run tauri dev`:启动桌面程序。它会先拉起 Vite dev server,再编译 Rust 壳,最后 spawn sidecar 并打开窗口。
 
 ---
 

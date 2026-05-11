@@ -30,7 +30,7 @@
 ## v2:AIAgent 进化(chariot 的核心方向)
 
 - ✅ **多轮对话记忆**(0.4.0)—— `conversations` + `messages` 表;
-  `X-Chariot-Convo` header 触发 stateful;Agent.handle 接 ConvoRepo
+  `X-Chariot-Conversation` header 触发 stateful;Agent.handle 接 ConversationRepo
 - ✅ **工具调用 / function calling**(0.4.0)—— BaseTool + ToolRegistry + 4 内置
   工具(read_file / list_dir / shell_exec / http_get);Agent slow path 工具循环
 - ✅ **协议级流式工具循环**(0.5.0)—— Agent 全程 streaming;`tool_use` /
@@ -50,7 +50,7 @@
     下轮 load history 拿到半截)。Surface 接入:CLI 加 SIGINT handler;
     sidecar 加 `chat.cancel` JSON-RPC 方法;tool 子类(尤其 shell_exec)
     在 `try/finally` 里 kill subprocess。0.6.0 内核阶段不做(S.6 已收尾)
-- **OpenAIProvider + Memory + Skills**(0.7.0)—— 自演化的两大数据底座 + 多 Provider:
+- **OpenAIProvider + Memory + Skills**(0.7.0,已完成)—— 自演化的两大数据底座 + 多 Provider:
   - `chariot/providers/builtin/openai.py`:覆盖 OpenAI 兼容协议生态(直接
     OpenAI / Azure / OpenRouter / Kimi / DeepSeek / z.ai / 通义 / Xiaomi /
     NVIDIA NIM 等)

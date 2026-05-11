@@ -54,12 +54,7 @@ class LogRepo:
         if until is not None:
             filters.append(LogEntry.created_at <= until)
 
-        stmt = (
-            select(LogEntry)
-            .order_by(LogEntry.created_at.desc(), LogEntry.id.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(LogEntry).order_by(LogEntry.created_at.desc(), LogEntry.id.desc()).limit(limit).offset(offset)
         if filters:
             stmt = stmt.where(and_(*filters))
 

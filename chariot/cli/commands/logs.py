@@ -33,9 +33,7 @@ _POLL_BATCH_LIMIT = 200
 
 def logs_cmd(
     n: Annotated[int, typer.Option("-n", "--limit", help="最多显示多少条")] = 50,
-    follow: Annotated[
-        bool, typer.Option("-f", "--follow", help="持续跟踪新日志(Ctrl+C 退出)")
-    ] = False,
+    follow: Annotated[bool, typer.Option("-f", "--follow", help="持续跟踪新日志(Ctrl+C 退出)")] = False,
 ) -> None:
     """显示请求日志;默认表格打印 N 条,--follow 持续追加增量。"""
     try:
@@ -66,9 +64,7 @@ async def _follow_loop(session_maker: async_sessionmaker[AsyncSession], *, tail:
     while True:
         await asyncio.sleep(_POLL_INTERVAL_SEC)
         async with session_maker() as session:
-            batch = list(
-                await LogRepo(session).list_logs(limit=_POLL_BATCH_LIMIT, offset=0, since=last_seen)
-            )
+            batch = list(await LogRepo(session).list_logs(limit=_POLL_BATCH_LIMIT, offset=0, since=last_seen))
         if not batch:
             continue
         batch_asc = list(reversed(batch))

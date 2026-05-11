@@ -37,7 +37,7 @@ from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.agent.exceptions import ConfigError, ProviderError
 from chariot.providers._sse import SseParser
-from chariot.providers.base import BaseProvider, BaseProviderConfig
+from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 from chariot.providers.clients import ClientCache, ClientSpec
 
 
@@ -55,6 +55,7 @@ class AnthropicProvider(BaseProvider):
     """
 
     _DEFAULT_BASE_URL: ClassVar[str] = "https://api.anthropic.com"
+    capabilities = BaseProviderCapabilities()
     _DEFAULT_API_KEY_ENV: ClassVar[str] = "ANTHROPIC_API_KEY"
     _BASE_URL_ENV: ClassVar[str] = "ANTHROPIC_BASE_URL"  # Anthropic SDK 标准 env
     _ANTHROPIC_VERSION: ClassVar[str] = "2023-06-01"
@@ -72,9 +73,7 @@ class AnthropicProvider(BaseProvider):
     # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发);
     # `provider_name` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
     # 用 `self.config.model` 显式写入)
-    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"provider_name", "convo_id", "agent_id"}
-    )
+    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"provider_name", "conversation_id", "agent_id"})
 
     def __init__(
         self,
@@ -233,7 +232,7 @@ class AnthropicProvider(BaseProvider):
 
         步骤:
         1. `dataclasses.asdict(req)` 拿全字段
-        2. 剔除 chariot 扩展字段(`provider_name` / `convo_id` / `agent_id`);
+        2. 剔除 chariot 扩展字段(`provider_name` / `conversation_id` / `agent_id`);
           `provider_name` 是 chariot 路由 key,Anthropic API 不识别
         3. 剔除 `None` 值字段(Anthropic API 不接受 null,且 max_tokens 等
           有默认 4096 不能漏)
@@ -245,9 +244,7 @@ class AnthropicProvider(BaseProvider):
         """
         full = dataclasses.asdict(req)
         body: dict[str, Any] = {
-            k: v
-            for k, v in full.items()
-            if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
+            k: v for k, v in full.items() if k not in self._CHARIOT_EXTENSION_FIELDS and v is not None
         }
         body["model"] = req.model or self.config.model
         body["stream"] = True

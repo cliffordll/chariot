@@ -18,7 +18,7 @@ Registry dispatch + 子类工厂"模式,工厂 classmethod 名字统一;不耦�
 -------------------------------
 - **无状态**:每次 execute 独立,实例之间不共享内存,失败不影响下一次
 - **不碰 DB**:Tool 只做"输入 → 输出";`messages` 表持久化由 Agent 负责
-- **不感知 convo_id**:Tool 不知道"这是哪个会话的第几轮工具调用"
+- **不感知 conversation_id**:Tool 不知道"这是哪个会话的第几轮工具调用"
 
 返回形态:`execute` 返 anthropic tool_result content block 形态,
 `tool_use_id` 字段由 Agent 在工具循环里填(Tool 不管对应哪个 tool_use)。

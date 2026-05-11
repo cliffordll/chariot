@@ -1,14 +1,4 @@
-"""`chariot` CLI 入口。
-
-子命令(0.6.0 库化后,撤 daemon `start` / `stop`;0.6.0 起
-`model` rename → `provider`,`conversation` rename → `convo`):
-
-- `chariot status`     —— DB 路径 / providers / tools / version
-- `chariot logs [-n N]`
-- `chariot stats [period]`
-- `chariot chat [text]` —— 一次性 / REPL,直接构造 AIAgent
-- `chariot provider ...` / `tool ...` / `convo ...`
-"""
+"""`chariot` CLI entrypoint."""
 
 from __future__ import annotations
 
@@ -16,34 +6,28 @@ from typing import Annotated
 
 import typer
 
-from chariot.cli.commands import (
-    chat as chat_mod,
-)
-from chariot.cli.commands import (
-    convo as convo_mod,
-)
-from chariot.cli.commands import (
-    logs as logs_mod,
-)
-from chariot.cli.commands import (
-    provider as provider_mod,
-)
-from chariot.cli.commands import (
-    stats as stats_mod,
-)
-from chariot.cli.commands import (
-    status as status_mod,
-)
-from chariot.cli.commands import (
-    tool as tool_mod,
-)
+from chariot.cli.commands import agent as agent_mod
+from chariot.cli.commands import chat as chat_mod
+from chariot.cli.commands import checkpoint as checkpoint_mod
+from chariot.cli.commands import context as context_mod
+from chariot.cli.commands import conversation as conversation_mod
+from chariot.cli.commands import evals as eval_mod
+from chariot.cli.commands import job as job_mod
+from chariot.cli.commands import logs as logs_mod
+from chariot.cli.commands import memory as memory_mod
+from chariot.cli.commands import prompt as prompt_mod
+from chariot.cli.commands import provider as provider_mod
+from chariot.cli.commands import skill as skill_mod
+from chariot.cli.commands import stats as stats_mod
+from chariot.cli.commands import status as status_mod
+from chariot.cli.commands import task as task_mod
+from chariot.cli.commands import tool as tool_mod
 
-# 所有子 Typer 共享的 context 配置:让 `-h` 也能触发 help(默认只认 `--help`)
 HELP_CONTEXT: dict[str, list[str]] = {"help_option_names": ["-h", "--help"]}
 
 app = typer.Typer(
     name="chariot",
-    help="chariot — 本地智能体 CLI",
+    help="chariot - local agent CLI",
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
     context_settings=HELP_CONTEXT,
@@ -51,13 +35,12 @@ app = typer.Typer(
 
 
 @app.callback()
-def _root(  # pyright: ignore[reportUnusedFunction] — typer @app.callback() 装饰器注册
+def _root(  # pyright: ignore[reportUnusedFunction]
     quiet: Annotated[
         bool,
-        typer.Option("--quiet", "-q", help="静默模式:抑制成功输出(错误仍打 stderr)"),
+        typer.Option("--quiet", "-q", help="quiet mode: suppress success output"),
     ] = False,
 ) -> None:
-    """根 callback:处理全局 flag。子命令执行前会先跑这里。"""
     from chariot.cli.render import Renderer
 
     Renderer.QUIET = quiet
@@ -70,7 +53,16 @@ for mod in (
     chat_mod,
     provider_mod,
     tool_mod,
-    convo_mod,
+    agent_mod,
+    task_mod,
+    job_mod,
+    conversation_mod,
+    memory_mod,
+    prompt_mod,
+    eval_mod,
+    skill_mod,
+    checkpoint_mod,
+    context_mod,
 ):
     mod.register(app)
 

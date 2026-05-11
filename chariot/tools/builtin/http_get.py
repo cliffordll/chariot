@@ -1,32 +1,4 @@
-"""HttpGetTool — HTTP GET,带域白名单 + max_bytes 限制(0.4.0 内置工具)。
-
-options
--------
-- `allowed_domains` (list[str]):允许访问的 host 精确匹配列表。
-  **空列表 → 所有 GET 拒绝**(等价工具禁用)
-- `max_bytes` (int):响应体最大字节数,默认 524288(512 KiB)
-
-输入 schema
------------
-- `url` (str, required):完整 URL(必须 http/https)
-- `headers` (dict[str, str], optional):额外请求头
-
-返回
-----
-- 成功:`tool_result` 含 `{status, body, headers, truncated}` 的 JSON
-  - body 是字符串(UTF-8 解码;失败 fallback base64,前缀 `[base64]`)
-  - headers 是响应头 dict(全小写 key)
-  - truncated 表示是否被 max_bytes 截断
-- 失败:is_error=True(域不在白名单 / URL 非 http(s) / 网络错误)
-
-安全注意
---------
-- 域白名单严格精确匹配 host,**不支持子域通配**(`*.example.com`)
-- 不支持其它 method(POST / PUT 等);0.4.x 看需求
-- 不跟随重定向到 _未_ 在白名单的域(httpx 默认不跟随 redirect,这里也保持)
-
-模块级零自由函数,所有逻辑收在 `HttpGetTool` 类里。
-"""
+"""HTTP GET tool with allow-list and max-bytes guardrails."""
 
 from __future__ import annotations
 
@@ -40,13 +12,11 @@ import httpx
 from chariot.agent.config import ConfigError, ToolEntry
 from chariot.tools.base import BaseTool
 
-_DEFAULT_MAX_BYTES = 524288  # 512 KiB
+_DEFAULT_MAX_BYTES = 524288
 _REQUEST_TIMEOUT_S = 30.0
 
 
 class HttpGetTool(BaseTool):
-    """HTTP GET 工具,带域白名单 + 响应体大小限制。"""
-
     _DESCRIPTION: ClassVar[str] = (
         "Make an HTTP GET request to a URL on the configured allow-list. "
         "Returns response status, headers, and body (truncated to max_bytes). "
@@ -67,20 +37,40 @@ class HttpGetTool(BaseTool):
     def create(cls, entry: ToolEntry) -> Self:
         allowed_raw = entry.options.get("allowed_domains", [])
         max_bytes = entry.options.get("max_bytes", _DEFAULT_MAX_BYTES)
-        if not isinstance(allowed_raw, list) or not all(
-            isinstance(d, str) for d in cast(list[Any], allowed_raw)
-        ):
-            raise ConfigError(
-                f"http_get.options.allowed_domains 必须是字符串数组,得到 {allowed_raw!r}"
-            )
+        allowed_list = cls._parse_allowed_domains(allowed_raw)
         if not isinstance(max_bytes, int) or max_bytes <= 0:
             raise ConfigError(f"http_get.options.max_bytes 必须是正整数,得到 {max_bytes!r}")
-        allowed_list = cast(list[str], allowed_raw)
         return cls(
             name=entry.name,
             allowed_domains=tuple(d.lower() for d in allowed_list),
             max_bytes=max_bytes,
         )
+
+    @staticmethod
+    def _parse_allowed_domains(raw: Any) -> list[str]:
+        """Accept canonical list[str] plus a few legacy string encodings."""
+
+        if isinstance(raw, list) and all(isinstance(d, str) for d in cast(list[Any], raw)):
+            return cast(list[str], raw)
+
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list) and all(isinstance(d, str) for d in cast(list[Any], parsed)):
+                return cast(list[str], parsed)
+            if text.startswith("[") and text.endswith("]"):
+                inner = text[1:-1].strip()
+                if not inner:
+                    return []
+                return [part.strip().strip("'\"") for part in inner.split(",") if part.strip()]
+            return [part.strip() for part in text.split(",") if part.strip()]
+
+        raise ConfigError(f"http_get.options.allowed_domains 必须是字符串数组,得到 {raw!r}")
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -158,7 +148,6 @@ class HttpGetTool(BaseTool):
         }
 
     def _make_client(self) -> httpx.AsyncClient:
-        """生成发请求用的 client。测试侧可在实例上替换这个方法注入 MockTransport。"""
         return httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S)
 
     @staticmethod

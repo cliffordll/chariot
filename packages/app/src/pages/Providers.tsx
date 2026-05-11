@@ -34,6 +34,7 @@ import {
   type ApiError,
   type ProviderEntry,
   type ProvidersListResponse,
+  type ProviderStatusResponse,
 } from "@/lib/api";
 
 /**
@@ -45,7 +46,7 @@ import {
  *   跟 Provider 概念不是一回事 —— Provider 是 chariot 内部的路由 entry,
  *   model 是上游 LLM 真实 id
  * - 展开行 → ParamsEditor:KV 形式编辑 sampling 默认参数,Save 写 DB
- * - 新建 / 编辑 / 复制 / 删除 entry(走 sidecar `add_provider` / `edit_provider` /
+ * - 新建 / 编辑 / 复制 / 删除 entry(走 sidecar `add_provider` / `update_provider` /
  *   `delete_provider` RPC method)
  * - Test 按钮跑探针(`probe_provider`)
  *
@@ -122,7 +123,7 @@ const TEMPLATES: ProviderTemplate[] = [
 
 type ProvidersState =
   | { kind: "loading" }
-  | { kind: "ok"; data: ProvidersListResponse }
+  | { kind: "ok"; data: ProvidersListResponse; status: ProviderStatusResponse }
   | { kind: "err"; message: string };
 
 type ProbeState =
@@ -150,8 +151,13 @@ export default function Providers() {
   const load = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
-      const data = await api.listModels();
-      setProvidersState({ kind: "ok", data });
+      const [{ providers }, status] = await Promise.all([api.listProviders(), api.getProviderStatus()]);
+      const data: ProvidersListResponse = {
+        available: providers.map((p) => p.name),
+        types: [],
+        entries: providers,
+      };
+      setProvidersState({ kind: "ok", data, status });
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setProvidersState({ kind: "err", message: msg });
@@ -170,7 +176,7 @@ export default function Providers() {
   const runProbe = useCallback(async (name: string) => {
     setProbeStates((s) => ({ ...s, [name]: { kind: "probing" } }));
     try {
-      const r = await api.probeModel(name);
+      const r = await api.probeProvider(name);
       setProbeStates((s) => ({
         ...s,
         [name]: r.ok
@@ -241,6 +247,7 @@ export default function Providers() {
         onProbe={runProbe}
         onEdit={openEdit}
         onDuplicate={openDuplicate}
+        onUse={(name) => void api.useProvider(name).then(() => void load())}
         onDelete={(name) => setDel({ open: true, name })}
         onParamsSaved={() => void load()}
       />
@@ -278,6 +285,7 @@ function ProvidersCard({
   onProbe,
   onEdit,
   onDuplicate,
+  onUse,
   onDelete,
   onParamsSaved,
 }: {
@@ -288,6 +296,7 @@ function ProvidersCard({
   onProbe: (name: string) => void;
   onEdit: (name: string) => void;
   onDuplicate: (name: string) => void;
+  onUse: (name: string) => void;
   onDelete: (name: string) => void;
   onParamsSaved: () => void;
 }) {
@@ -306,9 +315,11 @@ function ProvidersCard({
     );
   }
   const { data } = providersState;
+  const status = providersState.status;
 
   return (
     <div className="max-w-4xl rounded-lg border border-border p-4">
+      <ProviderStatusBanner status={status} />
       {data.entries.length === 0 ? (
         <p className="mb-4 text-xs text-muted-foreground">
           DB 里没有 entry。点击右上角 <code className="font-mono">+ Add</code> 新建一条。
@@ -331,6 +342,7 @@ function ProvidersCard({
                 onProbe={() => onProbe(entry.name)}
                 onEdit={() => onEdit(entry.name)}
                 onDuplicate={() => onDuplicate(entry.name)}
+                onUse={() => onUse(entry.name)}
                 onDelete={() => onDelete(entry.name)}
                 onParamsSaved={onParamsSaved}
               />
@@ -341,7 +353,7 @@ function ProvidersCard({
 
       <div className="text-xs text-muted-foreground">
         registered types:{" "}
-        {data.types.map((t, i) => (
+        {status.known_types.map((t, i) => (
           <span key={t}>
             {i > 0 && ", "}
             <code className="font-mono">{t}</code>
@@ -360,6 +372,7 @@ function ProviderRow({
   onProbe,
   onEdit,
   onDuplicate,
+  onUse,
   onDelete,
   onParamsSaved,
 }: {
@@ -370,6 +383,7 @@ function ProviderRow({
   onProbe: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
+  onUse: () => void;
   onDelete: () => void;
   onParamsSaved: () => void;
 }) {
@@ -391,6 +405,12 @@ function ProviderRow({
             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
               {entry.type}
             </Badge>
+            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+              {formatCapabilities(entry.capabilities)}
+            </Badge>
+            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+              {formatHealth(entry.health)}
+            </Badge>
           </button>
           <ProbeStatus state={state} />
           <div className="ml-auto flex items-center gap-1">
@@ -410,6 +430,15 @@ function ProviderRow({
               onClick={onDuplicate}
             >
               Dup
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={onUse}
+              disabled={entry.default === true}
+            >
+              {entry.default === true ? "Current" : "Default"}
             </Button>
             <Button
               variant="outline"
@@ -438,6 +467,41 @@ function ProviderRow({
       )}
     </li>
   );
+}
+
+function ProviderStatusBanner({ status }: { status: ProviderStatusResponse }) {
+  return (
+    <div className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span>
+          <span className="text-muted-foreground">default:</span>{" "}
+          <code className="font-mono">{status.default_provider ?? "(none)"}</code>
+        </span>
+        <span>
+          <span className="text-muted-foreground">providers:</span>{" "}
+          <code className="font-mono">{status.provider_count}</code>
+        </span>
+        <span className="text-muted-foreground">known types:</span>
+        <span className="font-mono">{status.known_types.join(", ") || "(none)"}</span>
+      </div>
+      {status.providers.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {status.providers.map((p) => (
+            <Badge key={p.name} variant={p.default ? "default" : "secondary"} className="text-[10px]">
+              {p.name}:{formatHealth(p.health)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatHealth(health: ProviderEntry["health"]): string {
+  if (!health) return "health: unknown";
+  const state = health.last_ok ? "healthy" : `degraded:${health.error_code ?? "unknown"}`;
+  const latency = health.latency_ms == null ? "n/a" : `${health.latency_ms}ms`;
+  return `${state} / ${latency}`;
 }
 
 /** 展开区 · options 主键只读展示(model / api_key 脱敏 / base_url)。 */
@@ -500,6 +564,20 @@ function maskApiKey(value: string): string {
   if (value.length === 0) return "";
   if (value.length <= 12) return "***";
   return value.slice(0, 7) + "***...***" + value.slice(-4);
+}
+
+function formatCapabilities(caps: {
+  supports_system: boolean;
+  supports_tools: boolean;
+  supports_tool_choice: boolean;
+  supports_thinking: boolean;
+}): string {
+  const parts: string[] = [];
+  if (caps.supports_system) parts.push("system");
+  if (caps.supports_tools) parts.push("tools");
+  if (caps.supports_tool_choice) parts.push("choice");
+  if (caps.supports_thinking) parts.push("thinking");
+  return parts.length > 0 ? parts.join(" / ") : "(none)";
 }
 
 function ProbeStatus({ state }: { state: ProbeState }) {
@@ -630,7 +708,7 @@ function ParamsEditor({
     }
     setSubmitting(true);
     try {
-      await api.updateModel(entry.name, { params });
+      await api.updateProvider(entry.name, { params });
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -806,12 +884,12 @@ function AddEditDialog({
     setSubmitting(true);
     try {
       if (mode.kind === "add") {
-        await api.createModel({ name: name.trim(), type, options: cleanOptions });
+        await api.addProvider({ name: name.trim(), type, options: cleanOptions });
       } else if (mode.kind === "edit") {
-        await api.updateModel(initial!.name, { type, options: cleanOptions });
+        await api.updateProvider(initial!.name, { type, options: cleanOptions });
       } else {
         // duplicate: server 复制源 entry,as=new-name;type/options/params 都不在请求里
-        await api.duplicateModel(initial!.name, name.trim());
+        await api.duplicateProvider(initial!.name, name.trim());
       }
       onSuccess();
       onClose();
@@ -981,7 +1059,7 @@ function DeleteDialog({
     setErr(null);
     setSubmitting(true);
     try {
-      await api.deleteModel(name);
+      await api.deleteProvider(name);
       onSuccess();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);

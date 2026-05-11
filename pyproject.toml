@@ -45,3 +45,10 @@ markers = [
 ]
 [tool.pyright]
 pythonVersion = "3.12"
+typeCheckingMode = "basic"
+# 项目惯例:dataclass field(default_factory=dict) 大量出现,
+# `# type: ignore` 也常见;关掉 unknown-type 类规则以匹配现实代码风格
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"

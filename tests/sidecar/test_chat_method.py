@@ -7,7 +7,7 @@ JsonRpcServer 走完完整 dispatch 路径"的端到端行为,而非单帧解析
 - 流式:N 个 ChatEvent → N 个 chat_event notify + 1 个 response
 - params 校验:provider_name 缺 / messages 缺 / role 非法 / content 类型错 →
   ERR_INVALID_PARAMS
-- 可选字段 pass-through:model / convo_id / max_tokens / system 进 ChatRequest
+- 可选字段 pass-through:model / conversation_id / max_tokens / system 进 ChatRequest
 - response shape:`{stream_id, ended_at}`(stream_id 是 UUID4 hex,ended_at
   是 epoch 浮点秒)
 - ChatEvent payload shape:`dataclasses.asdict` 形态(kind / message /
@@ -24,6 +24,8 @@ from typing import Any
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
+from chariot.database.session import init_db
+from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
 
@@ -66,7 +68,7 @@ class _MockAgent:
         self.events = list(events)
         self.last_req: ChatRequest | None = None
 
-    async def run(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         self.last_req = req
         for ev in self.events:
             yield ev
@@ -74,9 +76,7 @@ class _MockAgent:
 
 def _chat_request_frame(rid: int, params: dict[str, Any]) -> bytes:
     """拼一帧 chat request(带换行)。"""
-    return (
-        json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n"
-    ).encode()
+    return (json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n").encode()
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +171,32 @@ class TestChatStreaming:
         assert msg["model"] == "mock-1"
         assert msg["role"] == "assistant"
 
+    async def test_chat_writes_log_row(self, tmp_path: Path) -> None:
+        events = [
+            ChatEvent.message_start(message_id="m1", model="mock-1", usage={"input_tokens": 3}),
+            ChatEvent.message_delta_done(stop_reason="end_turn", usage={"output_tokens": 7}),
+            ChatEvent.message_done(),
+        ]
+        agent = _MockAgent(events)
+        server = JsonRpcServer()
+        db_path = tmp_path / "chariot.db"
+        register_methods(server, agent, db_path=db_path)
+
+        params = {"provider_name": "mock", "messages": [{"role": "user", "content": "hi"}]}
+        reader = make_reader(_chat_request_frame(1, params))
+        writer = MockWriter()
+        await server.serve(reader, writer)
+
+        sm = await init_db(db_path)
+        async with sm() as session:
+            logs = await LogRepo(session).list_logs(limit=10, offset=0)
+
+        assert len(logs) == 1
+        assert logs[0].provider == "mock"
+        assert logs[0].status == "ok"
+        assert logs[0].input_tokens == 3
+        assert logs[0].output_tokens == 7
+
 
 # ---------------------------------------------------------------------------
 # Params 校验
@@ -194,9 +220,7 @@ class TestParamsValidation:
         assert "provider_name" in line["error"]["message"]
 
     async def test_provider_name_empty_string(self) -> None:
-        line = await self._send(
-            {"provider_name": "", "messages": [{"role": "user", "content": "x"}]}
-        )
+        line = await self._send({"provider_name": "", "messages": [{"role": "user", "content": "x"}]})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
     async def test_missing_messages(self) -> None:
@@ -253,7 +277,7 @@ class TestOptionalFieldsPassThrough:
             "provider_name": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             "model": "claude-haiku-4-5",
-            "convo_id": "01H_TEST",
+            "conversation_id": "01H_TEST",
             "max_tokens": 1024,
             "system": "be nice",
         }
@@ -265,7 +289,7 @@ class TestOptionalFieldsPassThrough:
         assert captured is not None
         assert captured.provider_name == "mock"
         assert captured.model == "claude-haiku-4-5"
-        assert captured.convo_id == "01H_TEST"
+        assert captured.conversation_id == "01H_TEST"
         assert captured.max_tokens == 1024
         assert captured.system == "be nice"
 

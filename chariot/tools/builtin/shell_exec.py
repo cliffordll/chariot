@@ -98,9 +98,7 @@ class ShellExecTool(BaseTool):
         args_raw = input.get("args", [])
         if not isinstance(cmd, str) or not cmd:
             return self._error("input.cmd 必须是非空字符串")
-        if not isinstance(args_raw, list) or not all(
-            isinstance(a, str) for a in cast(list[Any], args_raw)
-        ):
+        if not isinstance(args_raw, list) or not all(isinstance(a, str) for a in cast(list[Any], args_raw)):
             return self._error("input.args 必须是字符串数组")
         args: list[str] = list(cast(list[str], args_raw))
 
