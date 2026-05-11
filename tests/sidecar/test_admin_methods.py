@@ -179,15 +179,15 @@ class TestConversationMethods:
 
 
 class TestToolMethods:
-    async def test_list_tools_returns_4_seeded(self, server: JsonRpcServer) -> None:
-        """seed_if_empty _?4 _?fixture(read_file / list_dir / shell_exec / http_get),
-        _?disabled_?"""
+    async def test_list_tools_returns_seeded(self, server: JsonRpcServer) -> None:
+        """seed_if_empty 落 5 条 fixture(read_file / list_dir / shell_exec / http_get
+        / propose_skill),全部 disabled。B6 wave 3 起 propose_skill 加入 seed。"""
         line = await _call(server, "list_tools")
         tools = line["result"]["tools"]
-        assert len(tools) == 4
+        assert len(tools) == 5
         names = sorted(t["name"] for t in tools)
-        assert names == ["http_get", "list_dir", "read_file", "shell_exec"]
-        # _____________?disabled
+        assert names == ["http_get", "list_dir", "propose_skill", "read_file", "shell_exec"]
+        # 全部 disabled
         assert all(not t["enabled"] for t in tools)
 
     async def test_enable_tool(self, server: JsonRpcServer) -> None:
