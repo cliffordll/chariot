@@ -147,11 +147,11 @@ uv run pytest -q
 烟测:
 
 ```powershell
-uv run chariot toolset add fs_safe --description "只读文件操作"
+uv run chariot toolset add --name fs_safe --description "只读文件操作"
 uv run chariot toolset members add fs_safe read_file
 uv run chariot toolset members add fs_safe list_dir
 uv run chariot agent update <name> --tool-profile fs_safe
-uv run chariot task add --goal "看一下这个仓库根目录" --agent <name>
+uv run chariot task create --goal "看一下这个仓库根目录" --agent-profile <name>
 uv run chariot task start <task-id>
 # 确认 task 跑出来只用了 read_file / list_dir
 ```
