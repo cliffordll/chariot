@@ -119,6 +119,7 @@ def register_methods(
     from chariot.sidecar.methods.provider import ProviderMethods
     from chariot.sidecar.methods.task import TaskMethods
     from chariot.sidecar.methods.tool import ToolMethods
+    from chariot.sidecar.methods.toolset import ToolsetMethods
 
     server.method("chat")(ChatMethod(runtime))
 
@@ -157,6 +158,15 @@ def register_methods(
     server.method("disable_tool")(tools.disable)
     server.method("config_tool")(tools.config)
     server.method("probe_tool")(tools.probe)
+
+    toolsets = ToolsetMethods(runtime)
+    server.method("list_toolsets")(toolsets.list_)
+    server.method("get_toolset")(toolsets.show)
+    server.method("create_toolset")(toolsets.add)
+    server.method("update_toolset")(toolsets.update)
+    server.method("delete_toolset")(toolsets.delete)
+    server.method("add_toolset_member")(toolsets.add_member)
+    server.method("remove_toolset_member")(toolsets.remove_member)
 
     providers = ProviderMethods(runtime)
     server.method("list_providers")(providers.list_)
