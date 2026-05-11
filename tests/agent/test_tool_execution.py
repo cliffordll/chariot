@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-from chariot.agent.tool_execution import ToolExecutionService
 from chariot.tools.base import BaseTool
+from chariot.tools.execution import ToolExecutionService
 
 
 class _StubTool(BaseTool):

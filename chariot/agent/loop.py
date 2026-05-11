@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.exceptions import ProviderError
-from chariot.agent.provider_contract import ProviderContractError, ProviderEventValidator
-from chariot.agent.tool_execution import ToolExecutionService
+from chariot.providers.contract import ProviderContractError, ProviderEventValidator
+from chariot.tools.execution import ToolExecutionService
 
 if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
