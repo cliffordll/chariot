@@ -416,12 +416,13 @@ class AIAgent:
         """Compose the active prompt bundle into `system`, then normalize request fields."""
         composed = req
         if self._sessionmaker is not None:
+            from chariot.prompt.composer import PromptComposer
             from chariot.repos.prompt_repo import PromptRepo
 
             async with self._sessionmaker() as session:
                 active_bundle = await PromptRepo(session).get_active_bundle()
                 if active_bundle is not None:
-                    system = PromptRepo.render_layers_text(
+                    system = PromptComposer.render_layers_text(
                         active_bundle.layers,
                         existing_system=req.system,
                         memory_entries=memory_entries,

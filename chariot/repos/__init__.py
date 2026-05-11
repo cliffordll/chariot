@@ -9,12 +9,7 @@ from chariot.repos.conversation_repo import Conversation, ConversationRepo
 from chariot.repos.eval_repo import EvalCaseEntry, EvalRepo, EvalRunEntry
 from chariot.repos.log_repo import LogRepo
 from chariot.repos.memory_repo import MemoryEntry, MemoryEventEntry, MemoryLinkEntry, MemoryRepo
-from chariot.repos.prompt_repo import (
-    PromptBundleEntry,
-    PromptRepo,
-    PromptTraceEntry,
-    PromptVersionEntry,
-)
+from chariot.repos.prompt_repo import PromptRepo
 from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.skill_repo import SkillEntry, SkillRepo
 from chariot.repos.task_repo import TaskRepo
@@ -38,10 +33,7 @@ __all__ = [
     "MemoryEventEntry",
     "MemoryLinkEntry",
     "MemoryRepo",
-    "PromptBundleEntry",
     "PromptRepo",
-    "PromptTraceEntry",
-    "PromptVersionEntry",
     "ProviderRepo",
     "SkillEntry",
     "SkillRepo",

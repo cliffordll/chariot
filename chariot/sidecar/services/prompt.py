@@ -1,4 +1,4 @@
-"""Prompt service for sidecar prompt-query methods."""
+"""Prompt API surface for sidecar prompt-query methods."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
-class PromptService:
+class PromptApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
