@@ -208,12 +208,15 @@ uv run chariot eval --baseline <baseline-run-id>
 ```powershell
 # 全局搜索(默认 limit 20,bm25 排序)
 uv run chariot conversation search "类型注解"
+uv run chariot conversation search "Sandbox"
 
 # 只搜某个 conversation 内
-uv run chariot conversation search "research notes" --conversation 01HABCDE...
+uv run chariot conversation search "research notes" --conversation 01KRBMJ4K07AJWPV4EKN513P0A
+uv run chariot conversation search "Sandbox" --conversation 01KRBMJ4K07AJWPV4EKN513P0A
 
 # 限制返回数量
 uv run chariot conversation search "fts5" --limit 5
+uv run chariot conversation search "shell" --limit 5
 
 # 灾备:FTS 索引跟 messages 表不同步时(测试漏调 sync / 早期版本 bug),全量重建
 uv run chariot conversation rebuild-fts
@@ -244,22 +247,30 @@ FTS5 表达式速查(透传给 SQLite,不做语法糖):
 context_length 阈值就调 AuxiliaryClient 把最早 N turn 摘要成
 `[context-summary] ...`。失败 fallback 直接丢最早一对 user/assistant turn。
 
+`auxiliary_clients` 表(v19 起,seed 一条 `summarizer` 指向 `mock`,开箱即用):
+
 ```powershell
-# 列已配置的 aux client(default seed:summarizer 指向 mock)
+# 列已配置的 aux client(默认有一条 'summarizer' → mock)
 uv run chariot auxiliary list
 
-# 加一个真正的 summarizer(指向 anthropic provider entry,小 budget)
+# 想用真实 claude 做摘要:删了默认 mock,再 add 一条同名 summarizer
+uv run chariot auxiliary rm summarizer
 uv run chariot auxiliary add --name summarizer --provider claude `
-  --model claude-haiku-4-5-20251001 --params '{"max_tokens":256,"temperature":0.3}'
+    --model claude-haiku-4-5-20251001 --param max_tokens=256 --param temperature=0.3
 
-# 查触发情况:压缩事件落 audit_events + B1 trace turn.meta 标记 context_compressed=true
-uv run chariot trace list --status completed | Select-Object -First 5
-# 找一条 turn 里 meta.context_compressed=true 的 turn,view 看 [context-summary] 插入位置
+# 改 params(整体替换);改 model(`--model -` 表 clear)
+uv run chariot auxiliary update summarizer --param max_tokens=512
+uv run chariot auxiliary update summarizer --model -    # 回到继承 provider 的 model
+
+# 跑一段长对话(20+ turn,单 turn 大 prompt)后看 trace 里压缩落地
+uv run chariot trace list --limit 5
+# 找一条 meta.context_compressed=true 的 turn,view 看 [context-summary] 插入位置
 uv run chariot trace view <turn-id>
 ```
 
-压缩是 transparent 的(主调用方不感知);要测它生效,跑一段长对话(20+ turn,
-单 turn 大 prompt)然后看 trace meta。
+压缩透明(主调用方不感知);只有 `summarizer` 这一条 entry 名字会被 AIAgent
+bootstrap 时认得 —— 其它名字的 aux client 可以共存,但当前 wave 不用;预留给
+B4 critic / B5 guardrails 等副任务路由。
 
 ---
 

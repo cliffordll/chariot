@@ -196,6 +196,20 @@ class TurnHandle:
         except Exception as exc:  # pragma: no cover - best-effort 容错
             _LOG.warning("trace checkpoint write failed: %s", exc)
 
+    async def merge_meta(self, patch: dict[str, Any]) -> None:
+        """shallow-merge `patch` 到 trace_turns.meta;同时回写 in-memory `self.meta`
+        让调用方读最新值。turn_id=None / disabled / row 已没了 → silent no-op。"""
+        if not patch:
+            return
+        self.meta.update(patch)
+        if self.turn_id is None or self.writer._disabled:
+            return
+        try:
+            async with self.writer._session() as session:
+                await TraceRepo(session).merge_turn_meta(self.turn_id, patch)
+        except Exception as exc:  # pragma: no cover - best-effort 容错
+            _LOG.warning("trace merge_turn_meta write failed: %s", exc)
+
     async def finalize(
         self,
         *,

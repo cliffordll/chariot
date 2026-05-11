@@ -36,6 +36,7 @@ from chariot.memory.policy import MemoryPolicy
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.context.compressor import ContextCompressor
     from chariot.models.agent import AgentProfile
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
@@ -95,6 +96,7 @@ class AIAgent:
         providers: dict[str, BaseProvider],
         tools: dict[str, BaseTool],
         sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+        context_compressor: ContextCompressor | None = None,
     ) -> None:
         from chariot.trace import TraceWriter
 
@@ -104,6 +106,9 @@ class AIAgent:
         # Phase B1:trace 写入入口。best-effort,失败不阻断主链路;
         # sessionmaker=None 时 writer 自动退化为 no-op。
         self._trace = TraceWriter(sessionmaker)
+        # B3 wave 2:可选副 model 压缩器(stateful 长对话用);bootstrap 时若
+        # auxiliary_clients 表里有 'summarizer' 行就装上,否则保持 None(noop)。
+        self._context_compressor = context_compressor
 
     # ---- 装载 ----
 
@@ -136,8 +141,11 @@ class AIAgent:
         场景)。
         """
         from chariot.agent.config import ChariotConfig, ToolConfig
+        from chariot.context.compressor import ContextCompressor
         from chariot.database.session import init_db
+        from chariot.providers.auxiliary_client import AuxiliaryClient
         from chariot.providers.registry import ProviderRegistry
+        from chariot.repos.auxiliary_repo import AuxiliaryRepo
         from chariot.repos.prompt_repo import PromptRepo
         from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.tool_repo import ToolRepo
@@ -150,6 +158,7 @@ class AIAgent:
             await PromptRepo(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
+            aux_entries = await AuxiliaryRepo(session).list_entries()
 
         overrides = provider_overrides or {}
         providers: dict[str, BaseProvider] = {
@@ -161,7 +170,21 @@ class AIAgent:
         }
         tools: dict[str, BaseTool] = {entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools}
 
-        return cls(providers=providers, tools=tools, sessionmaker=sm)
+        # B3 wave 2:装 ContextCompressor —— auxiliary_clients 表里有 'summarizer'
+        # 且其 provider_entry 已装时构造,否则保持 None(运行时跳过压缩)。
+        compressor: ContextCompressor | None = None
+        for aux_entry in aux_entries:
+            if aux_entry.name != "summarizer":
+                continue
+            aux_provider = providers.get(aux_entry.provider_entry)
+            if aux_provider is None:
+                break  # dangling reference,fallback noop
+            compressor = ContextCompressor(
+                aux_client=AuxiliaryClient(entry=aux_entry, provider=aux_provider),
+            )
+            break
+
+        return cls(providers=providers, tools=tools, sessionmaker=sm, context_compressor=compressor)
 
     # ---- 资源访问(供 surface 直调 repo) ----
 
@@ -409,6 +432,7 @@ class AIAgent:
         )
         full_req = dataclasses.replace(req, messages=history)
         full_req = await self._prepare_request(full_req, provider, memory_entries, memory_policy, binding)
+        full_req = await self._maybe_compress_context(full_req, provider, turn)
         prompt_trace = await self._record_prompt_trace(
             session,
             full_req,
@@ -474,6 +498,52 @@ class AIAgent:
         """SELECT messages → list[Message](Claude 形态,直接喂 Provider)。"""
         rows = await repo.load_messages_as_anthropic(conversation_id)
         return [Message(role=row["role"], content=row["content"]) for row in rows]
+
+    # ---- B3 wave 2: 长对话压缩 ----
+
+    async def _maybe_compress_context(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        turn: TurnHandle | None,
+    ) -> ChatRequest:
+        """跑 ContextCompressor.maybe_compress;压缩了就把 result 写到 turn.meta。
+
+        无 compressor / 未触发 → 直接返原 req,trace meta 不动。
+        compressor 抛非预期异常 → best-effort 吞掉,返原 req(主链路不阻断)。
+        """
+        if self._context_compressor is None:
+            return req
+        context_length = self._provider_context_length(provider)
+        try:
+            new_req, result = await self._context_compressor.maybe_compress(req, context_length=context_length)
+        except Exception:  # pragma: no cover - best-effort 容错
+            return req
+        if result.compressed and turn is not None:
+            await turn.merge_meta(
+                {
+                    "context_compressed": True,
+                    "context_compression": {
+                        "strategy": result.strategy,
+                        "dropped_turns": result.dropped_turns,
+                        "prompt_tokens_estimate": result.prompt_tokens_estimate,
+                        "context_length": context_length,
+                    },
+                }
+            )
+        return new_req
+
+    @staticmethod
+    def _provider_context_length(provider: BaseProvider) -> int:
+        """从 provider config / capabilities 读 context_length,缺省 8192。
+
+        约定:某些 provider 子类可在 config 上挂 `context_length` 字段(动态读)。
+        Mock / Anthropic 没挂时回退默认。
+        """
+        ctx = getattr(provider.config, "context_length", None)
+        if isinstance(ctx, int) and ctx > 0:
+            return ctx
+        return 8192
 
     # ---- default tools 注入 ----
 

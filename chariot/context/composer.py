@@ -1,8 +1,12 @@
-"""Context snapshot 构造逻辑。
+"""Context snapshot 构造逻辑(被动记录)。
 
 `ContextComposer` 把 `ChatRequest` + 运行时状态 + memory entries 组装成
 `ContextSnapshot`(7 个 `ContextSlice`)。无状态工具类,只暴露 `build_snapshot`
 classmethod;dataclass 形态在 `chariot/models/context.py`。
+
+**职责边界**:Composer **只记录**(给 B1 trace / audit / RL 回放快照),**不改
+request**。要在 provider 收到 request 前主动改写 messages(摘要 / pruning)的
+逻辑在 `ContextCompressor`(`compressor.py`)。
 """
 
 from __future__ import annotations

@@ -77,6 +77,14 @@ class DuplicateConversationId(ConfigError):  # noqa: N818 — 同上
     """conversation id 已存在(显式 create 路径撞已用 id)。"""
 
 
+class AuxiliaryClientNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好
+    """指定 auxiliary_client name 在 `auxiliary_clients` 表里找不到。"""
+
+
+class DuplicateAuxiliaryClientName(ConfigError):  # noqa: N818 — 同上
+    """auxiliary_client name 已存在(create 时撞已用 name)。"""
+
+
 class ToolExecutionError(Exception):
     """Tool.execute 抛的内部异常。
 
