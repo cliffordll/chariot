@@ -255,6 +255,7 @@ def register_methods(
     server.method("enable_skill")(skills.enable)
     server.method("disable_skill")(skills.disable)
     server.method("delete_skill")(skills.delete)
+    server.method("curate_skills")(skills.curate)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

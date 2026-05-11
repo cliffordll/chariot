@@ -147,6 +147,26 @@ async def test_install_skill_rejects_bad_yaml(server: JsonRpcServer) -> None:
     assert resp["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
 
+# ---- curate_skills (B6 wave 4) ----
+
+
+async def test_curate_skills_returns_four_buckets(server: JsonRpcServer) -> None:
+    """curate 应返 4 个 list 字段(builtin 装 3 个 → 全部 stale,无 activations)。"""
+    resp = await _call(server, "curate_skills", {})
+    assert "result" in resp
+    result = resp["result"]
+    assert set(result.keys()) == {"stale", "underused", "failing", "overlapping"}
+    # builtin 3 个,无 audit activations → 全在 stale + underused
+    assert "code_review" in result["stale"]
+    assert "debug_helper" in result["stale"]
+    assert "git_committer" in result["stale"]
+    assert "code_review" in result["underused"]
+    # failing 是空(无样本)
+    assert result["failing"] == []
+    # overlapping 是 dict list(每条 {a, b, ratio})
+    assert isinstance(result["overlapping"], list)
+
+
 # ---- enable / disable / delete ----
 
 

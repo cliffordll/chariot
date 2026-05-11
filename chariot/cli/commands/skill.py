@@ -86,6 +86,11 @@ def proposals_cmd(
     asyncio.run(_proposals(limit))
 
 
+@skill_app.command("curate", help="跑 4-bucket 静态分析(stale / underused / failing / overlapping)")
+def curate_cmd() -> None:
+    asyncio.run(_curate())
+
+
 # ---- 实现 ----
 
 
@@ -255,6 +260,34 @@ async def _proposals(limit: int) -> None:
         rows,
         title="skill proposals",
     )
+
+
+async def _curate() -> None:
+    """读 audit_events.skill_activate + skills.prompt → 4 bucket 分类输出。"""
+    from chariot.skills import SkillCurator
+
+    async with installed_runtime() as agent:
+        registry = agent.skill_registry
+        if registry is None:
+            Renderer.die("skill registry not loaded")
+            return
+        curator = SkillCurator(sessionmaker=agent.session_maker, skill_registry=registry)
+        result = await curator.curate()
+    Renderer.out(f"stale ({len(result.stale)}):")
+    Renderer.out(", ".join(result.stale) or "  (空)")
+    Renderer.out("")
+    Renderer.out(f"underused ({len(result.underused)}):")
+    Renderer.out(", ".join(result.underused) or "  (空)")
+    Renderer.out("")
+    Renderer.out(f"failing ({len(result.failing)}):")
+    Renderer.out(", ".join(result.failing) or "  (空)")
+    Renderer.out("")
+    Renderer.out(f"overlapping ({len(result.overlapping)}):")
+    if result.overlapping:
+        for a, b, ratio in result.overlapping:
+            Renderer.out(f"  {a} ↔ {b}  (ratio={ratio})")
+    else:
+        Renderer.out("  (空)")
 
 
 async def _remove(name: str) -> None:

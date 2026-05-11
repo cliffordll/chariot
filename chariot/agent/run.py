@@ -918,9 +918,9 @@ class AIAgent:
                     )
                     composed = dataclasses.replace(req, system=system)
         normalized = self._normalize_request(composed, provider, binding)
-        return self._maybe_activate_skill(normalized, binding)
+        return await self._maybe_activate_skill(normalized, binding)
 
-    def _maybe_activate_skill(self, req: ChatRequest, binding: _AgentBinding) -> ChatRequest:
+    async def _maybe_activate_skill(self, req: ChatRequest, binding: _AgentBinding) -> ChatRequest:
         """B6 wave 2:按 `req.skill` / `profile.default_skill` 决定是否注入 skill。
 
         优先级:
@@ -946,7 +946,15 @@ class AIAgent:
             return req
         from chariot.skills import SkillActivator
 
-        return SkillActivator.activate(req, skill)
+        activated = SkillActivator.activate(req, skill)
+        # B6 wave 4:每次 activate 写 audit_events.skill_activate(给 Curator 喂数据)
+        await self._audit_hooks.record_skill_activate(
+            skill_name=skill.name,
+            source=skill.source,
+            conversation_id=req.conversation_id,
+            agent_profile=binding.profile.name if binding.profile is not None else None,
+        )
+        return activated
 
     async def _load_memory_entries(
         self,

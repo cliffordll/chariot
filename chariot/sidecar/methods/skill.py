@@ -100,6 +100,26 @@ class SkillMethods(MethodBase):
     async def disable(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         return await self._set_enabled(params, ctx, enabled=False)
 
+    async def curate(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """B6 wave 4:跑 SkillCurator;返 4 bucket(stale/underused/failing/overlapping)。
+
+        无 registry / 无 sessionmaker → 退化空结果(让前端简单展示"暂无数据")。
+        """
+        del ctx, params
+        registry = self.agent.skill_registry
+        if registry is None:
+            return {"stale": [], "underused": [], "failing": [], "overlapping": []}
+        from chariot.skills import SkillCurator
+
+        curator = SkillCurator(sessionmaker=self.agent.session_maker, skill_registry=registry)
+        result = await curator.curate()
+        return {
+            "stale": list(result.stale),
+            "underused": list(result.underused),
+            "failing": list(result.failing),
+            "overlapping": [{"a": a, "b": b, "ratio": ratio} for a, b, ratio in result.overlapping],
+        }
+
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")

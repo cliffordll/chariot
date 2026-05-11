@@ -76,7 +76,7 @@ async def test_skill_activated_from_request_field(tmp_path: Path) -> None:
             skill="code_review",
             tools=[],
         )
-        out = agent._maybe_activate_skill(req, _NO_BINDING)
+        out = await agent._maybe_activate_skill(req, _NO_BINDING)
         assert isinstance(out.system, str)
         assert "code_review" in out.system or "<skill" in out.system
     finally:
@@ -97,7 +97,7 @@ async def test_skill_activated_from_profile_default_when_request_none(tmp_path: 
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
-        out = agent._maybe_activate_skill(req, binding)
+        out = await agent._maybe_activate_skill(req, binding)
         assert isinstance(out.system, str)
         assert "debug_helper" in out.system
     finally:
@@ -120,7 +120,7 @@ async def test_request_empty_string_overrides_profile_default(tmp_path: Path) ->
             skill="",
             tools=[],
         )
-        out = agent._maybe_activate_skill(req, binding)
+        out = await agent._maybe_activate_skill(req, binding)
         # system 没被注入 <skill> 块
         assert out.system is None or "<skill" not in (out.system if isinstance(out.system, str) else "")
     finally:
@@ -139,7 +139,7 @@ async def test_dangling_skill_name_silent_fallback(tmp_path: Path) -> None:
             skill="does_not_exist",
             tools=[],
         )
-        out = agent._maybe_activate_skill(req, _NO_BINDING)
+        out = await agent._maybe_activate_skill(req, _NO_BINDING)
         assert out.system is None
     finally:
         AgentRegistry._agents.clear()
