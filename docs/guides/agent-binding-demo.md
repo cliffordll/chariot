@@ -153,6 +153,52 @@ uv run chariot trace view <turn-id>                              # 树形展开 
 
 ---
 
+## 7.5 eval 跑批 / baseline diff(B2 wave 1-5)
+
+跑 golden task 集合,落基线,改完代码再跑同一套对比 verdict 变化。eval 内部用
+唯一 conversation_id 串通到 B1 trace,所以每条 record 都能反查 trace turn。
+
+```powershell
+# 看现有 golden task(默认从 tests/golden/ 加载)
+uv run chariot eval list-tasks
+
+# 跑全套 → 自动落 ~/.chariot/eval/<timestamp>/(5 文件:meta/tasks/records/summary/report)
+uv run chariot eval
+
+# 只跑某类 / 单个 task
+uv run chariot eval --category file
+uv run chariot eval --task file_read_pyproject
+
+# 走指定 agent_profile(走 _resolve_binding 三件套)
+uv run chariot eval --agent researcher
+
+# 试跑但不落盘
+uv run chariot eval --no-save
+
+# 列历史 run(看 summary)
+uv run chariot eval list-runs
+
+# 看单次 run 的 report.txt
+uv run chariot eval show <run-id>
+
+# baseline diff —— 跑完拿最新结果对比 <baseline-run-id>;
+# 输出 REGRESSED / RECOVERED / NEW / REMOVED / CHANGED(STABLE 隐藏降噪)
+uv run chariot eval --baseline <baseline-run-id>
+```
+
+**典型 review 流程**:
+
+1. 改代码前:`chariot eval` → 拿到 `run_a`(基线)
+2. 改完代码:`chariot eval --baseline run_a` → 看变化
+3. 若有 REGRESSED 行,记下 task_id,然后:
+4. `chariot trace list --conversation <eval-task-的-convo>`(或在桌面 Evals
+   页直接点 turn_id 跳 Traces 页)→ 树形展开,排查 provider / tool 哪一步出问题
+
+桌面 UI 同款链路:Evals 页 → 选 run → 选 baseline → 点 "Diff vs baseline" →
+点 record 行的 turn_id → 跳 Traces 页。
+
+---
+
 ## 8. flag 冲突 / 优先级速查
 
 | flag 组合 | 行为 |
