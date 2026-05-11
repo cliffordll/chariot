@@ -10,6 +10,7 @@ from chariot.sidecar.services.provider import ProviderApi
 from chariot.sidecar.services.task import TaskApi
 from chariot.sidecar.services.tool import ToolApi
 from chariot.sidecar.services.toolset import ToolsetApi
+from chariot.sidecar.services.trace import TraceApi
 
 __all__ = [
     "AgentApi",
@@ -23,4 +24,5 @@ __all__ = [
     "TaskApi",
     "ToolApi",
     "ToolsetApi",
+    "TraceApi",
 ]

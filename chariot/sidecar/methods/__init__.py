@@ -120,6 +120,7 @@ def register_methods(
     from chariot.sidecar.methods.task import TaskMethods
     from chariot.sidecar.methods.tool import ToolMethods
     from chariot.sidecar.methods.toolset import ToolsetMethods
+    from chariot.sidecar.methods.trace import TraceMethods
 
     server.method("chat")(ChatMethod(runtime))
 
@@ -223,3 +224,9 @@ def register_methods(
 
     logs = LogMethods(runtime)
     server.method("list_logs")(logs.list_)
+
+    traces = TraceMethods(runtime)
+    server.method("list_traces")(traces.list_)
+    server.method("get_trace_turn")(traces.show)
+    server.method("view_trace_tree")(traces.view)
+    server.method("reconcile_traces")(traces.reconcile)
