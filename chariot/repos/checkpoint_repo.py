@@ -62,6 +62,15 @@ class CheckpointRepo:
         await self.session.refresh(row)
         return self._row_to_entry(row)
 
+    async def delete(self, entry_id: str) -> bool:
+        """删一条 checkpoint 行;不存在返 False。"""
+        row = await self.session.get(CheckpointRow, entry_id)
+        if row is None:
+            return False
+        await self.session.delete(row)
+        await self.session.commit()
+        return True
+
     @staticmethod
     def _serialize_json(label: str, data: dict[str, Any]) -> str:
         try:

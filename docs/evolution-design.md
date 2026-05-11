@@ -344,9 +344,12 @@ uv run chariot eval --no-save                # 不落盘
 ### B5 Guardrails + Checkpoint + Audit(补 phalanx §2.8.d)
 
 - **Tool guardrails** — `chariot/guardrails/`:13 危险命令 regex(`rm -rf` / `chmod 777` / `git push --force` / DB drop / ...) + 三档 verdict(ALLOW / REQUIRE_APPROVAL / DENY) + 日配额
-- **Checkpoint 三件套** — git stash + SQLite `Connection.backup()` + `~/.chariot/{config.yaml, .env}` tarball;CLI `chariot checkpoint {create, list, show, rollback, delete}`
+- **Checkpoint 三件套** — git stash + SQLite `Connection.backup()` + `~/.chariot/{config.yaml, .env}` tarball;CLI `chariot checkpoint {create, list, show, rollback, delete}`(`list` 已有,wave 3 补齐 create/show/rollback/delete)
 - **Audit 自动 hook** — 五类:`tool_call_pre/post` / `guardrail_verdict` / `memory_store` / `checkpoint_create` / `rollback`;落 `audit_events` 表(已有)
-- **Capability gating** — `--enable-self-mod` opt-in flag(默认关),`--yolo` 跳过所有审批
+- **Capability gating** — v21 migration `capabilities` 表 + `chariot capability enable enable_self_mod`(默认关),`chariot --yolo` 跳过所有审批(per-process)
+- **桌面 Security 页** — Tabs 三标签:Guardrails / Audit / Checkpoints,一页搞定
+
+**详细设计**:`docs/B5-guardrails-design.md`(4 wave 拆分 + 13 内置规则表 + checkpoint 三件套接口 + 安全前置红线落地)。
 
 ### B6 Skills 生命周期(对齐 phalanx §2.8.e)
 

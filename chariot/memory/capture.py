@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chariot.agent.chat_request import ChatRequest
 from chariot.memory.policy import MemoryPolicy
 from chariot.models.memory import MemoryEntry
 from chariot.repos.memory_repo import MemoryRepo
+
+if TYPE_CHECKING:
+    from chariot.audit import AuditHookManager
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
 _PREFERENCE_HINTS = (
@@ -46,8 +49,11 @@ class MemoryCaptureCandidate:
 class MemoryCaptureService:
     """Extract small reusable memory items from turns and errors."""
 
-    def __init__(self, repo: MemoryRepo) -> None:
+    def __init__(self, repo: MemoryRepo, *, audit_hooks: AuditHookManager | None = None) -> None:
+        from chariot.audit import AuditHookManager as _AuditHookManager
+
         self._repo = repo
+        self._audit_hooks = audit_hooks or _AuditHookManager(None)
 
     async def capture_turn(
         self,
@@ -206,6 +212,12 @@ class MemoryCaptureService:
                 text=candidate.text,
                 meta=candidate.meta,
                 links=candidate.links,
+            )
+            await self._audit_hooks.record_memory_store(
+                memory_id=entry.id,
+                action="create",
+                kind=entry.kind,
+                pinned=entry.pinned,
             )
             captured.append(entry)
         return captured

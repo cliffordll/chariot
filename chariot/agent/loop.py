@@ -14,6 +14,9 @@ from chariot.providers.contract import ProviderContractError, ProviderEventValid
 from chariot.tools.execution import ToolExecutionService
 
 if TYPE_CHECKING:
+    from chariot.audit import AuditHookManager
+    from chariot.guardrails import GuardrailEngine
+    from chariot.guardrails.approval import ApprovalPolicy
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
@@ -35,10 +38,18 @@ class AgentLoop:
         conversation_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
         turn: TurnHandle | None = None,
+        guardrail_engine: GuardrailEngine | None = None,
+        approval_policy: ApprovalPolicy | None = None,
+        audit_hooks: AuditHookManager | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
-        self._tool_execution = ToolExecutionService(tools)
+        self._tool_execution = ToolExecutionService(
+            tools,
+            guardrail_engine=guardrail_engine,
+            approval_policy=approval_policy,
+            audit_hooks=audit_hooks,
+        )
         self._repo = repo
         self._conversation_id = conversation_id
         self._max_iter = max_iter

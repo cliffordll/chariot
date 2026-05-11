@@ -270,6 +270,12 @@ async def _add(
         except ConfigError as exc:
             Renderer.die(f"create failed: {exc}")
             return
+        await agent.audit_hooks.record_memory_store(
+            memory_id=entry.id,
+            action="create",
+            kind=entry.kind,
+            pinned=entry.pinned,
+        )
     Renderer.out(f"+ {entry.id} {entry.kind}")
 
 
@@ -310,6 +316,12 @@ async def _update(
         except ConfigError as exc:
             Renderer.die(f"update failed: {exc}")
             return
+        await agent.audit_hooks.record_memory_store(
+            memory_id=entry.id,
+            action="update",
+            kind=entry.kind,
+            pinned=entry.pinned,
+        )
     Renderer.out(f"~ {entry.id} {entry.kind}")
 
 
@@ -321,6 +333,10 @@ async def _delete(memory_id: str) -> None:
         except ConfigError as exc:
             Renderer.die(f"delete failed: {exc}")
             return
+        await agent.audit_hooks.record_memory_store(
+            memory_id=memory_id,
+            action="delete",
+        )
     Renderer.out(f"- {memory_id}")
 
 
@@ -332,6 +348,12 @@ async def _pin(memory_id: str, pinned: bool) -> None:
         except ConfigError as exc:
             Renderer.die(f"pin failed: {exc}")
             return
+        await agent.audit_hooks.record_memory_store(
+            memory_id=entry.id,
+            action="pin" if pinned else "unpin",
+            kind=entry.kind,
+            pinned=entry.pinned,
+        )
     Renderer.out(f"* {entry.id}: {'pinned' if entry.pinned else 'unpinned'}")
 
 
@@ -343,6 +365,12 @@ async def _archive(memory_id: str, archived: bool) -> None:
         except ConfigError as exc:
             Renderer.die(f"archive failed: {exc}")
             return
+        await agent.audit_hooks.record_memory_store(
+            memory_id=entry.id,
+            action="archive" if archived else "restore",
+            kind=entry.kind,
+            pinned=entry.pinned,
+        )
     Renderer.out(f"* {entry.id}: {'archived' if entry.archived else 'restored'}")
 
 
