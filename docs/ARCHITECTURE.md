@@ -186,7 +186,7 @@ AgentLoop                                                  |
                            |
       +--------------------+--------------------+
       |                    |                    |
- tool_mgmt           provider_mgmt         agent_mgmt
+   tools             providers             tasks
       |                    |                    |
       +------------- platform control layer ----+
                            |
@@ -198,7 +198,7 @@ AgentLoop                                                  |
                            |
       +--------------------+--------------------+
       |                    |                    |
- checkpoints          delegation           artifact_mgmt
+ checkpoints          delegation            artifacts
                            |
                       guardrails
                            |
@@ -284,10 +284,10 @@ AgentLoop                                                  |
 - `chariot/prompt/`
 - `chariot/context/`
 - `chariot/memory/`
-- `chariot/tool_mgmt/`
-- `chariot/provider_mgmt/`
-- `chariot/agent_mgmt/`
-- `chariot/artifact_mgmt/`
+- `chariot/tools/`
+- `chariot/providers/`
+- `chariot/tasks/`
+- `chariot/artifacts/`
 - `chariot/skills/`
 - `chariot/eval/`
 - `chariot/audit/`
@@ -423,7 +423,6 @@ AgentLoop                                                  |
 
 建议模块：
 
-- `chariot/tool_mgmt/`
 - `chariot/tools/`
 
 ### 6.6 Provider management
@@ -443,7 +442,6 @@ AgentLoop                                                  |
 
 建议模块：
 
-- `chariot/provider_mgmt/`
 - `chariot/providers/`
 
 ### 6.7 Agent / task management
@@ -464,7 +462,7 @@ AgentLoop                                                  |
 
 建议模块：
 
-- `chariot/agent_mgmt/`
+- `chariot/tasks/`
 - `chariot/delegation/`
 - `chariot/cron/`
 
@@ -483,7 +481,7 @@ AgentLoop                                                  |
 
 建议模块：
 
-- `chariot/artifact_mgmt/`
+- `chariot/artifacts/`
 
 ### 6.9 Skills
 

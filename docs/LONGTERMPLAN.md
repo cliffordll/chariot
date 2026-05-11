@@ -430,7 +430,6 @@ uv run chariot memory show <id>
 
 ### 6.3 模块落点
 
-- `chariot/tool_mgmt/`
 - `chariot/tools/`
 - `chariot/repos/`
 
@@ -523,7 +522,6 @@ uv run chariot tool profile list
 
 ### 7.3 模块落点
 
-- `chariot/provider_mgmt/`
 - `chariot/providers/`
 - `chariot/repos/`
 
@@ -616,7 +614,7 @@ uv run chariot provider status
 
 ### 8.3 模块落点
 
-- `chariot/agent_mgmt/`
+- `chariot/tasks/`
 - `chariot/delegation/`
 - `chariot/cron/`
 - `chariot/repos/`
@@ -700,7 +698,7 @@ uv run chariot job list
 
 ### 9.3 模块落点
 
-- `chariot/artifact_mgmt/`
+- `chariot/artifacts/`
 - `chariot/repos/`
 
 ### 9.4 数据结构
@@ -803,7 +801,7 @@ uv run chariot trace view <turn-id>
 ### 11.3 模块落点
 
 - `chariot/delegation/`
-- `chariot/agent_mgmt/`
+- `chariot/tasks/`
 - `chariot/tools/`
 
 ### 11.4 数据结构
@@ -896,7 +894,7 @@ uv run chariot skill propose --from-trace <turn-id>
 
 - `chariot/eval/`
 - `chariot/repos/`
-- `chariot/artifact_mgmt/`
+- `chariot/artifacts/`
 
 ### 13.4 数据结构
 

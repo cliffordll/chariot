@@ -15,6 +15,9 @@ from chariot.repos.eval_repo import EvalRepo
 from chariot.repos.memory_repo import MemoryRepo
 from chariot.repos.prompt_repo import PromptRepo
 from chariot.repos.skill_repo import SkillRepo
+from chariot.repos.task_repo import TaskRepo
+from chariot.tasks.models import TaskCreate, TaskRunCreate
+from chariot.tasks.service import TaskService
 
 
 @pytest_asyncio.fixture
@@ -38,6 +41,11 @@ class TestMigrationV10:
             "prompt_bundles",
             "prompt_versions",
             "prompt_traces",
+            "agent_profiles",
+            "tasks",
+            "task_runs",
+            "scheduled_jobs",
+            "job_runs",
         }
         rows = (
             await session.execute(
@@ -127,3 +135,87 @@ class TestPlatformRepos:
         active_bundle = await repo.get_active_bundle()
         assert active_bundle is not None
         assert active_bundle.name == "default"
+
+    async def test_task_repo_create_profile_task_run_and_job(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        profile = await repo.create_agent_profile(
+            name="planner",
+            role="planner",
+            tool_profile="default",
+            provider_profile="mock",
+            budget={"max_steps": 3},
+        )
+        task = await repo.create_task(
+            TaskCreate(
+                goal="split work into child tasks",
+                agent_profile=profile.name,
+                owner="user",
+                meta={"source": "test"},
+            )
+        )
+        run = await repo.create_run(TaskRunCreate(task_id=task.id, trigger="manual"))
+        job = await repo.create_job(name="cleanup", goal="cleanup stale state", cron="0 * * * *")
+        job_run = await repo.create_job_run(job_name=job.name, task_id=task.id, status="queued")
+
+        assert (await repo.get_agent_profile(profile.name)) is not None
+        stored_task = await repo.get_task(task.id)
+        assert stored_task is not None
+        assert stored_task.agent_profile == "planner"
+        assert stored_task.status.value == "queued"
+        runs = await repo.list_runs(task.id)
+        assert runs[0].id == run.id
+        jobs = await repo.list_jobs()
+        assert jobs[0].name == job.name
+        job_runs = await repo.list_job_runs(job.name)
+        assert job_runs[0].id == job_run.id
+
+    async def test_task_repo_update_delete_agent_and_delete_job(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        await repo.create_agent_profile(name="planner", role="planner")
+        updated = await repo.update_agent_profile(
+            name="planner",
+            role="executor",
+            tool_profile="default",
+            meta={"scope": "repo"},
+        )
+        assert updated.role == "executor"
+        assert updated.tool_profile == "default"
+        assert updated.meta["scope"] == "repo"
+        await repo.delete_agent_profile("planner")
+        assert await repo.get_agent_profile("planner") is None
+
+        await repo.create_job(name="cleanup", goal="cleanup stale state", cron="0 * * * *")
+        await repo.delete_job("cleanup")
+        assert await repo.get_job("cleanup") is None
+
+    async def test_task_repo_update_and_toggle_job(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        await repo.create_job(name="cleanup", goal="cleanup stale state", cron="0 * * * *", enabled=False)
+
+        updated = await repo.update_job(
+            name="cleanup",
+            goal="cleanup tmp files",
+            cron="*/5 * * * *",
+            meta={"scope": "repo"},
+        )
+        assert updated.goal == "cleanup tmp files"
+        assert updated.cron == "*/5 * * * *"
+        assert updated.meta["scope"] == "repo"
+
+        enabled = await repo.set_job_enabled("cleanup", True)
+        assert enabled.enabled is True
+
+    async def test_task_service_can_fail_and_cancel_runs(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        service = TaskService(repo)
+        failed_task = await service.create_task(TaskCreate(goal="worker fail"))
+        failed_run = await service.start_task_run(TaskRunCreate(task_id=failed_task.id))
+        failed = await service.fail_task_run(failed_run.id, error="boom")
+        assert failed.status.value == "failed"
+        assert (await repo.get_task(failed_task.id)).status.value == "failed"
+
+        cancelled_task = await service.create_task(TaskCreate(goal="worker cancel"))
+        cancelled_run = await service.start_task_run(TaskRunCreate(task_id=cancelled_task.id))
+        cancelled = await service.cancel_task_run(cancelled_run.id, error="user requested")
+        assert cancelled.status.value == "cancelled"
+        assert (await repo.get_task(cancelled_task.id)).status.value == "cancelled"

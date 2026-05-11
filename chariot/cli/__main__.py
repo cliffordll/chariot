@@ -18,6 +18,7 @@ from chariot.cli.commands import provider as provider_mod
 from chariot.cli.commands import skill as skill_mod
 from chariot.cli.commands import stats as stats_mod
 from chariot.cli.commands import status as status_mod
+from chariot.cli.commands import task as task_mod
 from chariot.cli.commands import tool as tool_mod
 
 HELP_CONTEXT: dict[str, list[str]] = {"help_option_names": ["-h", "--help"]}
@@ -50,6 +51,7 @@ for mod in (
     chat_mod,
     provider_mod,
     tool_mod,
+    task_mod,
     conversation_mod,
     memory_mod,
     prompt_mod,
