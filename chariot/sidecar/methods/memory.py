@@ -113,9 +113,7 @@ class MemoryMethods(MethodBase):
         memory_id = self._require_str(params, "memory_id")
         archived = bool(params.get("archived", True))
         async with self._session() as session:
-            entry = await self._service.archive_entry(
-                session, memory_id=memory_id, archived=archived
-            )
+            entry = await self._service.archive_entry(session, memory_id=memory_id, archived=archived)
         return {"memory": entry}
 
     async def events(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:

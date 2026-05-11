@@ -74,9 +74,7 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         )
         for entry in entries
     ]
-    Renderer.table(
-        ["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles"
-    )
+    Renderer.table(["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
 
 
 def _render_layers_table(layers: list[dict[str, Any]]) -> None:
@@ -149,7 +147,7 @@ def _parse_layer_item(raw: str) -> Any:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             Renderer.die(f"layer 不是合法 JSON: {raw!r}\n{exc}")
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
     return _parse_layer_mapping(raw)
 
 
@@ -189,9 +187,7 @@ def _append_layer(target: list[dict[str, Any]], item: Any, *, raw: str) -> None:
 
 
 def _looks_like_json(raw: str) -> bool:
-    return (raw.startswith("{") and raw.endswith("}")) or (
-        raw.startswith("[") and raw.endswith("]")
-    )
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
 
 
 def _layers_or_default(values: list[str] | None) -> list[dict[str, Any]]:

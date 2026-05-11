@@ -1,4 +1,4 @@
-﻿"""ChatRepl slash 命令测试(0.6.0 库化版)。
+"""ChatRepl slash 命令测试(0.6.0 库化版)。
 
 slash 命令分单 / 复数:**单数 = 显示当前状态(只读)**,**复数 = 列全部(走 repo)**。
 覆盖 /model · /models · /convo · /convos · /tool · /tools。
@@ -88,9 +88,7 @@ _Capt = list[tuple[str, str]]
 # ==========================================================
 
 
-async def test_slash_provider_no_arg_shows_current(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_provider_no_arg_shows_current(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/provider` 无参数:显示 ctx.provider_name,不查 DB。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/provider")
@@ -130,9 +128,7 @@ async def test_slash_provider_use_persists_default_to_db(agent: AIAgent) -> None
     assert default is not None and default.name == "claude-haiku-4-5"
 
 
-async def test_slash_provider_use_unknown_errors(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_provider_use_unknown_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/provider use <unknown>` 报 error;ctx 不变。"""
     ctx = _make_ctx(agent)
     original = ctx.provider_name
@@ -175,9 +171,7 @@ async def test_slash_providers_lists_entries_with_current_and_default_markers(
     assert "mock" in body
 
 
-async def test_slash_providers_with_arg_errors(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_providers_with_arg_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/providers <arg>` 报 error 引导用 `/provider <name>` 切 provider。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/providers foo")
@@ -194,9 +188,7 @@ async def test_slash_providers_with_arg_errors(
 CONVO = "01ABCDEF0123456789ABCDEFGH"
 
 
-async def test_slash_convo_no_arg_shows_current_with_id(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convo_no_arg_shows_current_with_id(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """有 conversation_id 时,`/convo` 显示 id + model + 本地消息数,不查 DB。"""
     ctx = _make_ctx(agent, conversation_id=CONVO)
     ctx.append_user("hi")
@@ -209,9 +201,7 @@ async def test_slash_convo_no_arg_shows_current_with_id(
     assert "1" in msg  # local msgs=1
 
 
-async def test_slash_convo_no_arg_stateless_shows_off(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convo_no_arg_stateless_shows_off(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """stateless(conversation_id=None)时 `/convo` 显示 off。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/conversation")
@@ -221,9 +211,7 @@ async def test_slash_convo_no_arg_stateless_shows_off(
     assert "off" in msg or "stateless" in msg
 
 
-async def test_slash_convos_lists_with_current_marker(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convos_lists_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/convos` 走 ConversationRepo,当前会话行带 ← current。"""
     other_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
     async with agent.session_maker() as session:
@@ -242,9 +230,7 @@ async def test_slash_convos_lists_with_current_marker(
     assert CONVO in body and other_id in body
 
 
-async def test_slash_convos_empty_db_shows_hint(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convos_empty_db_shows_hint(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """空 DB → `/convos` 提示用 `/convo new` 开一个。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/conversations")
@@ -253,9 +239,7 @@ async def test_slash_convos_empty_db_shows_hint(
     assert "/conversation new" in outs[0][1]
 
 
-async def test_slash_convos_with_arg_errors(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convos_with_arg_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/convos <arg>` 报 error 引导用 `/convo <ULID|new|off>`。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/convos new")
@@ -291,9 +275,7 @@ async def test_slash_convo_off_clears_id_and_messages(agent: AIAgent) -> None:
     assert ctx.messages == []
 
 
-async def test_slash_convo_invalid_value_errors(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_convo_invalid_value_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/convo foo")
     assert ctx.conversation_id is None
@@ -302,9 +284,7 @@ async def test_slash_convo_invalid_value_errors(
     assert "ULID" in errs[0][1]
 
 
-async def test_slash_help_shows_conversation_aliases(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_help_shows_conversation_aliases(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/help")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
@@ -325,9 +305,7 @@ async def test_slash_help_shows_conversation_aliases(
 # ==========================================================
 
 
-async def test_slash_tool_shows_only_enabled(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_tool_shows_only_enabled(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/tool` 只列 enabled=True;disabled 的不出现在表里。
 
     fresh DB seed 4 条全 disabled 的 fixture,先开 read_file 再断。
@@ -346,9 +324,7 @@ async def test_slash_tool_shows_only_enabled(
     assert "shell_exec" not in body
 
 
-async def test_slash_tool_no_enabled_shows_hint(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_tool_no_enabled_shows_hint(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """全部 disabled → `/tool` 提示 `chariot tool enable`。"""
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/tool")
@@ -357,9 +333,7 @@ async def test_slash_tool_no_enabled_shows_hint(
     assert "chariot tool enable" in outs[0][1]
 
 
-async def test_slash_tools_lists_all_with_marks(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
+async def test_slash_tools_lists_all_with_marks(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/tools` 列全部工具,enabled / disabled 都展示并带 ON/off 标记。"""
     async with agent.session_maker() as session:
         await ToolRepo(session).update("read_file", enabled=True)

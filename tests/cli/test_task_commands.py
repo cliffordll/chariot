@@ -8,8 +8,8 @@ import pytest
 from typer.testing import CliRunner
 
 from chariot.cli.__main__ import app
-from chariot.repos.task_repo import TaskRepo
 from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.repos.task_repo import TaskRepo
 from chariot.services.task import TaskService
 
 runner = CliRunner()

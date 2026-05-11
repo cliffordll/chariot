@@ -61,9 +61,7 @@ class HttpGetTool(BaseTool):
                 parsed = json.loads(text)
             except json.JSONDecodeError:
                 parsed = None
-            if isinstance(parsed, list) and all(
-                isinstance(d, str) for d in cast(list[Any], parsed)
-            ):
+            if isinstance(parsed, list) and all(isinstance(d, str) for d in cast(list[Any], parsed)):
                 return cast(list[str], parsed)
             if text.startswith("[") and text.endswith("]"):
                 inner = text[1:-1].strip()
@@ -119,9 +117,7 @@ class HttpGetTool(BaseTool):
         if not host:
             return self._error("URL 缺少 host")
         if host not in self.allowed_domains:
-            return self._error(
-                f"host {host!r} 不在白名单(白名单大小={len(self.allowed_domains)})"
-            )
+            return self._error(f"host {host!r} 不在白名单(白名单大小={len(self.allowed_domains)})")
 
         try:
             async with self._make_client() as client:

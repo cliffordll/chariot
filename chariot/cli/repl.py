@@ -74,7 +74,7 @@ class ChatRepl:
     ctx: ChatContext
 
     # U+203A 单右尖引号,和普通 > 视觉上有区别,便于识别 REPL 提示符
-    _PROMPT: ClassVar[str] = "› "  # noqa: RUF001
+    _PROMPT: ClassVar[str] = "› "
 
     _HISTORY_PATH: ClassVar[Path] = Path.home() / ".chariot" / "repl_history"
     """REPL 输入历史文件,跨 session 持久化。位置跟 `chariot.db` 同根。"""
@@ -373,8 +373,7 @@ class ChatRepl:
         """
         if arg:
             Renderer.error_bubble(
-                "/tool 不接受参数;改启用 / options 用 "
-                "`chariot tool enable|disable|config <name>` 或 GUI Tools 页",
+                "/tool 不接受参数;改启用 / options 用 `chariot tool enable|disable|config <name>` 或 GUI Tools 页",
             )
             return
         async with self.ctx.agent.session_maker() as session:

@@ -135,9 +135,7 @@ class AIAgent:
             )
             for entry in cfg.providers
         }
-        tools: dict[str, BaseTool] = {
-            entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools
-        }
+        tools: dict[str, BaseTool] = {entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools}
 
         return cls(providers=providers, tools=tools, sessionmaker=sm)
 
@@ -183,8 +181,7 @@ class AIAgent:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
                 error_message=(
-                    f"unknown provider entry {req.provider_name!r}; "
-                    f"known: {sorted(self._providers.keys())}"
+                    f"unknown provider entry {req.provider_name!r}; known: {sorted(self._providers.keys())}"
                 ),
             )
             return
@@ -196,9 +193,7 @@ class AIAgent:
             async for event in self._run_stateless_chat(req, provider):
                 yield event
 
-    async def _run_stateless_chat(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
+    async def _run_stateless_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
@@ -246,9 +241,7 @@ class AIAgent:
                     prompt_trace_id=prompt_trace.id,
                 )
 
-    async def _run_stateful_chat(
-        self, req: ChatRequest, provider: BaseProvider
-    ) -> AsyncIterator[ChatEvent]:
+    async def _run_stateful_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
         """有 conversation_id:开 session + 进 conversation lock + load history + AgentLoop。
 
         约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
@@ -267,9 +260,7 @@ class AIAgent:
         async with self._sessionmaker() as session:
             try:
                 async with ConversationLockManager.acquire(conversation_id, db_session=session):
-                    async for event in self._run_stateful_turn(
-                        req, conversation_id, provider, session
-                    ):
+                    async for event in self._run_stateful_turn(req, conversation_id, provider, session):
                         yield event
             except ConversationLockTimeout as e:
                 yield ChatEvent.error_event(
@@ -366,11 +357,7 @@ class AIAgent:
         for msg in req.messages:
             if msg.role != "user":
                 continue
-            content = (
-                msg.content
-                if isinstance(msg.content, list)
-                else [{"type": "text", "text": msg.content}]
-            )
+            content = msg.content if isinstance(msg.content, list) else [{"type": "text", "text": msg.content}]
             await repo.append_message(conversation_id, role="user", content=content)
 
     @staticmethod

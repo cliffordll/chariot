@@ -137,7 +137,9 @@ class PromptRepo:
         )
 
     async def get_active_version(self, bundle_name: str | None = None) -> PromptVersionEntry | None:
-        bundle = await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self.get_active_bundle()
+        bundle = (
+            await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self.get_active_bundle()
+        )
         if bundle is None:
             return None
         stmt = select(PromptVersionRow).where(
@@ -295,7 +297,9 @@ class PromptRepo:
         memory_policy: dict[str, Any] | None = None,
     ) -> PromptTraceEntry:
         await self.seed_if_empty()
-        bundle = await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self._active_bundle_row()
+        bundle = (
+            await self._bundle_row_by_name(bundle_name) if bundle_name is not None else await self._active_bundle_row()
+        )
         if bundle is None:
             bundle = await self._bundle_row_by_name(DEFAULT_BUNDLE_NAME)
         if bundle is None:
@@ -345,7 +349,11 @@ class PromptRepo:
             version=version,
             spec=self._serialize_json(
                 "spec",
-                {"bundle": bundle_name, "version": version, "layers": layers or DEFAULT_BUNDLE_LAYERS},
+                {
+                    "bundle": bundle_name,
+                    "version": version,
+                    "layers": layers or DEFAULT_BUNDLE_LAYERS,
+                },
             ),
             is_active=1 if activate else 0,
         )
@@ -358,9 +366,7 @@ class PromptRepo:
         stmt = select(PromptVersionRow.version).where(PromptVersionRow.bundle_id == bundle_id)
         versions = [row[0] for row in (await self.session.execute(stmt)).all()]
         numbers = [
-            int(v[1:])
-            for v in versions
-            if isinstance(v, str) and len(v) > 1 and v[0] == "v" and v[1:].isdigit()
+            int(v[1:]) for v in versions if isinstance(v, str) and len(v) > 1 and v[0] == "v" and v[1:].isdigit()
         ]
         return f"v{(max(numbers) if numbers else 0) + 1}"
 

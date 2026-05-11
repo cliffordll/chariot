@@ -16,9 +16,7 @@ from chariot.models.task import TaskCreate, TaskKind, TaskRunCreate
 from chariot.repos.task_repo import TaskRepo
 from chariot.services.task import TaskService
 
-task_app = typer.Typer(
-    name="task", help="管理 tasks / task runs / delegation", no_args_is_help=True
-)
+task_app = typer.Typer(name="task", help="管理 tasks / task runs / delegation", no_args_is_help=True)
 
 
 def _fmt_dt(value: Any) -> str:
@@ -37,10 +35,10 @@ def _parse_meta(raw: str) -> dict[str, Any] | None:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         Renderer.die(f"meta must be valid JSON: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if not isinstance(data, dict):
         Renderer.die("meta must be a JSON object")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     return data
 
 
@@ -50,9 +48,7 @@ def _truncate(text: str, limit: int) -> str:
 
 @task_app.command("list", help="列出 tasks")
 def task_list_cmd(
-    parent_task_id: Annotated[
-        str, typer.Option("--parent-task-id", help="只看某个父任务的 children")
-    ] = "",
+    parent_task_id: Annotated[str, typer.Option("--parent-task-id", help="只看某个父任务的 children")] = "",
 ) -> None:
     asyncio.run(_task_list(parent_task_id or None))
 
@@ -67,9 +63,7 @@ def task_show_cmd(
 @task_app.command("create", help="创建 task")
 def task_create_cmd(
     goal: Annotated[str, typer.Option("--goal", help="task goal")] = "",
-    kind: Annotated[
-        str, typer.Option("--kind", help="interactive/background/delegated/scheduled")
-    ] = "interactive",
+    kind: Annotated[str, typer.Option("--kind", help="interactive/background/delegated/scheduled")] = "interactive",
     agent_profile: Annotated[str, typer.Option("--agent-profile", help="agent profile name")] = "",
     owner: Annotated[str, typer.Option("--owner", help="task owner")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
@@ -111,9 +105,7 @@ def task_delegate_cmd(
     parent_task_id: Annotated[str, typer.Argument(help="parent task id")],
     goal: Annotated[list[str], typer.Option("--goal", help="child task goal; repeatable")] = [],
     reason: Annotated[str, typer.Option("--reason", help="delegation reason")] = "",
-    agent_profile: Annotated[
-        str, typer.Option("--agent-profile", help="apply to all child tasks")
-    ] = "",
+    agent_profile: Annotated[str, typer.Option("--agent-profile", help="apply to all child tasks")] = "",
     owner: Annotated[str, typer.Option("--owner", help="apply to all child tasks")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta for delegation")] = "",
 ) -> None:
@@ -133,9 +125,7 @@ def task_delegate_cmd(
 def task_start_run_cmd(
     task_id: Annotated[str, typer.Argument(help="task id")],
     trigger: Annotated[str, typer.Option("--trigger", help="run trigger")] = "manual",
-    resume_from_run_id: Annotated[
-        str, typer.Option("--resume-from-run-id", help="resume from previous run")
-    ] = "",
+    resume_from_run_id: Annotated[str, typer.Option("--resume-from-run-id", help="resume from previous run")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
 ) -> None:
     asyncio.run(
@@ -206,9 +196,7 @@ async def _task_list(parent_task_id: str | None) -> None:
         )
         for entry in entries
     ]
-    Renderer.table(
-        ["id", "kind", "status", "agent_profile", "parent_task_id", "goal"], rows, title="tasks"
-    )
+    Renderer.table(["id", "kind", "status", "agent_profile", "parent_task_id", "goal"], rows, title="tasks")
 
 
 async def _task_show(task_id: str) -> None:

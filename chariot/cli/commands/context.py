@@ -126,9 +126,7 @@ async def _inspect(context_id: str) -> None:
             "provider": snapshot["provider_name"]
             if snapshot is not None
             else (trace["provider_name"] if trace is not None else "-"),
-            "model": snapshot["model"]
-            if snapshot is not None
-            else (trace["model"] if trace is not None else "-"),
+            "model": snapshot["model"] if snapshot is not None else (trace["model"] if trace is not None else "-"),
             "size": snapshot["context_size"] if snapshot is not None else "-",
         }
     )

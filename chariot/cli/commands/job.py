@@ -33,10 +33,10 @@ def _parse_meta(raw: str) -> dict[str, Any] | None:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         Renderer.die(f"meta must be valid JSON: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if not isinstance(data, dict):
         Renderer.die("meta must be a JSON object")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     return data
 
 
@@ -136,9 +136,7 @@ async def _job_list() -> None:
         )
         for entry in entries
     ]
-    Renderer.table(
-        ["name", "enabled", "agent_profile", "cron", "last_run_status"], rows, title="jobs"
-    )
+    Renderer.table(["name", "enabled", "agent_profile", "cron", "last_run_status"], rows, title="jobs")
 
 
 async def _job_show(name: str) -> None:

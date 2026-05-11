@@ -66,9 +66,7 @@ def _request_frame(rid: int, method: str, params: dict[str, Any] | None = None) 
     return (json.dumps(body) + "\n").encode()
 
 
-async def _call(
-    server: JsonRpcServer, method: str, params: dict[str, Any] | None = None
-) -> dict[str, Any]:
+async def _call(server: JsonRpcServer, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """_____________?RPC,_______________________________?response _?error)_?"""
     reader = make_reader(_request_frame(1, method, params))
     writer = MockWriter()
@@ -202,9 +200,7 @@ class TestToolMethods:
         assert line["result"]["tool"]["enabled"] is False
 
     async def test_config_tool_options(self, server: JsonRpcServer) -> None:
-        line = await _call(
-            server, "config_tool", {"name": "read_file", "options": {"max_bytes": 8192}}
-        )
+        line = await _call(server, "config_tool", {"name": "read_file", "options": {"max_bytes": 8192}})
         assert line["result"]["tool"]["options"] == {"max_bytes": 8192}
 
     async def test_enable_unknown_tool_returns_not_found(self, server: JsonRpcServer) -> None:
@@ -243,9 +239,7 @@ class TestProviderMethods:
         assert result["name"] == "mock2"
         assert result["type"] == "mock"
 
-    async def test_add_provider_duplicate_returns_err_duplicate(
-        self, server: JsonRpcServer
-    ) -> None:
+    async def test_add_provider_duplicate_returns_err_duplicate(self, server: JsonRpcServer) -> None:
         """seed _____________?'mock',___________________?_?ERR_DUPLICATE_?"""
         line = await _call(
             server,

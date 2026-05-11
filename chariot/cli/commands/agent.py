@@ -32,10 +32,10 @@ def _parse_meta(raw: str) -> dict[str, Any] | None:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         Renderer.die(f"meta must be valid JSON: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if not isinstance(data, dict):
         Renderer.die("meta must be a JSON object")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     return data
 
 
@@ -57,9 +57,7 @@ def agent_add_cmd(
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
     tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
-    provider_profile: Annotated[
-        str, typer.Option("--provider-profile", help="provider profile")
-    ] = "",
+    provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
 ) -> None:
@@ -82,9 +80,7 @@ def agent_update_cmd(
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
     tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
-    provider_profile: Annotated[
-        str, typer.Option("--provider-profile", help="provider profile")
-    ] = "",
+    provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
 ) -> None:
@@ -124,9 +120,7 @@ async def _agent_list() -> None:
         )
         for entry in entries
     ]
-    Renderer.table(
-        ["name", "role", "prompt_bundle", "tool_profile", "provider_profile"], rows, title="agents"
-    )
+    Renderer.table(["name", "role", "prompt_bundle", "tool_profile", "provider_profile"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:

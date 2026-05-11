@@ -68,9 +68,7 @@ def chat_cmd(
         str | None,
         typer.Option(
             "--base-url",
-            help=(
-                "本次覆盖 entry.options.base_url;不传按 inline → ANTHROPIC_BASE_URL env → 默认 解析"
-            ),
+            help=("本次覆盖 entry.options.base_url;不传按 inline → ANTHROPIC_BASE_URL env → 默认 解析"),
         ),
     ] = None,
     api_key: Annotated[
@@ -80,9 +78,7 @@ def chat_cmd(
             help="本次覆盖 entry.options.api_key;不传按 inline → api_key_env 指向的 env 解析",
         ),
     ] = None,
-    max_tokens: Annotated[
-        int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")
-    ] = 1024,
+    max_tokens: Annotated[int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")] = 1024,
     conversation: Annotated[
         str | None,
         typer.Option(

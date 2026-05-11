@@ -157,9 +157,7 @@ async def _rename(conversation_id: str, title: str) -> None:
     async with installed_runtime() as agent:
         try:
             async with agent.session_maker() as session:
-                conversation = await ConversationRepo(session).update_title(
-                    conversation_id, new_title
-                )
+                conversation = await ConversationRepo(session).update_title(conversation_id, new_title)
         except ConversationNotFound as e:
             Renderer.die(f"重命名失败: {e}")
             return

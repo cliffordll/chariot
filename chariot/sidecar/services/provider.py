@@ -134,9 +134,7 @@ class ProviderService:
             "ok": result.ok,
             "latency_ms": result.latency_ms,
             "error": (
-                {"code": result.error.code, "message": result.error.message}
-                if result.error is not None
-                else None
+                {"code": result.error.code, "message": result.error.message} if result.error is not None else None
             ),
         }
 

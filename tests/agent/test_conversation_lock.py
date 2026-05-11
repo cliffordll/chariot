@@ -193,9 +193,7 @@ class TestAdvisoryLockCrossConnection:
 class TestDoubleLayerAcquire:
     """`ConversationLockManager.acquire(conversation_id, db_session=s)` 同时持两层锁。"""
 
-    async def test_acquire_with_db_session_writes_and_commits(
-        self, session_a: AsyncSession
-    ) -> None:
+    async def test_acquire_with_db_session_writes_and_commits(self, session_a: AsyncSession) -> None:
         """带 db_session 的 acquire,critical section 内写数据,正常 commit。"""
         async with ConversationLockManager.acquire("conv_dl", db_session=session_a):
             repo = ConversationRepo(session_a)

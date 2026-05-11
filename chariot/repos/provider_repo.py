@@ -133,17 +133,13 @@ class ProviderRepo:
         row = await self._find_row(name)
         if row is None:
             raise ProviderNotFound(f"未知 provider name: {name!r}")
-        await self.session.execute(
-            update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0)
-        )
+        await self.session.execute(update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0))
         row.is_default = 1
         await self.session.commit()
 
     async def unset_default(self) -> None:
         """清掉当前默认(把所有行的 `is_default` 置 0)。无默认时也是 no-op。"""
-        await self.session.execute(
-            update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0)
-        )
+        await self.session.execute(update(ProviderRow).where(ProviderRow.is_default == 1).values(is_default=0))
         await self.session.commit()
 
     # ---- copy ----

@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+
 import pytest
 
 from chariot.agent.chat_event import ChatEvent
@@ -257,9 +258,7 @@ class TestBootstrapProviderOverrides:
     """
 
     @pytest.fixture(autouse=True)
-    async def _seed_anthropic_entry(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> AsyncIterator[Path]:
+    async def _seed_anthropic_entry(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Path]:
         """tmp DB 装一个 anthropic entry,yield db_path。"""
         from chariot.database.session import dispose_db
         from chariot.repos.provider_repo import ProviderRepo
@@ -309,9 +308,7 @@ class TestBootstrapProviderOverrides:
         provider = agent.providers["claude"]
         assert provider._spec.base_url == "https://override.api"  # type: ignore[attr-defined]
 
-    async def test_overrides_keyed_by_other_provider_ignored(
-        self, _seed_anthropic_entry: Path
-    ) -> None:
+    async def test_overrides_keyed_by_other_provider_ignored(self, _seed_anthropic_entry: Path) -> None:
         """overrides keyed 到不存在的 entry → 被忽略,不影响现有 entry。"""
         agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,

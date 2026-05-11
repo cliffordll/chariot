@@ -69,9 +69,7 @@ class TaskService:
 
     async def start_task_run(self, spec: TaskRunCreate) -> TaskRun:
         task = await self.require_task(spec.task_id)
-        if task.status == TaskStatus.PAUSED:
-            await self._store.update_task(task.with_status(TaskStatus.RUNNING))
-        elif task.status == TaskStatus.QUEUED:
+        if task.status == TaskStatus.PAUSED or task.status == TaskStatus.QUEUED:
             await self._store.update_task(task.with_status(TaskStatus.RUNNING))
         elif task.status != TaskStatus.RUNNING:
             raise ValueError(f"cannot start run for task in status {task.status}")
@@ -134,9 +132,7 @@ class TaskService:
         error: str | None = None,
     ) -> TaskRun:
         run = await self.require_run(run_id)
-        run = await self._store.update_run(
-            run.finish(status=run_status, result=result, error=error)
-        )
+        run = await self._store.update_run(run.finish(status=run_status, result=result, error=error))
         task = await self.require_task(run.task_id)
         await self._store.update_task(task.with_status(task_status))
         return run

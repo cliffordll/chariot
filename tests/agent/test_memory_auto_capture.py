@@ -40,7 +40,4 @@ async def test_memory_is_auto_captured_after_turn(agent: AIAgent) -> None:
     async with agent.session_maker() as session:
         entries = await MemoryRepo(session).list_entries(kind="preference")
 
-    assert any(
-        entry.text == "默认用中文输出但保留关键 English terms"
-        for entry in entries
-    )
+    assert any(entry.text == "默认用中文输出但保留关键 English terms" for entry in entries)

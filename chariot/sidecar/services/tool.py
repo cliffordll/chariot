@@ -50,9 +50,7 @@ class ToolService:
         await self._runtime.reload()
         return self.serialize(entry)
 
-    async def update_options(
-        self, session: Any, *, name: str, options: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update_options(self, session: Any, *, name: str, options: dict[str, Any]) -> dict[str, Any]:
         entry = await ToolRepo(session).update(name, options=options)
         await self._runtime.reload()
         return self.serialize(entry)

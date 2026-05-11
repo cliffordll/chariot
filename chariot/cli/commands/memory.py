@@ -36,10 +36,10 @@ def _parse_meta(raw: str) -> dict[str, Any] | None:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         Renderer.die(f"meta must be valid JSON: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if not isinstance(data, dict):
         Renderer.die("meta must be a JSON object")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     return data
 
 
@@ -78,9 +78,7 @@ def add_cmd(
     kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "preference",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
-    conversation: Annotated[
-        list[str], typer.Option("--conversation", help="关联 conversation id")
-    ] = [],
+    conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],
     provider: Annotated[list[str], typer.Option("--provider", help="关联 provider name")] = [],
     tag: Annotated[list[str], typer.Option("--tag", help="关联 tag")] = [],
     pinned: Annotated[bool, typer.Option("--pinned", help="是否置顶")] = False,
@@ -106,9 +104,7 @@ def update_cmd(
     kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
-    conversation: Annotated[
-        list[str], typer.Option("--conversation", help="关联 conversation id")
-    ] = [],
+    conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],
     provider: Annotated[list[str], typer.Option("--provider", help="关联 provider name")] = [],
     tag: Annotated[list[str], typer.Option("--tag", help="关联 tag")] = [],
     pinned: Annotated[str, typer.Option("--pinned", help="yes/no/empty")] = "",
@@ -366,10 +362,7 @@ async def _links(memory_id: str | None) -> None:
     if not entries:
         Renderer.out("(没有 memory links)")
         return
-    rows = [
-        (link.memory_id, link.link_type, link.link_value, _fmt_dt(link.created_at))
-        for link in entries
-    ]
+    rows = [(link.memory_id, link.link_type, link.link_value, _fmt_dt(link.created_at)) for link in entries]
     Renderer.table(["memory", "type", "value", "created_at"], rows, title="memory links")
 
 
@@ -379,10 +372,7 @@ async def _search(query: str) -> None:
     if not entries:
         Renderer.out("(没有匹配的 memory)")
         return
-    rows = [
-        (entry.id, entry.kind, "yes" if entry.pinned else "no", _truncate(entry.text, 72))
-        for entry in entries
-    ]
+    rows = [(entry.id, entry.kind, "yes" if entry.pinned else "no", _truncate(entry.text, 72)) for entry in entries]
     Renderer.table(["id", "kind", "pinned", "text"], rows, title=f"memory search: {query}")
 
 

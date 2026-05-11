@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
@@ -313,9 +313,7 @@ class MemoryRepo:
             link_value = str(link.get("link_value") or link.get("value") or "").strip()
             if not link_type or not link_value:
                 raise ConfigError("memory link requires link_type and link_value")
-            self.session.add(
-                MemoryLinkRow(memory_id=memory_id, link_type=link_type, link_value=link_value)
-            )
+            self.session.add(MemoryLinkRow(memory_id=memory_id, link_type=link_type, link_value=link_value))
         await self.session.flush()
 
     async def _record_event(self, memory_id: str, event_type: str, payload: dict[str, Any]) -> None:

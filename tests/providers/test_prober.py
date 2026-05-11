@@ -228,9 +228,7 @@ class TestProberIncompleteStream:
 
 
 class TestProberGenericExceptionFallback:
-    async def test_unexpected_exception_caught_as_internal_error(
-        self, _registry_isolated: Any
-    ) -> None:
+    async def test_unexpected_exception_caught_as_internal_error(self, _registry_isolated: Any) -> None:
         ProviderRegistry.register("probe_generic_exc", _GenericExceptionProvider)
         result = await ProviderProber.probe(_entry("probe_generic_exc"))
         assert result.ok is False

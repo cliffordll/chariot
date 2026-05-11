@@ -172,9 +172,7 @@ def _parse_kv(items: list[str]) -> dict[str, Any]:
 
 
 def _looks_like_json(raw: str) -> bool:
-    return (raw.startswith("{") and raw.endswith("}")) or (
-        raw.startswith("[") and raw.endswith("]")
-    )
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
 
 
 def _is_valid_kv_key(key: str) -> bool:

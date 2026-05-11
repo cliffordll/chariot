@@ -21,7 +21,8 @@ BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_defaul
 
 CRUD:
 - `chariot provider add --name X --type Y -o k=v -o k=v ... [-p k=v]`: ?? entry
-  ?: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY`
+  ?: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b
+        -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY`
 - `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`: ?? entry
 - `chariot provider delete <name>`: ?? entry
 - `chariot provider rm <name>`: ?? entry ??(??)
@@ -69,10 +70,7 @@ async def _list() -> None:
     if not entries:
         Renderer.out("(DB 里没有 entry — `chariot provider add` 加一条)")
     else:
-        rows = [
-            (e.name, e.type, "*" if e.name == default_name else "", _caps_short(e.type))
-            for e in entries
-        ]
+        rows = [(e.name, e.type, "*" if e.name == default_name else "", _caps_short(e.type)) for e in entries]
         Renderer.table(["name", "type", "default", "capabilities"], rows, title="entries")
 
     types = sorted(ProviderRegistry.known_types())
@@ -298,9 +296,7 @@ def _parse_kv(items: list[str], *, label: str) -> dict[str, Any]:
 
 
 def _looks_like_json(raw: str) -> bool:
-    return (raw.startswith("{") and raw.endswith("}")) or (
-        raw.startswith("[") and raw.endswith("]")
-    )
+    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
 
 
 def _is_valid_kv_key(key: str) -> bool:
@@ -336,9 +332,7 @@ def add_cmd(
     ] = None,
     params: Annotated[
         list[str] | None,
-        typer.Option(
-            "-p", "--param", help="params key=value;可重复(runtime 默认值,如 temperature)"
-        ),
+        typer.Option("-p", "--param", help="params key=value;可重复(runtime 默认值,如 temperature)"),
     ] = None,
 ) -> None:
     asyncio.run(_add(name, type, options or [], params or []))

@@ -78,9 +78,7 @@ class PromptApi:
         version = await repo.create_bundle(name, description=description, layers=layers)
         bundle = await repo.get_bundle(name)
         if bundle is None:
-            raise RpcError(
-                JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after create"
-            )
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after create")
         return {
             "bundle": self._bundle_to_dict(bundle),
             "version": self._version_to_dict(version),
@@ -104,9 +102,7 @@ class PromptApi:
         version = await repo.update_bundle(name, **kwargs)
         bundle = await repo.get_bundle(name)
         if bundle is None:
-            raise RpcError(
-                JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after update"
-            )
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after update")
         return {
             "bundle": self._bundle_to_dict(bundle),
             "version": self._version_to_dict(version),
@@ -125,16 +121,12 @@ class PromptApi:
             active_version = await repo.get_active_version(name)
             return {
                 "bundle": self._bundle_to_dict(bundle),
-                "version": self._version_to_dict(active_version)
-                if active_version is not None
-                else None,
+                "version": self._version_to_dict(active_version) if active_version is not None else None,
             }
         version_entry = await repo.activate_version(name, version)
         bundle = await repo.get_bundle(name)
         if bundle is None:
-            raise RpcError(
-                JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after activate"
-            )
+            raise RpcError(JsonRpcServer.ERR_INTERNAL, f"prompt bundle {name!r} not found after activate")
         return {
             "bundle": self._bundle_to_dict(bundle),
             "version": self._version_to_dict(version_entry),

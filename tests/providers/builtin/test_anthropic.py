@@ -244,9 +244,7 @@ class TestCaseBToolUse:
             assert d.delta is not None
             assert d.delta["type"] == "input_json_delta"
 
-    async def test_message_delta_stop_reason_tool_use(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_message_delta_stop_reason_tool_use(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -402,9 +400,7 @@ class TestCreate:
     def test_inline_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # 防意外 fallback 到 env
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        provider = AnthropicProvider.create(
-            {"model": "claude-3-5-sonnet-20241022", "api_key": "sk-ant-xxx"}
-        )
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022", "api_key": "sk-ant-xxx"})
         assert provider.config.model == "claude-3-5-sonnet-20241022"
 
     def test_env_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -419,9 +415,7 @@ class TestCreate:
 
     def test_custom_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-        provider = AnthropicProvider.create(
-            {"model": "claude-3-5-sonnet-20241022", "base_url": "https://custom.api"}
-        )
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022", "base_url": "https://custom.api"})
         # base_url 在 _build_body 不暴露,只能间接验:_spec.base_url 字段
         assert provider._spec.base_url == "https://custom.api"
 
@@ -436,9 +430,7 @@ class TestCreate:
         """inline > env(CLI flag 通过 inline 注入,所以 CLI > env;DB 显式 inline 也 > env)。"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://env.api")
-        provider = AnthropicProvider.create(
-            {"model": "claude-3-5-sonnet-20241022", "base_url": "https://inline.api"}
-        )
+        provider = AnthropicProvider.create({"model": "claude-3-5-sonnet-20241022", "base_url": "https://inline.api"})
         assert provider._spec.base_url == "https://inline.api"
 
     def test_base_url_default_when_no_inline_no_env(self, monkeypatch: pytest.MonkeyPatch) -> None:

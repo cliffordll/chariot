@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-import pytest
 import pytest_asyncio
 
 from chariot.agent.chat_event import ChatEvent

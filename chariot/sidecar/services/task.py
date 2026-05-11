@@ -17,14 +17,9 @@ class TaskApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
-    async def list_tasks(
-        self, session: Any, *, parent_task_id: str | None = None
-    ) -> list[dict[str, Any]]:
+    async def list_tasks(self, session: Any, *, parent_task_id: str | None = None) -> list[dict[str, Any]]:
         service = TaskService(TaskRepo(session))
-        return [
-            self._task_to_dict(entry)
-            for entry in await service.list_tasks(parent_task_id=parent_task_id)
-        ]
+        return [self._task_to_dict(entry) for entry in await service.list_tasks(parent_task_id=parent_task_id)]
 
     async def get_task(self, session: Any, *, task_id: str) -> dict[str, Any]:
         service = TaskService(TaskRepo(session))

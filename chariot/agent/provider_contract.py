@@ -13,9 +13,7 @@ class ProviderContractError(ValueError):
     """Provider emitted an invalid event sequence."""
 
 
-def normalize_request(
-    req: ChatRequest, capabilities: BaseProviderCapabilities
-) -> ChatRequest:
+def normalize_request(req: ChatRequest, capabilities: BaseProviderCapabilities) -> ChatRequest:
     """Drop request fields unsupported by the selected provider."""
 
     updates: dict[str, object | None] = {}
@@ -84,18 +82,14 @@ class ProviderEventValidator:
             if event.delta is None:
                 raise ProviderContractError("content_block_delta missing delta")
             if event.index not in self._open_blocks:
-                raise ProviderContractError(
-                    f"content_block_delta for unopened index {event.index}"
-                )
+                raise ProviderContractError(f"content_block_delta for unopened index {event.index}")
             return event
 
         if kind == "content_block_stop":
             if event.index is None:
                 raise ProviderContractError("content_block_stop missing index")
             if event.index not in self._open_blocks:
-                raise ProviderContractError(
-                    f"content_block_stop for unopened index {event.index}"
-                )
+                raise ProviderContractError(f"content_block_stop for unopened index {event.index}")
             self._open_blocks.remove(event.index)
             return event
 

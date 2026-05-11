@@ -39,9 +39,7 @@ class _Writer:
         return [json.loads(line) for line in self.buf.split(b"\n") if line.strip()]
 
 
-async def _call(
-    server: JsonRpcServer, method: str, params: dict[str, Any] | None = None
-) -> dict[str, Any]:
+async def _call(server: JsonRpcServer, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "method": method}
     if params is not None:
         body["params"] = params
@@ -105,10 +103,7 @@ async def test_use_provider_switches_default(server: JsonRpcServer) -> None:
 
     status = await _call(server, "get_provider_status")
     assert status["result"]["default_provider"] == "mock2"
-    assert any(
-        p["name"] == "mock2" and p["default"] is True
-        for p in status["result"]["providers"]
-    )
+    assert any(p["name"] == "mock2" and p["default"] is True for p in status["result"]["providers"])
 
 
 @pytest.mark.asyncio

@@ -50,4 +50,3 @@ async def test_prompt_bundle_create_update_activate(session: AsyncSession) -> No
     )
     assert trace.bundle_name == "demo"
     assert trace.version == "v2"
-

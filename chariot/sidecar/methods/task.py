@@ -104,9 +104,7 @@ class TaskMethods(MethodBase):
         result = self._optional_dict(params, "result")
         error = self._optional_str(params, "error")
         async with self._session() as session:
-            run = await self._api.complete_task_run(
-                session, run_id=run_id, result=result, error=error
-            )
+            run = await self._api.complete_task_run(session, run_id=run_id, result=result, error=error)
         return {"run": run}
 
     async def fail_run(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -124,9 +122,7 @@ class TaskMethods(MethodBase):
         error = self._optional_str(params, "error")
         result = self._optional_dict(params, "result")
         async with self._session() as session:
-            run = await self._api.cancel_task_run(
-                session, run_id=run_id, error=error, result=result
-            )
+            run = await self._api.cancel_task_run(session, run_id=run_id, error=error, result=result)
         return {"run": run}
 
     async def delegate(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:

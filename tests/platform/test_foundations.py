@@ -8,15 +8,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.chat_request import ChatRequest, Message
+from chariot.database.session import dispose_db, init_db
+from chariot.models.task import TaskCreate, TaskRunCreate
 from chariot.repos.audit_repo import AuditRepo
 from chariot.repos.checkpoint_repo import CheckpointRepo
-from chariot.database.session import dispose_db, init_db
 from chariot.repos.eval_repo import EvalRepo
 from chariot.repos.memory_repo import MemoryRepo
 from chariot.repos.prompt_repo import PromptRepo
 from chariot.repos.skill_repo import SkillRepo
 from chariot.repos.task_repo import TaskRepo
-from chariot.models.task import TaskCreate, TaskRunCreate
 from chariot.services.task import TaskService
 
 
@@ -48,10 +48,14 @@ class TestMigrationV10:
             "job_runs",
         }
         rows = (
-            await session.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            (
+                await session.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert names.issubset(set(rows))
 
 
