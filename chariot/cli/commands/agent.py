@@ -10,6 +10,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
+from chariot.models.agent import UNSET, ClearableStr
 from chariot.repos.task_repo import TaskRepo
 from chariot.services.agent import AgentService
 
@@ -78,9 +79,18 @@ def agent_add_cmd(
 def agent_update_cmd(
     name: Annotated[str, typer.Argument(help="agent profile name")],
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
-    prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
-    tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
-    provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
+    prompt_bundle: Annotated[
+        str | None,
+        typer.Option("--prompt-bundle", help="prompt bundle name(传空串 `--prompt-bundle ''` 表示清空)"),
+    ] = None,
+    tool_profile: Annotated[
+        str | None,
+        typer.Option("--tool-profile", help="tool profile name(传空串清空)"),
+    ] = None,
+    provider_profile: Annotated[
+        str | None,
+        typer.Option("--provider-profile", help="provider profile name(传空串清空)"),
+    ] = None,
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
 ) -> None:
@@ -88,13 +98,27 @@ def agent_update_cmd(
         _agent_update(
             name=name,
             role=role or None,
-            prompt_bundle=prompt_bundle or None,
-            tool_profile=tool_profile or None,
-            provider_profile=provider_profile or None,
+            prompt_bundle=_to_clearable(prompt_bundle),
+            tool_profile=_to_clearable(tool_profile),
+            provider_profile=_to_clearable(provider_profile),
             budget=budget,
             meta=meta,
         )
     )
+
+
+def _to_clearable(value: str | None) -> ClearableStr:
+    """CLI flag → ClearableStr 三态。
+
+    - 没传 flag(typer 给 None)→ UNSET(skip update)
+    - `--xxx ''`(显式空串)→ None(清空字段)
+    - `--xxx value` → "value"(set)
+    """
+    if value is None:
+        return UNSET
+    if value == "":
+        return None
+    return value
 
 
 @agent_app.command("remove", help="remove agent profile")
@@ -180,9 +204,9 @@ async def _agent_update(
     *,
     name: str,
     role: str | None,
-    prompt_bundle: str | None,
-    tool_profile: str | None,
-    provider_profile: str | None,
+    prompt_bundle: ClearableStr,
+    tool_profile: ClearableStr,
+    provider_profile: ClearableStr,
     budget: str,
     meta: str,
 ) -> None:

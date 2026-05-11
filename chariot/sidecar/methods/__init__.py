@@ -17,6 +17,7 @@ from chariot.agent.exceptions import (
     ProviderNotFound,
     ToolNotFound,
 )
+from chariot.models.agent import UNSET, ClearableStr
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
@@ -89,6 +90,25 @@ class MethodBase:
     @staticmethod
     def _optional_str(params: dict[str, Any], key: str) -> str | None:
         val = params.get(key)
+        if val is None:
+            return None
+        if not isinstance(val, str):
+            raise RpcError(
+                JsonRpcServer.ERR_INVALID_PARAMS,
+                f"{key!r} must be a string or null",
+            )
+        return val
+
+    @staticmethod
+    def _clearable_str(params: dict[str, Any], key: str) -> ClearableStr:
+        """三态读取:key 缺席 → UNSET(skip);key=null → None(清空);key=str → set。
+
+        给 update 路径用,区分"字段没传"和"显式清空"。普通 `_optional_str` 把
+        二者都归到 None,导致前端无法清空字段。
+        """
+        if key not in params:
+            return UNSET
+        val = params[key]
         if val is None:
             return None
         if not isinstance(val, str):

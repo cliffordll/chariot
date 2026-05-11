@@ -198,6 +198,34 @@ class TestPlatformRepos:
         await repo.delete_job("cleanup")
         assert await repo.get_job("cleanup") is None
 
+    async def test_task_repo_clear_agent_binding_fields(self, session: AsyncSession) -> None:
+        """显式传 None 应清空 binding;未传(UNSET 默认)保持原值。"""
+        repo = TaskRepo(session)
+        await repo.create_agent_profile(
+            name="a1",
+            role="r",
+            prompt_bundle="research",
+            tool_profile="fs_safe",
+            provider_profile="claude",
+        )
+        # 1) 未传 prompt/tool/provider → 都保留;只改 role
+        u1 = await repo.update_agent_profile(name="a1", role="executor")
+        assert u1.prompt_bundle == "research"
+        assert u1.tool_profile == "fs_safe"
+        assert u1.provider_profile == "claude"
+        # 2) 显式 None → 清空 provider,其它仍保留
+        u2 = await repo.update_agent_profile(name="a1", provider_profile=None)
+        assert u2.provider_profile is None
+        assert u2.prompt_bundle == "research"
+        assert u2.tool_profile == "fs_safe"
+        # 3) 同时清两个
+        u3 = await repo.update_agent_profile(name="a1", prompt_bundle=None, tool_profile=None)
+        assert u3.prompt_bundle is None
+        assert u3.tool_profile is None
+        # 4) 重新 set
+        u4 = await repo.update_agent_profile(name="a1", provider_profile="ollama")
+        assert u4.provider_profile == "ollama"
+
     async def test_task_repo_update_and_toggle_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
         await repo.create_job(name="cleanup", goal="cleanup stale state", cron="0 * * * *", enabled=False)
