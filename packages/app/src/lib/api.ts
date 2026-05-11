@@ -626,6 +626,24 @@ const apiCore = {
     return rpc("create_agent", payload as Record<string, unknown>);
   },
 
+  updateAgent(
+    name: string,
+    payload: {
+      role?: string | null;
+      prompt_bundle?: string | null;
+      tool_profile?: string | null;
+      provider_profile?: string | null;
+      budget?: Record<string, unknown>;
+      meta?: Record<string, unknown>;
+    },
+  ): Promise<{ agent: AgentProfile }> {
+    return rpc("update_agent", { name, ...payload });
+  },
+
+  deleteAgent(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_agent", { name });
+  },
+
   listTasks(params: { parent_task_id?: string | null } = {}): Promise<{ tasks: TaskEntry[] }> {
     return rpc("list_tasks", { ...params });
   },
@@ -689,6 +707,27 @@ const apiCore = {
     return rpc("cancel_task_run", payload as Record<string, unknown>);
   },
 
+  delegateTask(payload: {
+    parent_task_id: string;
+    tasks: Array<{
+      goal: string;
+      agent_profile?: string | null;
+      owner?: string | null;
+      meta?: Record<string, unknown>;
+    }>;
+    reason?: string | null;
+    meta?: Record<string, unknown>;
+  }): Promise<{
+    delegation: {
+      parent_task_id: string;
+      child_task_ids: string[];
+      requested: number;
+      created: number;
+    };
+  }> {
+    return rpc("delegate_task", payload as Record<string, unknown>);
+  },
+
   listJobs(): Promise<{ jobs: ScheduledJob[] }> {
     return rpc("list_jobs");
   },
@@ -730,6 +769,10 @@ const apiCore = {
 
   runJobNow(name: string): Promise<{ task: TaskEntry; job_run: JobRunRecord }> {
     return rpc("run_job_now", { name });
+  },
+
+  deleteJob(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_job", { name });
   },
 
   async status(): Promise<StatusResponse> {

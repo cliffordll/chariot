@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +48,15 @@ export default function Agents() {
   const [state, setState] = useState<AgentsState>({ kind: "loading" });
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [createOpen, setCreateOpen] = useState(false);
+  const [editAgent, setEditAgent] = useState<AgentProfile | null>(null);
+  const [removeAgent, setRemoveAgent] = useState<AgentProfile | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const detailRef = useRef(detail);
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   const loadAgent = useCallback(async (name: string) => {
     setDetail({ kind: "loading", name });
@@ -56,11 +74,12 @@ export default function Agents() {
     try {
       const { agents } = await api.listAgents();
       setState({ kind: "ok", agents });
-      const selected =
-        preferredName ??
-        (detail.kind === "ok" ? detail.agent.name : detail.kind === "loading" || detail.kind === "err" ? detail.name : null) ??
-        agents[0]?.name ??
+      const d = detailRef.current;
+      const currentSelected =
+        d.kind === "ok" ? d.agent.name :
+        d.kind === "loading" || d.kind === "err" ? d.name :
         null;
+      const selected = preferredName ?? currentSelected ?? agents[0]?.name ?? null;
       if (selected) {
         void loadAgent(selected);
       } else {
@@ -71,7 +90,7 @@ export default function Agents() {
       setState({ kind: "err", message });
       setDetail({ kind: "idle" });
     }
-  }, [detail, loadAgent]);
+  }, [loadAgent]);
 
   useEffect(() => {
     void load();
@@ -100,7 +119,11 @@ export default function Agents() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]">
         <AgentsListCard state={state} selectedName={detail.kind === "ok" ? detail.agent.name : detail.kind === "loading" || detail.kind === "err" ? detail.name : null} onSelect={loadAgent} />
-        <AgentDetailCard detail={detail} />
+        <AgentDetailCard
+          detail={detail}
+          onEdit={(agent) => setEditAgent(agent)}
+          onRemove={(agent) => setRemoveAgent(agent)}
+        />
       </div>
 
       {createOpen && (
@@ -113,6 +136,55 @@ export default function Agents() {
           }}
         />
       )}
+
+      {editAgent && (
+        <EditAgentDialog
+          agent={editAgent}
+          onClose={() => setEditAgent(null)}
+          onSaved={(name) => {
+            setEditAgent(null);
+            setNotice(`Updated agent profile ${name}.`);
+            void load(name);
+          }}
+        />
+      )}
+
+      <AlertDialog open={!!removeAgent} onOpenChange={(open) => { if (!open && !removing) setRemoveAgent(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove agent profile</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeAgent ? `Permanently delete profile "${removeAgent.name}"? This cannot be undone.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={removing}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!removeAgent) return;
+                setRemoving(true);
+                try {
+                  await api.deleteAgent(removeAgent.name);
+                  const name = removeAgent.name;
+                  detailRef.current = { kind: "idle" };
+                  setDetail({ kind: "idle" });
+                  setRemoveAgent(null);
+                  setNotice(`Removed agent profile ${name}.`);
+                  void load();
+                } catch (err) {
+                  setNotice(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setRemoving(false);
+                }
+              }}
+            >
+              {removing ? "Removing..." : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -164,7 +236,15 @@ function AgentsListCard({
   );
 }
 
-function AgentDetailCard({ detail }: { detail: DetailState }) {
+function AgentDetailCard({
+  detail,
+  onEdit,
+  onRemove,
+}: {
+  detail: DetailState;
+  onEdit: (agent: AgentProfile) => void;
+  onRemove: (agent: AgentProfile) => void;
+}) {
   if (detail.kind === "idle") return <Panel title="Agent Detail">Select an agent profile to inspect its bindings.</Panel>;
   if (detail.kind === "loading") return <Panel title="Agent Detail">Loading {detail.name}...</Panel>;
   if (detail.kind === "err") return <Panel title="Agent Detail" tone="danger">{detail.message}</Panel>;
@@ -173,16 +253,22 @@ function AgentDetailCard({ detail }: { detail: DetailState }) {
   return (
     <Panel title="Agent Detail" subtitle={agent.name}>
       <div className="space-y-5">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge>{agent.role}</Badge>
-            {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
-            {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
-            {agent.provider_profile && <Badge variant="outline">{agent.provider_profile}</Badge>}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge>{agent.role}</Badge>
+              {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
+              {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
+              {agent.provider_profile && <Badge variant="outline">{agent.provider_profile}</Badge>}
+            </div>
+            <div className="grid gap-1 text-sm text-muted-foreground">
+              <span>created: {formatDateTime(agent.created_at)}</span>
+              <span>updated: {formatDateTime(agent.updated_at)}</span>
+            </div>
           </div>
-          <div className="grid gap-1 text-sm text-muted-foreground">
-            <span>created: {formatDateTime(agent.created_at)}</span>
-            <span>updated: {formatDateTime(agent.updated_at)}</span>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => onEdit(agent)}>Edit</Button>
+            <Button variant="outline" size="sm" onClick={() => onRemove(agent)}>Remove</Button>
           </div>
         </div>
 
@@ -282,6 +368,94 @@ function CreateAgentDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           <Button onClick={() => void submit()} disabled={submitting}>{submitting ? "Creating..." : "Create"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditAgentDialog({
+  agent,
+  onClose,
+  onSaved,
+}: {
+  agent: AgentProfile;
+  onClose: () => void;
+  onSaved: (name: string) => void;
+}) {
+  const [role, setRole] = useState(agent.role);
+  const [promptBundle, setPromptBundle] = useState(agent.prompt_bundle ?? "");
+  const [toolProfile, setToolProfile] = useState(agent.tool_profile ?? "");
+  const [providerProfile, setProviderProfile] = useState(agent.provider_profile ?? "");
+  const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
+  const [meta, setMeta] = useState(JSON.stringify(agent.meta, null, 2));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    let parsedBudget: Record<string, unknown>;
+    let parsedMeta: Record<string, unknown>;
+    try {
+      parsedBudget = parseJsonObject(budget);
+      parsedMeta = parseJsonObject(meta);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.updateAgent(agent.name, {
+        role,
+        prompt_bundle: promptBundle || null,
+        tool_profile: toolProfile || null,
+        provider_profile: providerProfile || null,
+        budget: parsedBudget,
+        meta: parsedMeta,
+      });
+      onSaved(agent.name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Edit agent profile</DialogTitle>
+          <DialogDescription>Update role, bindings, budget, or meta for {agent.name}.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Field label="Role">
+            <Input value={role} onChange={(e) => setRole(e.target.value)} />
+          </Field>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="Prompt bundle">
+              <Input value={promptBundle} onChange={(e) => setPromptBundle(e.target.value)} placeholder="default" />
+            </Field>
+            <Field label="Tool profile">
+              <Input value={toolProfile} onChange={(e) => setToolProfile(e.target.value)} placeholder="default" />
+            </Field>
+            <Field label="Provider profile">
+              <Input value={providerProfile} onChange={(e) => setProviderProfile(e.target.value)} placeholder="mock" />
+            </Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Budget JSON">
+              <Textarea value={budget} onChange={(e) => setBudget(e.target.value)} className="min-h-28 font-mono text-xs" />
+            </Field>
+            <Field label="Meta JSON">
+              <Textarea value={meta} onChange={(e) => setMeta(e.target.value)} className="min-h-28 font-mono text-xs" />
+            </Field>
+          </div>
+          {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button onClick={() => void submit()} disabled={submitting}>{submitting ? "Saving..." : "Save changes"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
