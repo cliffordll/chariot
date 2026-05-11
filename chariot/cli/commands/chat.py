@@ -120,7 +120,7 @@ def chat_cmd(
             "--skill",
             help=(
                 "B6 wave 2:激活 skill name(`chariot skill list` 看可用)。"
-                "覆盖 agent_profile.default_skill;空串 `--skill \"\"` 显式清空。"
+                '覆盖 agent_profile.default_skill;空串 `--skill ""` 显式清空。'
                 "dangling reference / disabled skill 走 fallback 不阻断。"
             ),
         ),
