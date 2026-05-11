@@ -1,0 +1,15 @@
+task_id: context_long_history_trim
+prompt: |
+  我下面贴一段约 800 字的虚构产品描述,请读完后告诉我:产品名叫什么、目标用户是谁、核心功能是哪一个。
+  ---
+  产品名叫 ChariotProxy,定位是给本地开发者用的智能体桥接器。目标用户是中小团队里既要做后端又要兼顾前端的工程师,核心痛点是 LLM 调用链路黑盒、调试困难。
+  ChariotProxy 的核心功能是:把每次 LLM 调用的 request / response / tool_call 完整 trace 落到本地 SQLite,后续可在桌面 UI 树形展开查看,任何环节都能回放和对比。
+  次要功能包括:provider 多家热插拔(Mock / Anthropic / OpenAI 等)、prompt bundle 版本管理、tool 权限白名单、memory 跨会话注入。
+  非目标是:不做云端协作、不做团队权限管理、不做模型训练。
+  当前版本 0.8.0-evolution,处于自主进化(Phase B)阶段。
+verifier_type: exact_match
+expected:
+  contains: ["ChariotProxy", "trace", "本地"]
+category: context
+description: 长 prompt(>800 字)下,agent 必须抓出 "ChariotProxy" 名字 + 核心功能 trace + "本地"定位三个关键信息,验证 context 不丢
+max_iterations: 4

@@ -13,6 +13,8 @@ dependencies = [
     "typer>=0.13",
     "python-ulid>=2.0",
     "prompt_toolkit>=3.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
 ]
 
 [project.scripts]
@@ -31,6 +33,7 @@ dev = [
     "pyright>=1.1.409",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "types-pyyaml>=6.0",
 ]
 build = [
     "pyinstaller>=6.0",

@@ -1,0 +1,10 @@
+task_id: file_write_artifact
+prompt: "在当前工作目录下创建一个名为 eval_artifact.txt 的文件,内容写一行 'evaluated'。"
+verifier_type: file_state
+expected:
+  path: eval_artifact.txt
+  exists: true
+  contains: "evaluated"
+category: file
+description: 跑完后磁盘上必须存在 eval_artifact.txt 且包含 'evaluated';验证 agent 能产物落地
+max_iterations: 8

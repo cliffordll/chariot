@@ -1,0 +1,9 @@
+task_id: plan_explain_class
+prompt: "用一两句话告诉我:Python 里 class 和 method 之间是什么关系?"
+verifier_type: exact_match
+expected:
+  contains: [class, method]
+  case_insensitive: true
+category: plan
+description: 解释类问题 —— 回复必须同时含 'class' 和 'method' 两个关键词
+max_iterations: 3

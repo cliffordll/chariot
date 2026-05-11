@@ -1,0 +1,10 @@
+task_id: web_get_example
+prompt: "用 http_get 工具拿 https://example.com 这个页面,简单告诉我它的标题是什么。"
+verifier_type: tool_called
+expected:
+  tool: http_get
+  args_subset:
+    url: "https://example.com"
+category: web
+description: agent 该走 http_get 调 example.com,验证外部 HTTP 调用工具链
+max_iterations: 6
