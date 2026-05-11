@@ -22,9 +22,11 @@ import,跟新 eval 入口分层。
 """
 
 from chariot.eval.cost import TraceCostExtractor
+from chariot.eval.diff import DiffEntry, DiffStatus, DiffSummary, EvalDiff
 from chariot.eval.loader import GoldenTaskLoader
 from chariot.eval.report import EvalReport, EvalSummary
 from chariot.eval.runner import AgentFactory, EvalRunner
+from chariot.eval.store import EvalRunSnapshot, EvalRunStore
 from chariot.eval.verifiers import VERIFIERS, BaseVerifier
 from chariot.models.eval import GoldenTask, RunRecord, Verdict, VerifierResult
 
@@ -32,7 +34,13 @@ __all__ = [
     "VERIFIERS",
     "AgentFactory",
     "BaseVerifier",
+    "DiffEntry",
+    "DiffStatus",
+    "DiffSummary",
+    "EvalDiff",
     "EvalReport",
+    "EvalRunSnapshot",
+    "EvalRunStore",
     "EvalRunner",
     "EvalSummary",
     "GoldenTask",
