@@ -31,6 +31,8 @@ export interface ChatTurnOpts {
   topP?: number;
   /** 0.4.0 加。stateful 多轮 convo id;非空时 sidecar 接续历史。 */
   conversationId?: string | null;
+  /** 0.7.2-tool+ agent_profile name;非空时由 AIAgent 解析 provider/prompt/tool 三件套绑定。 */
+  agentProfile?: string | null;
   signal: AbortSignal;
   onEvent: (ev: StreamEvent) => void;
 }
@@ -60,6 +62,7 @@ export async function runTurn(messages: ChatTurnMsg[], opts: ChatTurnOpts): Prom
   if (opts.baseUrl) req.base_url = opts.baseUrl;
   if (opts.apiKey) req.api_key = opts.apiKey;
   if (opts.conversationId) req.conversation_id = opts.conversationId;
+  if (opts.agentProfile) req.agent_profile = opts.agentProfile;
   if (opts.temperature !== undefined && opts.temperature !== 1) {
     req.temperature = opts.temperature;
   }

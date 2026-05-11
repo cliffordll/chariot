@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ApiError,
   api,
+  type AgentProfile,
   type AnthropicBlock,
   type Conversation,
   type Message,
@@ -56,6 +57,7 @@ function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
 
 const ENTRY_STORAGE_KEY = "chariot.chat.selected_entry";
 const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
+const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
 
 // 0.6.6+ per-call override:三字段 chat RPC 都接,sidecar 走 AgentRegistry
 // per-call agent 缓存,**不**写库。
@@ -122,6 +124,13 @@ export default function Chat() {
   const [selectedEntry, setSelectedEntryState] = useState<string | null>(() =>
     lsGet(ENTRY_STORAGE_KEY),
   );
+  // 0.7.2-tool+ agent picker:选中 agent 后,本轮 chat RPC 带 agent_profile,
+  // sidecar 由 AIAgent._resolve_binding 解析三件套(provider/prompt/tool);
+  // 选 "(none)" 走 0.7.0 行为(全局 active bundle + 全量 enabled tools)。
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [selectedAgent, setSelectedAgentState] = useState<string | null>(() =>
+    lsGet(AGENT_STORAGE_KEY),
+  );
   // 三字段对齐 CLI per-call 语义,启动全空白(不读盘)
   const [overrides, setOverridesState] = useState<OverrideValues>(() => ({
     model: "",
@@ -147,6 +156,11 @@ export default function Chat() {
   const setSelectedEntry = useCallback((name: string | null) => {
     setSelectedEntryState(name);
     lsSet(ENTRY_STORAGE_KEY, name);
+  }, []);
+
+  const setSelectedAgent = useCallback((name: string | null) => {
+    setSelectedAgentState(name);
+    lsSet(AGENT_STORAGE_KEY, name);
   }, []);
 
   // 三字段都仅 in-memory(关窗口就丢),要永久存走 Providers 页编辑 entry.options
@@ -208,7 +222,24 @@ export default function Chat() {
   useEffect(() => {
     void loadProviders();
     void loadConvs();
+    void (async () => {
+      try {
+        const { agents: list } = await api.listAgents();
+        setAgents(list);
+      } catch {
+        // 静默:agent picker 是辅助,失败不阻断主聊天
+      }
+    })();
   }, [loadProviders, loadConvs]);
+
+  // selectedAgent 兜底:dangling(本机 ls 残留但 DB 已删)→ 清空回 "(none)"
+  useEffect(() => {
+    if (selectedAgent === null) return;
+    if (agents.length === 0) return;
+    if (!agents.some((a) => a.name === selectedAgent)) {
+      setSelectedAgent(null);
+    }
+  }, [agents, selectedAgent, setSelectedAgent]);
 
   // 启动时若 localStorage 里残留了 conv id,拉一次详情
   useEffect(() => {
@@ -376,6 +407,7 @@ export default function Chat() {
         temperature: sampling.temperature,
         topP: sampling.topP,
         conversationId: convId,
+        agentProfile: selectedAgent,
         signal: ctrl.signal,
         onEvent: (ev) => {
           setPending((cur) => (cur ? { ...cur, blocks: applyEvent(cur.blocks, ev) } : cur));
@@ -412,7 +444,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, selectedEntry, pane, providersState, overrides, setActivePane, loadConvDetail, loadConvs]);
+  }, [input, inFlight, selectedEntry, selectedAgent, pane, providersState, overrides, setActivePane, loadConvDetail, loadConvs]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -540,6 +572,9 @@ export default function Chat() {
           onSelect={setSelectedEntry}
           overrides={overrides}
           onOverridesChange={setOverrides}
+          agents={agents}
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
         />
 
         <div
@@ -580,18 +615,26 @@ export default function Chat() {
 
 // ---------- EntryRow(0.3.1 起 · 0.6.6+ 加 per-call override 输入框)----------
 
+const AGENT_NONE = "__none__";
+
 function EntryRow({
   providersState,
   selectedEntry,
   onSelect,
   overrides,
   onOverridesChange,
+  agents,
+  selectedAgent,
+  onSelectAgent,
 }: {
   providersState: ProvidersState;
   selectedEntry: string | null;
   onSelect: (name: string) => void;
   overrides: OverrideValues;
   onOverridesChange: (next: OverrideValues) => void;
+  agents: AgentProfile[];
+  selectedAgent: string | null;
+  onSelectAgent: (name: string | null) => void;
 }) {
   // 高级面板收/展状态。in-memory(不持久化),跟 override 值同语义 —— 关窗口
   // 默认收起,需要时手动展开
@@ -637,6 +680,25 @@ function EntryRow({
             ))}
           </SelectContent>
         </Select>
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+          agent
+        </span>
+        <Select
+          value={selectedAgent ?? AGENT_NONE}
+          onValueChange={(v) => onSelectAgent(v === AGENT_NONE ? null : v)}
+        >
+          <SelectTrigger className="h-8 w-48">
+            <SelectValue placeholder="(none)" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={AGENT_NONE}>(none)</SelectItem>
+            {agents.map((a) => (
+              <SelectItem key={a.name} value={a.name}>
+                {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button
           type="button"
           variant="ghost"
@@ -655,7 +717,9 @@ function EntryRow({
           )}
         </Button>
         <span className="ml-auto text-xs text-muted-foreground">
-          sampling 走 entry.params,去 Providers 页改
+          {selectedAgent
+            ? `agent: ${selectedAgent} 覆盖 provider / prompt / tools`
+            : "sampling 走 entry.params,去 Providers 页改"}
         </span>
       </div>
       {advancedOpen && (

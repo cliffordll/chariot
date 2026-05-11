@@ -54,9 +54,10 @@ class AgentMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         role = self._optional_str(params, "role")
-        prompt_bundle = self._optional_str(params, "prompt_bundle")
-        tool_profile = self._optional_str(params, "tool_profile")
-        provider_profile = self._optional_str(params, "provider_profile")
+        # 三个 binding 字段走 clearable 语义:key 缺席 → UNSET(skip);null → 清空;str → set
+        prompt_bundle = self._clearable_str(params, "prompt_bundle")
+        tool_profile = self._clearable_str(params, "tool_profile")
+        provider_profile = self._clearable_str(params, "provider_profile")
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
         async with self._session() as session:

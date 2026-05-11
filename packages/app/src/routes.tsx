@@ -12,6 +12,7 @@ const Memory = lazy(() => import("@/pages/Memory"));
 const Prompt = lazy(() => import("@/pages/Prompt"));
 const Context = lazy(() => import("@/pages/Context"));
 const Logs = lazy(() => import("@/pages/Logs"));
+const Traces = lazy(() => import("@/pages/Traces"));
 const Chat = lazy(() => import("@/pages/Chat"));
 
 export const NAV_ITEMS = [
@@ -26,6 +27,7 @@ export const NAV_ITEMS = [
   { path: "/prompt", label: "Prompt" },
   { path: "/context", label: "Context" },
   { path: "/logs", label: "Logs" },
+  { path: "/traces", label: "Traces" },
   { path: "/chat", label: "Chat" },
 ] as const;
 
@@ -45,6 +47,7 @@ export function AppRoutes() {
         <Route path="/prompt" element={<Prompt />} />
         <Route path="/context" element={<Context />} />
         <Route path="/logs" element={<Logs />} />
+        <Route path="/traces" element={<Traces />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
 from chariot.database.models import AgentProfileRow, JobRunRow, ScheduledJobRow, TaskRow, TaskRunRow
-from chariot.models.agent import AgentProfile
+from chariot.models.agent import UNSET, AgentProfile, ClearableStr, _UnsetType
 from chariot.models.job import JobRunRecord, ScheduledJob
 from chariot.models.task import Task, TaskCreate, TaskRun, TaskRunCreate
 
@@ -81,9 +81,9 @@ class TaskRepo:
         *,
         name: str,
         role: str | None = None,
-        prompt_bundle: str | None = None,
-        tool_profile: str | None = None,
-        provider_profile: str | None = None,
+        prompt_bundle: ClearableStr = UNSET,
+        tool_profile: ClearableStr = UNSET,
+        provider_profile: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
     ) -> AgentProfile:
@@ -91,11 +91,11 @@ class TaskRepo:
         if role is not None:
             self._require_non_empty(role, "agent profile role")
             row.role = role
-        if prompt_bundle is not None:
+        if not isinstance(prompt_bundle, _UnsetType):
             row.prompt_bundle = prompt_bundle
-        if tool_profile is not None:
+        if not isinstance(tool_profile, _UnsetType):
             row.tool_profile = tool_profile
-        if provider_profile is not None:
+        if not isinstance(provider_profile, _UnsetType):
             row.provider_profile = provider_profile
         if budget is not None:
             row.budget = self._serialize_object("budget", budget)

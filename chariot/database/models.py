@@ -24,6 +24,7 @@
 - v14(0.7.2-task):`agent_profiles / tasks / task_runs / scheduled_jobs`
 - v15(0.7.2-task):`job_runs`
 - v16(0.7.2-tool):`toolsets / toolset_members`(命名 toolset + agent 绑定)
+- v17(0.8.0-evolution):`trace_turns / trace_provider_calls / trace_tool_calls / trace_checkpoints`(Phase B1 trace 平台)
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -449,3 +450,80 @@ class ToolsetMemberRow(Base):
 
     toolset_name: Mapped[str] = mapped_column(primary_key=True)
     tool_name: Mapped[str] = mapped_column(primary_key=True)
+
+
+class TraceTurnRow(Base):
+    __tablename__ = "trace_turns"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    agent_profile: Mapped[str | None] = mapped_column(default=None)
+    task_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    task_run_id: Mapped[str | None] = mapped_column(default=None)
+    provider_name: Mapped[str]
+    model: Mapped[str | None] = mapped_column(default=None)
+    prompt_trace_id: Mapped[str | None] = mapped_column(default=None)
+    context_trace_id: Mapped[str | None] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(index=True)
+    stop_reason: Mapped[str | None] = mapped_column(default=None)
+    error_type: Mapped[str | None] = mapped_column(default=None)
+    error_message: Mapped[str | None] = mapped_column(default=None)
+    input_tokens: Mapped[int | None] = mapped_column(default=None)
+    output_tokens: Mapped[int | None] = mapped_column(default=None)
+    cache_read_tokens: Mapped[int | None] = mapped_column(default=None)
+    cache_write_tokens: Mapped[int | None] = mapped_column(default=None)
+    reasoning_tokens: Mapped[int | None] = mapped_column(default=None)
+    cost_usd: Mapped[float | None] = mapped_column(default=None)
+    cost_status: Mapped[str | None] = mapped_column(default=None)
+    duration_ms: Mapped[int | None] = mapped_column(default=None)
+    started_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    meta: Mapped[str] = mapped_column(default="{}")
+
+
+class TraceProviderCallRow(Base):
+    __tablename__ = "trace_provider_calls"
+    __table_args__ = (Index("idx_trace_provider_calls_turn", "turn_id"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    turn_id: Mapped[str]
+    provider_name: Mapped[str]
+    model: Mapped[str | None] = mapped_column(default=None)
+    log_id: Mapped[str | None] = mapped_column(default=None)
+    request_summary: Mapped[str] = mapped_column(default="{}")
+    response_summary: Mapped[str] = mapped_column(default="{}")
+    started_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    latency_ms: Mapped[int | None] = mapped_column(default=None)
+    error_type: Mapped[str | None] = mapped_column(default=None)
+
+
+class TraceToolCallRow(Base):
+    __tablename__ = "trace_tool_calls"
+    __table_args__ = (
+        Index("idx_trace_tool_calls_turn", "turn_id"),
+        Index("idx_trace_tool_calls_tool", "tool_name"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    turn_id: Mapped[str]
+    provider_call_id: Mapped[str | None] = mapped_column(default=None)
+    tool_name: Mapped[str]
+    arguments: Mapped[str] = mapped_column(default="{}")
+    result_summary: Mapped[str | None] = mapped_column(default=None)
+    duration_ms: Mapped[int | None] = mapped_column(default=None)
+    status: Mapped[str]
+    error_message: Mapped[str | None] = mapped_column(default=None)
+    started_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class TraceCheckpointRow(Base):
+    __tablename__ = "trace_checkpoints"
+    __table_args__ = (Index("idx_trace_checkpoints_turn", "turn_id"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    turn_id: Mapped[str]
+    kind: Mapped[str]
+    snapshot_id: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)

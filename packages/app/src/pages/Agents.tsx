@@ -23,6 +23,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -235,6 +242,7 @@ function AgentsListCard({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Prompt bundle</TableHead>
               <TableHead>Tool profile</TableHead>
               <TableHead>Provider profile</TableHead>
             </TableRow>
@@ -249,6 +257,7 @@ function AgentsListCard({
               >
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
+                <TableCell>{agent.prompt_bundle ?? "-"}</TableCell>
                 <TableCell>{agent.tool_profile ?? "-"}</TableCell>
                 <TableCell>{agent.provider_profile ?? "-"}</TableCell>
               </TableRow>
@@ -300,6 +309,39 @@ function AgentDetailCard({
         <MetaBlock title="Meta" value={agent.meta} />
       </div>
     </Panel>
+  );
+}
+
+const BINDING_NONE = "__none__";
+
+function BindingSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ name: string }>;
+  placeholder: string;
+}) {
+  return (
+    <Select
+      value={value === "" ? BINDING_NONE : value}
+      onValueChange={(v) => onChange(v === BINDING_NONE ? "" : v)}
+    >
+      <SelectTrigger className="h-9 w-full">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={BINDING_NONE}>(none)</SelectItem>
+        {options.map((opt) => (
+          <SelectItem key={opt.name} value={opt.name}>
+            {opt.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -372,31 +414,30 @@ function CreateAgentDialog({
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Prompt bundle">
-              <Input
-                list="agent-bundle-options"
+              <BindingSelect
                 value={promptBundle}
-                onChange={(e) => setPromptBundle(e.target.value)}
-                placeholder="default"
+                onChange={setPromptBundle}
+                options={options.bundles}
+                placeholder="(none)"
               />
             </Field>
             <Field label="Tool profile">
-              <Input
-                list="agent-toolset-options"
+              <BindingSelect
                 value={toolProfile}
-                onChange={(e) => setToolProfile(e.target.value)}
-                placeholder="toolset name"
+                onChange={setToolProfile}
+                options={options.toolsets}
+                placeholder="(none)"
               />
             </Field>
             <Field label="Provider profile">
-              <Input
-                list="agent-provider-options"
+              <BindingSelect
                 value={providerProfile}
-                onChange={(e) => setProviderProfile(e.target.value)}
-                placeholder="mock"
+                onChange={setProviderProfile}
+                options={options.providers}
+                placeholder="(none)"
               />
             </Field>
           </div>
-          <BindingDatalists options={options} />
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Budget JSON">
               <Textarea value={budget} onChange={(e) => setBudget(e.target.value)} className="min-h-28 font-mono text-xs" />
@@ -478,31 +519,30 @@ function EditAgentDialog({
           </Field>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Prompt bundle">
-              <Input
-                list="agent-bundle-options"
+              <BindingSelect
                 value={promptBundle}
-                onChange={(e) => setPromptBundle(e.target.value)}
-                placeholder="default"
+                onChange={setPromptBundle}
+                options={options.bundles}
+                placeholder="(none)"
               />
             </Field>
             <Field label="Tool profile">
-              <Input
-                list="agent-toolset-options"
+              <BindingSelect
                 value={toolProfile}
-                onChange={(e) => setToolProfile(e.target.value)}
-                placeholder="toolset name"
+                onChange={setToolProfile}
+                options={options.toolsets}
+                placeholder="(none)"
               />
             </Field>
             <Field label="Provider profile">
-              <Input
-                list="agent-provider-options"
+              <BindingSelect
                 value={providerProfile}
-                onChange={(e) => setProviderProfile(e.target.value)}
-                placeholder="mock"
+                onChange={setProviderProfile}
+                options={options.providers}
+                placeholder="(none)"
               />
             </Field>
           </div>
-          <BindingDatalists options={options} />
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Budget JSON">
               <Textarea value={budget} onChange={(e) => setBudget(e.target.value)} className="min-h-28 font-mono text-xs" />
@@ -519,28 +559,6 @@ function EditAgentDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function BindingDatalists({ options }: { options: BindingOptions }) {
-  return (
-    <>
-      <datalist id="agent-bundle-options">
-        {options.bundles.map((b) => (
-          <option key={b.name} value={b.name} />
-        ))}
-      </datalist>
-      <datalist id="agent-toolset-options">
-        {options.toolsets.map((t) => (
-          <option key={t.name} value={t.name} />
-        ))}
-      </datalist>
-      <datalist id="agent-provider-options">
-        {options.providers.map((p) => (
-          <option key={p.name} value={p.name} />
-        ))}
-      </datalist>
-    </>
   );
 }
 

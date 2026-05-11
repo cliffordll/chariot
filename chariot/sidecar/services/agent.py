@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.models.agent import AgentProfile
+from chariot.models.agent import UNSET, AgentProfile, ClearableStr
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.agent import AgentService
@@ -55,9 +55,9 @@ class AgentApi:
         *,
         name: str,
         role: str | None = None,
-        prompt_bundle: str | None = None,
-        tool_profile: str | None = None,
-        provider_profile: str | None = None,
+        prompt_bundle: ClearableStr = UNSET,
+        tool_profile: ClearableStr = UNSET,
+        provider_profile: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:

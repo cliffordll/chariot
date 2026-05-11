@@ -130,6 +130,46 @@ async def test_update_and_delete_agent(server: JsonRpcServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
+    """RPC payload key 不在 → UNSET(skip);key=null → 清空;key=str → set。"""
+    await _call(
+        server,
+        "create_agent",
+        {
+            "name": "researcher",
+            "role": "research",
+            "prompt_bundle": "research",
+            "tool_profile": "fs_safe",
+            "provider_profile": "claude",
+        },
+    )
+
+    # 只改 role,binding 字段 key 不在 payload 里 → 保留
+    only_role = await _call(server, "update_agent", {"name": "researcher", "role": "planner"})
+    assert only_role["result"]["agent"]["role"] == "planner"
+    assert only_role["result"]["agent"]["provider_profile"] == "claude"
+    assert only_role["result"]["agent"]["prompt_bundle"] == "research"
+
+    # provider_profile=null → 清空,其它保留
+    cleared = await _call(
+        server,
+        "update_agent",
+        {"name": "researcher", "provider_profile": None},
+    )
+    assert cleared["result"]["agent"]["provider_profile"] is None
+    assert cleared["result"]["agent"]["prompt_bundle"] == "research"
+    assert cleared["result"]["agent"]["tool_profile"] == "fs_safe"
+
+    # 重新 set
+    reset = await _call(
+        server,
+        "update_agent",
+        {"name": "researcher", "provider_profile": "ollama"},
+    )
+    assert reset["result"]["agent"]["provider_profile"] == "ollama"
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_and_get_task_include_runs_and_children(server: JsonRpcServer, agent: AIAgent) -> None:
     async with agent.session_maker() as session:
         repo = TaskRepo(session)

@@ -368,6 +368,88 @@ export interface PromptActivatePayload {
   version?: string | null;
 }
 
+// Phase B1:trace platform
+export type TurnStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface TraceTurn {
+  id: string;
+  conversation_id: string | null;
+  agent_profile: string | null;
+  task_id: string | null;
+  task_run_id: string | null;
+  provider_name: string;
+  model: string | null;
+  prompt_trace_id: string | null;
+  context_trace_id: string | null;
+  status: TurnStatus;
+  stop_reason: string | null;
+  error_type: string | null;
+  error_message: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  reasoning_tokens: number | null;
+  cost_usd: number | null;
+  cost_status: string | null;
+  duration_ms: number | null;
+  started_at: string;
+  finished_at: string | null;
+  meta: Record<string, unknown>;
+}
+
+export interface TraceProviderCall {
+  id: string;
+  turn_id: string;
+  provider_name: string;
+  model: string | null;
+  log_id: string | null;
+  request_summary: Record<string, unknown>;
+  response_summary: Record<string, unknown>;
+  started_at: string;
+  finished_at: string | null;
+  latency_ms: number | null;
+  error_type: string | null;
+}
+
+export interface TraceToolCall {
+  id: string;
+  turn_id: string;
+  provider_call_id: string | null;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  result_summary: Record<string, unknown> | null;
+  duration_ms: number | null;
+  status: "ok" | "error";
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface TraceCheckpoint {
+  id: string;
+  turn_id: string;
+  kind: string;
+  snapshot_id: string | null;
+  created_at: string;
+}
+
+export interface TraceTree {
+  turn: TraceTurn;
+  provider_calls: TraceProviderCall[];
+  tool_calls: TraceToolCall[];
+  checkpoints: TraceCheckpoint[];
+}
+
+export interface ListTracesParams {
+  conversation_id?: string;
+  task_id?: string;
+  provider_name?: string;
+  status?: TurnStatus;
+  limit?: number;
+  offset?: number;
+}
+
 const apiCore = {
   listConversations(): Promise<{ conversations: Conversation[] }> {
     return rpc("list_conversations");
@@ -523,6 +605,22 @@ const apiCore = {
 
   listLogs(params: ListLogsParams = {}): Promise<{ logs: LogEntry[] }> {
     return rpc("list_logs", { ...params });
+  },
+
+  listTraces(params: ListTracesParams = {}): Promise<{ turns: TraceTurn[] }> {
+    return rpc("list_traces", { ...params });
+  },
+
+  getTraceTurn(turn_id: string): Promise<{ turn: TraceTurn }> {
+    return rpc("get_trace_turn", { turn_id });
+  },
+
+  viewTraceTree(turn_id: string): Promise<TraceTree> {
+    return rpc("view_trace_tree", { turn_id });
+  },
+
+  reconcileTraces(older_than_seconds?: number): Promise<{ cleaned: number }> {
+    return rpc("reconcile_traces", { older_than_seconds });
   },
 
   listPromptBundles(): Promise<{ bundles: PromptBundle[] }> {

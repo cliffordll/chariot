@@ -284,7 +284,7 @@ uv run chariot eval --category file          # 只跑某类
 uv run chariot eval --task file_read_pyproject  # 单 task
 uv run chariot eval list-tasks               # 列已有 task
 uv run chariot eval list-runs                # 列历史 run(从 ~/.chariot/eval/<timestamp>/)
-uv run chariot eval --baseline <run_id>      # 跟基线 diff
+uv run chariot eval --baseline <run_id> --diff   # 跟基线 diff
 uv run chariot eval --no-save                # 不落盘
 ```
 
@@ -311,15 +311,14 @@ uv run chariot eval --no-save                # 不落盘
 | memory | memory_recall_pref | exact_match | 引用之前对话里的偏好 |
 | context | context_long_history_trim | exact_match | 长 history 下不丢关键信息 |
 
-### 5.9 B2 落地拆分(5 wave,对齐 phalanx)
+### 5.9 B2 落地拆分(4 wave,对齐 phalanx)
 
 | Wave | 内容 |
 |---|---|
 | 1 | `tests/golden/` YAML schema + `chariot/eval/` 模块(GoldenTask / RunRecord / VerifierResult / Verdict + loader + runner skeleton + VERIFIERS registry + `chariot eval` argparse skeleton)|
 | 2 | 10 个种子 golden task 文件 |
-| 3 | 四种 verifier 实现(`exact_match` / `tool_called` / `file_state` / `output_schema`)+ `chariot/eval/cost.py`(从 trace_turns 拼成本)+ Runner 接 AIAgent + report 渲染 |
+| 3 | 三种 verifier 实现 + `chariot/eval/cost.py`(从 trace_turns 拼成本)+ report 渲染 |
 | 4 | run 持久化 `~/.chariot/eval/<timestamp>/` + `--baseline / --diff / --no-save` flag + CI smoke test |
-| 5 | 桌面 Evals 页:tasks 列表 + runs grid(PASS/FAIL/ERROR/SKIP 配色)+ 单 run 详情 + baseline diff;task 行点击跳 Traces 页(走 turn_id 关联);sidecar `EvalApi` 暴露 `list_golden_tasks` / `list_eval_runs` / `get_eval_run` / `diff_runs` RPC |
 
 ## 6. B3 ~ B7 概要(具体设计留各自子文档)
 
