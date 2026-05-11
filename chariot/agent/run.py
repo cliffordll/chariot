@@ -36,8 +36,10 @@ from chariot.providers.contract import normalize_request
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.agent.config import Capabilities
     from chariot.agent.reflection import CriticAgent
     from chariot.audit import AuditHookManager
+    from chariot.checkpoints import CheckpointManager
     from chariot.context.compressor import ContextCompressor
     from chariot.context.references import ReferenceExpander
     from chariot.guardrails import GuardrailEngine
@@ -107,7 +109,10 @@ class AIAgent:
         guardrail_engine: GuardrailEngine | None = None,
         approval_policy: ApprovalPolicy | None = None,
         audit_hooks: AuditHookManager | None = None,
+        capabilities: Capabilities | None = None,
+        checkpoint_manager: CheckpointManager | None = None,
     ) -> None:
+        from chariot.agent.config import Capabilities as _Capabilities
         from chariot.audit import AuditHookManager as _AuditHookManager
         from chariot.guardrails.approval import ApprovalPolicy as _ApprovalPolicy
         from chariot.trace import TraceWriter
@@ -134,6 +139,11 @@ class AIAgent:
         # B5 wave 2:audit hook manager(best-effort 写 audit_events);默认绑
         # sessionmaker;无 sm 时退化 no-op。
         self._audit_hooks = audit_hooks or _AuditHookManager(sessionmaker)
+        # B5 wave 3:capability gating(enable_self_mod / yolo)。bootstrap 从 DB
+        # 装 enable_self_mod;yolo 由调用方(CLI --yolo / sidecar)传入。
+        self._capabilities = capabilities or _Capabilities.default()
+        # B5 wave 3:CheckpointManager 三件套 snapshot + rollback;无 sm 退化 None。
+        self._checkpoint_manager = checkpoint_manager
 
     # ---- 装载 ----
 
@@ -143,6 +153,7 @@ class AIAgent:
         db_path: Path,
         *,
         provider_overrides: dict[str, dict[str, str]] | None = None,
+        yolo: bool = False,
     ) -> Self:
         """从零装载 AIAgent —— 开 DB + 跑 migrations + 装 ProviderEntry / ToolEntry
         + 实例化所有 Provider / Tool + 配 sessionmaker,返就绪 AIAgent。
@@ -176,6 +187,8 @@ class AIAgent:
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
 
+        from chariot.agent.config import Capabilities
+
         sm = await init_db(db_path)
         async with sm() as session:
             await ProviderRepo(session).seed_if_empty()
@@ -184,6 +197,9 @@ class AIAgent:
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
             aux_entries = await AuxiliaryRepo(session).list_entries()
+            # B5 wave 3:装 capabilities(从 DB 装 enable_self_mod;yolo 是
+            # per-process bootstrap 入参,不读 DB 的 yolo 行)
+            capabilities = await Capabilities.from_db(session, yolo=yolo)
 
         overrides = provider_overrides or {}
         providers: dict[str, BaseProvider] = {
@@ -225,11 +241,27 @@ class AIAgent:
 
         critic = CriticAgent.from_auxiliary_clients(aux_entries, providers)
 
-        # B5 wave 1:装 GuardrailEngine —— 13 内置规则,REQUIRE_APPROVAL 在 wave 3
-        # 接 capabilities.yolo / per-tool 白名单后才放行;现在保守拒。
+        # B5 wave 1+3:装 GuardrailEngine + ApprovalPolicy,挂 capabilities 让
+        # self_modify_chariot 在 enable_self_mod=True 时降级为 REQUIRE_APPROVAL,
+        # 让 ApprovalPolicy 在 yolo=True 时放行 REQUIRE_APPROVAL 类。
         from chariot.guardrails import GuardrailEngine
+        from chariot.guardrails.approval import ApprovalPolicy
 
-        guardrails = GuardrailEngine.with_defaults()
+        guardrails = GuardrailEngine.with_defaults(capabilities=capabilities)
+        approval = ApprovalPolicy(capabilities=capabilities)
+
+        # B5 wave 3:CheckpointManager 三件套(共享 audit_hooks);db_path.parent
+        # 默认是 ~/.chariot/,checkpoints 子目录放 sqlite/tgz 落盘。
+        from chariot.audit import AuditHookManager
+        from chariot.checkpoints import CheckpointManager
+
+        audit_hooks = AuditHookManager(sm)
+        checkpoint_manager = CheckpointManager(
+            sessionmaker=sm,
+            db_path=db_path,
+            checkpoint_dir=db_path.parent / "checkpoints",
+            audit_hooks=audit_hooks,
+        )
 
         return cls(
             providers=providers,
@@ -239,6 +271,10 @@ class AIAgent:
             reference_expander=expander,
             critic_agent=critic,
             guardrail_engine=guardrails,
+            approval_policy=approval,
+            audit_hooks=audit_hooks,
+            capabilities=capabilities,
+            checkpoint_manager=checkpoint_manager,
         )
 
     @staticmethod
@@ -295,6 +331,18 @@ class AIAgent:
         """已装载的 AuditHookManager(B5 wave 2)。bootstrap 默认绑 sessionmaker;
         测试路径若没传 sessionmaker 也没传 audit_hooks → disabled no-op manager。"""
         return self._audit_hooks
+
+    @property
+    def capabilities(self) -> Capabilities:
+        """已装载的 capability 集合(B5 wave 3)。bootstrap 从 DB 装 enable_self_mod,
+        yolo 由 bootstrap 入参传入。"""
+        return self._capabilities
+
+    @property
+    def checkpoint_manager(self) -> CheckpointManager | None:
+        """已装载的 CheckpointManager(B5 wave 3)。bootstrap 默认装;测试路径
+        若没传 sessionmaker 也没传 checkpoint_manager → None。"""
+        return self._checkpoint_manager
 
     # ---- 主入口 ----
 

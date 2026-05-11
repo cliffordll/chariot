@@ -583,32 +583,31 @@ uv run pytest tests/sidecar/test_audit_methods.py -q
 ## 7.15 Checkpoint + Capability gating(B5 wave 3)
 
 `chariot checkpoint create <name>` 三件套打 snapshot:git stash + SQLite
-backup + `~/.chariot/{config.yaml,.env}` tarball。`rollback` 走反向。
+backup + `~/.chariot/{config.yaml,.env}` tarball。`rollback` 走反向。每段独立
+try/except,best-effort —— 某段失败 / no-op 不阻其它段;`checkpoint_create` /
+`rollback` 事件自动写 `audit_events`。
 
 ```powershell
 # 全量 snapshot
 uv run chariot checkpoint create before_refactor
 
-# 列所有 checkpoint
+# 列所有 checkpoint(显示 git/db/config 三段是否 ok)
 uv run chariot checkpoint list
 
-# 看单条详情(git stash id / sqlite 文件 / tarball 路径)
+# 看单条详情(git stash ref / sqlite 文件 / tarball 路径 / errors)
 uv run chariot checkpoint show <id>
 
-# rollback 全量
+# rollback 全量(三段反向,失败的段在 errors 报告)
 uv run chariot checkpoint rollback <id>
 
-# rollback 单组件(只回 DB,git / config 不动)
-uv run chariot checkpoint rollback <id> --db-only
-
-# 删除(rm 落盘 sqlite/tgz + DB 记录)
+# 删除(rm 落盘 sqlite/tgz + DB 记录;git stash 保留)
 uv run chariot checkpoint delete <id>
 ```
 
-**Capability gating**(默认全关):
+**Capability gating**(默认全关;v21 migration 种入 `capabilities` 表):
 
 ```powershell
-# 看当前 capabilities
+# 看当前 capabilities(name / enabled / updated_at)
 uv run chariot capability list
 
 # 打开 self-mod(允许 agent 改 chariot/ 下文件;guardrail 改判 REQUIRE_APPROVAL)
@@ -618,7 +617,7 @@ uv run chariot capability enable enable_self_mod
 uv run chariot capability disable enable_self_mod
 ```
 
-**`--yolo` 全局 flag**(per-process,不持久化):
+**`--yolo` 全局 flag**(per-process,不持久化;不写 DB 的 `yolo` 行):
 
 ```powershell
 # 跳过所有 REQUIRE_APPROVAL,但不影响 DENY(危险动作仍拒)
@@ -627,6 +626,23 @@ uv run chariot --yolo chat "..."
 
 ⚠️ `--yolo` **只用于沙箱机器 / CI**;生产 / 本地开发不建议。即使 `--yolo`,
 guardrail 仍写 audit,只是不阻断。
+
+sidecar 路径:`list_checkpoints` / `get_checkpoint` / `create_checkpoint` /
+`rollback_checkpoint` / `delete_checkpoint` + `list_capabilities` /
+`set_capability`。
+
+**验证**:
+
+```powershell
+# step 1:Capabilities + CapabilityRepo + gate 翻转 + ApprovalPolicy 接 caps
+uv run pytest tests/platform/test_capabilities.py -q
+
+# step 2:CheckpointManager 三件套 + rollback + delete + audit hook
+uv run pytest tests/platform/test_checkpoint_manager.py -q
+
+# step 3:无独立测试套,但 guardrail / audit / sidecar 套件回归确保接线没破
+uv run pytest tests/platform/test_guardrail_integration.py tests/platform/test_audit_hooks.py tests/sidecar/test_audit_methods.py -q
+```
 
 ---
 

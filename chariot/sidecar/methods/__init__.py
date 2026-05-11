@@ -28,8 +28,10 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.agent.config import Capabilities
     from chariot.agent.reflection import CriticAgent
     from chariot.audit import AuditHookManager
+    from chariot.checkpoints import CheckpointManager
     from chariot.guardrails import GuardrailEngine
 
 __all__ = ["register_methods"]
@@ -49,6 +51,12 @@ class SidecarAgent(Protocol):
 
     @property
     def audit_hooks(self) -> AuditHookManager: ...
+
+    @property
+    def capabilities(self) -> Capabilities: ...
+
+    @property
+    def checkpoint_manager(self) -> CheckpointManager | None: ...
 
 
 class MethodBase:
@@ -155,7 +163,9 @@ def register_methods(
     from chariot.sidecar.methods.agent import AgentMethods
     from chariot.sidecar.methods.audit import AuditMethods
     from chariot.sidecar.methods.auxiliary import AuxiliaryMethods
+    from chariot.sidecar.methods.capability import CapabilityMethods
     from chariot.sidecar.methods.chat import ChatMethod
+    from chariot.sidecar.methods.checkpoint import CheckpointMethods
     from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
     from chariot.sidecar.methods.critic import CriticMethods
@@ -221,6 +231,17 @@ def register_methods(
     audits = AuditMethods(runtime)
     server.method("list_audit_events")(audits.list_)
     server.method("get_audit_event")(audits.show)
+
+    checkpoints = CheckpointMethods(runtime)
+    server.method("list_checkpoints")(checkpoints.list_)
+    server.method("get_checkpoint")(checkpoints.show)
+    server.method("create_checkpoint")(checkpoints.create)
+    server.method("rollback_checkpoint")(checkpoints.rollback)
+    server.method("delete_checkpoint")(checkpoints.delete)
+
+    capabilities = CapabilityMethods(runtime)
+    server.method("list_capabilities")(capabilities.list_)
+    server.method("set_capability")(capabilities.set_)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

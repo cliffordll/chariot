@@ -72,6 +72,7 @@ class AgentRegistry:
         *,
         db_path: Path,
         provider_overrides: dict[str, dict[str, str]] | None = None,
+        yolo: bool = False,
     ) -> AIAgent:
         """命中 cache 返已有 agent;未命中调 `AIAgent.bootstrap` 装载并缓存。
 
@@ -79,6 +80,9 @@ class AgentRegistry:
         仅在**首次** reserve 同 session_key 时生效(命中已有 agent 时忽略后续
         overrides)。语义:overrides 是 session-bound 的,session 创建时定,
         per-call 不再变;要换 overrides 用新的 session_key。
+
+        `yolo`(B5 wave 3):per-process / per-session 临时 capability 覆盖,首次
+        reserve 时透传给 `AIAgent.bootstrap`,跟 overrides 同语义(只在首次生效)。
 
         失败处理:`AIAgent.bootstrap` 抛(DB 装载错 / Provider 配置错)→ 透传
         给 caller;cache 不写入。
@@ -92,7 +96,11 @@ class AgentRegistry:
                 cls._agents.move_to_end(session_key)
                 return existing
 
-            agent = await AIAgent.bootstrap(db_path, provider_overrides=provider_overrides)
+            agent = await AIAgent.bootstrap(
+                db_path,
+                provider_overrides=provider_overrides,
+                yolo=yolo,
+            )
             cls._agents[session_key] = agent
 
             # LRU evict:超上限 → 弹最老的(不需 cleanup,GC 处理)

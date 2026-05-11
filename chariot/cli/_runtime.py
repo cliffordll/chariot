@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import ClassVar
 
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
@@ -44,23 +45,41 @@ from chariot.providers.clients import ClientCache
 _CLI_SESSION_KEY = "process"
 
 
+class CliYoloState:
+    """CLI 全局 `--yolo` flag 的进程级状态(B5 wave 3)。
+
+    `chariot --yolo <cmd>` 由 `_root` callback 在子命令运行前 set;子命令通过
+    `installed_runtime()` 读它,透传给 `AgentRegistry.reserve(yolo=...)`。
+
+    封装:挂 ClassVar,跟 `Renderer.QUIET` 同模式;模块级零可变变量。
+    """
+
+    yolo: ClassVar[bool] = False
+
+
 @asynccontextmanager
 async def installed_runtime(
     *,
     provider_overrides: dict[str, dict[str, str]] | None = None,
+    yolo: bool | None = None,
 ) -> AsyncGenerator[AIAgent, None]:
     """进程级 AIAgent + DB 连接池 + httpx client 缓存的生命周期。
 
     `provider_overrides`(0.6.5 起):per-process 注入到 entry.options 的 patch,
     给 CLI `--base-url` / `--api-key` 用;传给 `AgentRegistry.reserve`。
 
+    `yolo`(B5 wave 3):per-process 临时 capability 覆盖。None 时回退到全局 flag
+    `CliYoloState.yolo`(由 `chariot --yolo <cmd>` 的 `_root` 设置)。
+
     退出时即使有异常也按 AgentRegistry → ClientCache → DB 顺序释放(防 fixture
     串味 / 连接泄露 / engine 残留)。
     """
+    yolo_resolved = CliYoloState.yolo if yolo is None else yolo
     agent = await AgentRegistry.reserve(
         _CLI_SESSION_KEY,
         db_path=DEFAULT_DB_PATH,
         provider_overrides=provider_overrides,
+        yolo=yolo_resolved,
     )
     try:
         yield agent

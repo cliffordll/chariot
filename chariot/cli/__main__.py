@@ -9,6 +9,7 @@ import typer
 from chariot.cli.commands import agent as agent_mod
 from chariot.cli.commands import audit as audit_mod
 from chariot.cli.commands import auxiliary as auxiliary_mod
+from chariot.cli.commands import capability as capability_mod
 from chariot.cli.commands import chat as chat_mod
 from chariot.cli.commands import checkpoint as checkpoint_mod
 from chariot.cli.commands import context as context_mod
@@ -46,10 +47,19 @@ def _root(  # pyright: ignore[reportUnusedFunction]
         bool,
         typer.Option("--quiet", "-q", help="quiet mode: suppress success output"),
     ] = False,
+    yolo: Annotated[
+        bool,
+        typer.Option(
+            "--yolo",
+            help="放行所有 REQUIRE_APPROVAL 类工具调用(per-process,不写 DB;沙箱 / CI 用)",
+        ),
+    ] = False,
 ) -> None:
+    from chariot.cli._runtime import CliYoloState
     from chariot.cli.render import Renderer
 
     Renderer.QUIET = quiet
+    CliYoloState.yolo = yolo
 
 
 for mod in (
@@ -75,6 +85,7 @@ for mod in (
     critic_mod,
     guardrail_mod,
     audit_mod,
+    capability_mod,
 ):
     mod.register(app)
 
