@@ -48,6 +48,10 @@ class TestMigrationV10:
             "job_runs",
             "toolsets",
             "toolset_members",
+            "trace_turns",
+            "trace_provider_calls",
+            "trace_tool_calls",
+            "trace_checkpoints",
         }
         rows = (
             (

@@ -15,6 +15,7 @@ from chariot.repos.skill_repo import SkillEntry, SkillRepo
 from chariot.repos.task_repo import TaskRepo
 from chariot.repos.tool_repo import ToolRepo
 from chariot.repos.toolset_repo import ToolsetRepo
+from chariot.repos.trace_repo import TraceRepo
 
 __all__ = [
     "AuditEvent",
@@ -36,4 +37,5 @@ __all__ = [
     "TaskRepo",
     "ToolRepo",
     "ToolsetRepo",
+    "TraceRepo",
 ]
