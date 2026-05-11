@@ -158,9 +158,7 @@ def _next_version(current: str, level: str) -> str:
     """patch/minor/major 自动递增;只支持干净 X.Y.Z(带后缀的请用显式版本号)。"""
     match = _BASE_SEMVER_RE.match(current)
     if not match:
-        raise RuntimeError(
-            f"当前版本 {current!r} 含 prerelease / meta 后缀,无法自动 {level} bump;请用显式版本号"
-        )
+        raise RuntimeError(f"当前版本 {current!r} 含 prerelease / meta 后缀,无法自动 {level} bump;请用显式版本号")
     major, minor, patch = (int(x) for x in match.groups())
     if level == "patch":
         return f"{major}.{minor}.{patch + 1}"
@@ -185,8 +183,7 @@ def _cmd_bump(spec: str) -> int:
 
     if not _SEMVER_RE.match(new):
         print(
-            f"[publish] 非法 semver:{new!r}"
-            "(期望 X.Y.Z 可带 -rc1 / +meta 后缀,或 patch / minor / major 关键字)",
+            f"[publish] 非法 semver:{new!r}(期望 X.Y.Z 可带 -rc1 / +meta 后缀,或 patch / minor / major 关键字)",
             file=sys.stderr,
         )
         return 2
@@ -221,10 +218,7 @@ def _cmd_bump(spec: str) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
-        "[publish] 提醒:`uv sync && bun install` 同步锁文件;"
-        "Cargo.lock 下次 cargo check/build 自动更新"
-    )
+    print("[publish] 提醒:`uv sync && bun install` 同步锁文件;Cargo.lock 下次 cargo check/build 自动更新")
     return 0
 
 
@@ -339,9 +333,7 @@ def _summary(release_dir: Path, installer: bool) -> None:
             size_mb = path.stat().st_size / (1024 * 1024)
             print(f"  {path.relative_to(_REPO_ROOT)}  ({size_mb:.1f} MB)")
     if not installer:
-        print(
-            "\n[publish] 提示:未产 NSIS installer / latest.json;加 --installer 一键产完整发布产物"
-        )
+        print("\n[publish] 提示:未产 NSIS installer / latest.json;加 --installer 一键产完整发布产物")
 
 
 def _cmd_build(installer: bool) -> int:
