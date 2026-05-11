@@ -39,7 +39,8 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar, Self, cast
 
-from chariot.agent.config import ConfigError, ToolEntry
+from chariot.agent.exceptions import ConfigError
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
 
 _DEFAULT_TIMEOUT_S = 30

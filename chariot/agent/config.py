@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 # 异常类型 0.6.0 起 re-export 自 exceptions.py,本模块不重复定义
 from chariot.agent.exceptions import (
@@ -35,6 +35,11 @@ from chariot.agent.exceptions import (
     ProviderNotFound,
     ToolNotFound,
 )
+
+# ToolEntry 0.7.2 起迁到 chariot.models.tool;本模块保留 re-export 兼容旧 import
+# 路径(`from chariot.agent.config import ToolEntry`)。`ToolConfig` 仍在本模块
+# 定义,跟 `ChariotConfig` 一起作为顶层配置容器。
+from chariot.models.tool import ToolEntry
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,25 +96,6 @@ class ChariotConfig:
             if entry.name == name:
                 return entry
         return None
-
-
-@dataclass(frozen=True)
-class ToolEntry:
-    """单条 tool 配置(0.4.0)。
-
-    `name` == ToolRegistry type key(0.4.0 一种 type 一个 entry,预留同类多实例
-    时再分;详见 `docs/DESIGN.md` §8)。`options` 形态依 type 而定:
-
-    - `read_file`:`{"max_bytes": int}`
-    - `list_dir`:`{}`
-    - `shell_exec`:`{"workdir": str, "timeout_s": int}`
-    - `http_get`:`{"allowed_domains": list[str], "max_bytes": int}`
-    """
-
-    name: str
-    type: str
-    enabled: bool
-    options: dict[str, Any]
 
 
 @dataclass(frozen=True)

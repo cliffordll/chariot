@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from chariot.agent.config import ToolEntry
-from chariot.sidecar.services.tool import ToolService
+from chariot.sidecar.services.tool import ToolApi
 
 
 class DummyRuntime:
@@ -14,8 +14,8 @@ class DummyRuntime:
 
 
 @pytest.fixture
-def service() -> ToolService:
-    return ToolService(DummyRuntime())
+def service() -> ToolApi:
+    return ToolApi(DummyRuntime())
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def entry() -> ToolEntry:
 
 @pytest.mark.asyncio
 async def test_list_show_probe_tool_methods(
-    service: ToolService, entry: ToolEntry, monkeypatch: pytest.MonkeyPatch
+    service: ToolApi, entry: ToolEntry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def fake_list_entries(self):  # type: ignore[no-untyped-def]
         return [entry]

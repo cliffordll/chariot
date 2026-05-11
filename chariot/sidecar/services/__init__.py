@@ -8,7 +8,7 @@ from chariot.sidecar.services.memory import MemoryApi
 from chariot.sidecar.services.prompt import PromptApi
 from chariot.sidecar.services.provider import ProviderApi
 from chariot.sidecar.services.task import TaskApi
-from chariot.sidecar.services.tool import ToolService
+from chariot.sidecar.services.tool import ToolApi
 
 __all__ = [
     "AgentApi",
@@ -20,5 +20,5 @@ __all__ = [
     "PromptApi",
     "ProviderApi",
     "TaskApi",
-    "ToolService",
+    "ToolApi",
 ]

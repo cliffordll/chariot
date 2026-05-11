@@ -1,19 +1,19 @@
-"""Tool service for sidecar admin methods."""
+"""Tool API surface for sidecar admin methods."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from chariot.agent.config import ToolEntry
 from chariot.agent.exceptions import ConfigError
+from chariot.models.tool import ToolEntry
 from chariot.repos.tool_repo import ToolRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 from chariot.tools.registry import ToolRegistry
 
 
-class ToolService:
+class ToolApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
