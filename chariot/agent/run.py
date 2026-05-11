@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
     from chariot.skills import SkillRegistry
+    from chariot.skills.propose_service import SkillProposeService
     from chariot.tools.base import BaseTool
     from chariot.trace import TurnHandle
 
@@ -113,6 +114,7 @@ class AIAgent:
         capabilities: Capabilities | None = None,
         checkpoint_manager: CheckpointManager | None = None,
         skill_registry: SkillRegistry | None = None,
+        skill_propose_service: SkillProposeService | None = None,
     ) -> None:
         from chariot.agent.config import Capabilities as _Capabilities
         from chariot.audit import AuditHookManager as _AuditHookManager
@@ -149,6 +151,11 @@ class AIAgent:
         # B6 wave 1:SkillRegistry(builtin YAML + DB skills union);bootstrap 默认
         # 装,测试路径若没传 → None,activator/propose 等下游 None-check 后跳过。
         self._skill_registry = skill_registry
+        # B6 wave 3:SkillProposeService(propose_skill tool 走的全链路 orchestrator)。
+        # bootstrap 默认装并 attach 到 propose_skill tool;测试路径不传 → propose_skill
+        # 执行时返 is_error。
+        self._skill_propose_service = skill_propose_service
+        self._attach_propose_service_if_present()
 
     # ---- 装载 ----
 
@@ -272,6 +279,16 @@ class AIAgent:
 
         skill_registry = await SkillRegistry.load(sm)
 
+        # B6 wave 3:装 SkillProposeService —— propose_skill tool 走的全链路 orchestrator;
+        # 在 `cls(...)` 内 attach 到 `propose_skill` tool 实例(若已装载)。
+        from chariot.skills.propose_service import SkillProposeService
+
+        skill_propose_service = SkillProposeService(
+            sessionmaker=sm,
+            audit_hooks=audit_hooks,
+            checkpoint_manager=checkpoint_manager,
+        )
+
         return cls(
             providers=providers,
             tools=tools,
@@ -285,6 +302,7 @@ class AIAgent:
             capabilities=capabilities,
             checkpoint_manager=checkpoint_manager,
             skill_registry=skill_registry,
+            skill_propose_service=skill_propose_service,
         )
 
     @staticmethod
@@ -359,6 +377,27 @@ class AIAgent:
         """已装载的 SkillRegistry(B6 wave 1)。bootstrap 默认装 builtin + DB 行 union;
         测试路径若没传 → None,activator/propose 等下游需 None-check。"""
         return self._skill_registry
+
+    @property
+    def skill_propose_service(self) -> SkillProposeService | None:
+        """已装载的 SkillProposeService(B6 wave 3)。bootstrap 默认装;测试路径
+        不传 → None,propose_skill tool 执行时返 is_error。"""
+        return self._skill_propose_service
+
+    def _attach_propose_service_if_present(self) -> None:
+        """`propose_skill` tool 实例化时不知 service;bootstrap 在 __init__ 末段把
+        service 注入到 tool 上(若已装载)。
+
+        放在 `__init__` 内是为了"调用方直接 `AIAgent(...)` 测试"路径也能 attach 上
+        (而不仅是 `AIAgent.bootstrap` 路径)。
+        """
+        if self._skill_propose_service is None:
+            return
+        from chariot.tools.builtin.propose_skill import ProposeSkillTool
+
+        for tool in self._tools.values():
+            if isinstance(tool, ProposeSkillTool):
+                tool.attach_service(self._skill_propose_service)
 
     # ---- 主入口 ----
 

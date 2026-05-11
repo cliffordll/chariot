@@ -18,8 +18,10 @@ from typing import Annotated
 import typer
 
 from chariot.agent.config import ConfigError
+from chariot.audit.hooks import AuditHookManager
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
+from chariot.repos.audit_repo import AuditRepo
 from chariot.repos.skill_repo import SkillEntry, SkillRepo
 from chariot.skills import SkillLoader, SkillManifestError, SkillRegistry
 
@@ -75,6 +77,13 @@ def remove_cmd(
     name: Annotated[str, typer.Argument(help="skill name")],
 ) -> None:
     asyncio.run(_remove(name))
+
+
+@skill_app.command("proposals", help="列历史 propose_skill 调用记录(read-only audit 视图)")
+def proposals_cmd(
+    limit: Annotated[int, typer.Option("--limit", help="返回条数上限")] = 20,
+) -> None:
+    asyncio.run(_proposals(limit))
 
 
 # ---- 实现 ----
@@ -209,6 +218,43 @@ async def _set_enabled(name: str, enabled: bool) -> None:
             action="enable" if enabled else "disable",
         )
     Renderer.out(f"* {updated.name}: {'enabled' if updated.enabled else 'disabled'}")
+
+
+async def _proposals(limit: int) -> None:
+    """筛 audit_events.event_type='skill_store' AND payload.source='propose' 倒序展示。
+
+    展示字段:created_at / status(create=成功 / failed=失败)/ name / checkpoint_id /
+    proposer / error(若有)。
+    """
+    if limit <= 0:
+        limit = 20
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        # 多取一些(allowance ×4),再 client-side filter source='propose'
+        events = await AuditRepo(session).list_events(limit=max(limit * 4, 50))
+    filtered = [
+        ev
+        for ev in events
+        if ev.event_type == AuditHookManager.EVENT_SKILL_STORE and ev.payload.get("source") == "propose"
+    ][:limit]
+    if not filtered:
+        Renderer.out("(没有 propose 记录)")
+        return
+    rows = [
+        (
+            ev.created_at.isoformat(timespec="seconds"),
+            ev.status or "-",
+            str(ev.payload.get("name") or "-"),
+            str(ev.payload.get("checkpoint_id") or "-"),
+            str(ev.payload.get("proposer") or "-"),
+            _truncate(str(ev.payload.get("error") or ""), 40),
+        )
+        for ev in filtered
+    ]
+    Renderer.table(
+        ["created_at", "status", "name", "checkpoint", "proposer", "error"],
+        rows,
+        title="skill proposals",
+    )
 
 
 async def _remove(name: str) -> None:
