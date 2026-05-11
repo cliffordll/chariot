@@ -4,9 +4,10 @@
 由 `ProviderRepo` 持久化。
 0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
 0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
-`ProviderEntry` / `ChariotConfig` 同结构。本模块汇总:
+`ChariotConfig` 同结构。本模块汇总:
 
-- `ProviderEntry` / `ChariotConfig`:Provider 配置(0.3.x;0.6.0 起 ModelEntry → ProviderEntry)
+- `ChariotConfig`:Provider 集合(0.3.x;`ProviderEntry` 0.7.2 起迁到
+  `chariot/models/provider.py`)
 - `ToolEntry` / `ToolConfig`:tool 配置(0.4.0);`from_db(session)` 从 ToolRepo 装载
 
 异常类型(`ConfigError` 及子类)0.6.0 起统一在 `chariot/agent/exceptions.py`;
@@ -35,12 +36,10 @@ from chariot.agent.exceptions import (
     ToolNotFound,
 )
 
-# ProviderEntry 0.7.2 起迁到 chariot.models.provider;本模块保留 re-export 维持
-# 现有 `from chariot.agent.config import ProviderEntry` 调用方继续工作。
-from chariot.models.provider import ProviderEntry
-
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from chariot.models.provider import ProviderEntry
 
 
 __all__ = [
@@ -49,7 +48,6 @@ __all__ = [
     "ConversationNotFound",
     "DuplicateConversationId",
     "DuplicateProviderName",
-    "ProviderEntry",
     "ProviderNotFound",
     "ToolConfig",
     "ToolEntry",

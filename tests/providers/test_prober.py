@@ -19,8 +19,8 @@ import pytest
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
-from chariot.agent.config import ProviderEntry
 from chariot.agent.exceptions import ProviderError
+from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider, BaseProviderConfig
 from chariot.providers.prober import ProviderProber
 from chariot.providers.registry import ProviderRegistry
