@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from chariot.repos.audit_repo import AuditEvent, AuditRepo
 from chariot.repos.checkpoint_repo import CheckpointEntry, CheckpointRepo
-from chariot.repos.context_repo import ContextRepo, ContextSnapshotEntry, ContextTraceEntry
+from chariot.repos.context_repo import ContextRepo
 from chariot.repos.conversation_repo import Conversation, ConversationRepo
 from chariot.repos.eval_repo import EvalCaseEntry, EvalRepo, EvalRunEntry
 from chariot.repos.log_repo import LogRepo
@@ -21,8 +21,6 @@ __all__ = [
     "CheckpointEntry",
     "CheckpointRepo",
     "ContextRepo",
-    "ContextSnapshotEntry",
-    "ContextTraceEntry",
     "Conversation",
     "ConversationRepo",
     "EvalCaseEntry",

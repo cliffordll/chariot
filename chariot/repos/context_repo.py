@@ -3,42 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
-from chariot.context.composer import ContextSnapshot
 from chariot.database.models import ContextSnapshotRow, ContextTraceRow
-
-
-@dataclass(frozen=True)
-class ContextSnapshotEntry:
-    id: str
-    conversation_id: str | None
-    provider_name: str
-    model: str | None
-    request: dict[str, Any]
-    slices: list[dict[str, Any]]
-    source_refs: list[dict[str, Any]]
-    context_size: int
-    created_at: datetime
-
-
-@dataclass(frozen=True)
-class ContextTraceEntry:
-    id: str
-    snapshot_id: str
-    conversation_id: str | None
-    provider_name: str
-    model: str | None
-    prompt_trace_id: str | None
-    policy: dict[str, Any]
-    selected_refs: list[dict[str, Any]]
-    created_at: datetime
+from chariot.models.context import ContextSnapshot, ContextSnapshotEntry, ContextTraceEntry
 
 
 class ContextRepo:

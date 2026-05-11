@@ -278,7 +278,7 @@ class AIAgent:
     ) -> AsyncIterator[ChatEvent]:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
-        from chariot.context.composer import build_snapshot as build_context_snapshot
+        from chariot.context.composer import ContextComposer
         from chariot.repos.context_repo import ContextRepo
         from chariot.repos.conversation_repo import ConversationRepo
 
@@ -290,7 +290,7 @@ class AIAgent:
         memory_policy = MemoryPolicy()
         memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
         context_snapshot = await context_repo.record_snapshot(
-            build_context_snapshot(
+            ContextComposer.build_snapshot(
                 req,
                 provider_name=provider.config.name,
                 model=provider.config.model,

@@ -1,15 +1,16 @@
-"""Context service for sidecar context-query methods."""
+"""Context API surface for sidecar context-query methods."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.context_repo import ContextRepo, ContextSnapshotEntry, ContextTraceEntry
+from chariot.models.context import ContextSnapshotEntry, ContextTraceEntry
+from chariot.repos.context_repo import ContextRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
-class ContextService:
+class ContextApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 

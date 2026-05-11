@@ -308,16 +308,24 @@ class ChariotConfig:
    - 等所有调用方 import 迁完,撤销 `chariot/tasks/__init__.py` re-export shim,删 `chariot/tasks/` 目录
    - 撤销 `chariot/agent/config.py` 里的 `ProviderEntry` re-export
    - `chariot/memory/` 目录按 D6 b 方案保留;无需在本步处理
+7. **第七步(`context` 领域,补做)**
+   - 原规划遗漏 context 领域 —— 它和 prompt/memory 形态一致,落地后补一步
+   - 新建 `chariot/models/context.py`:把 `ContextSlice` / `ContextSnapshot` 从 `chariot/context/composer.py` 搬过来;把 `ContextSnapshotEntry` / `ContextTraceEntry` 从 `chariot/repos/context_repo.py` 搬过来
+   - `chariot/context/composer.py` 模块级 `build_snapshot` + `_build_slices` 收成 `ContextComposer` 类的 classmethod / staticmethod;消除 CLAUDE.md ⭐ red flag(模块级自由函数 + 下划线 helper)
+   - 新建 `chariot/services/context.py:ContextService`,薄封 `ContextRepo`(list/get snapshots & traces / record / inspect)
+   - `chariot/sidecar/services/context.py:ContextService` 改名 `ContextApi`;`chariot/sidecar/methods/context.py` 跟进
+   - `chariot/agent/run.py` / tests 的 `build_snapshot` 调用点改走 `ContextComposer.build_snapshot`
+   - 跑全套静态检查与烟测
 
 ## 验收标准
 
-- `chariot/models/{task,prompt,provider,memory}.py` 四文件存在,内容是该领域全部业务 dataclass
-- `chariot/services/{task,prompt,provider,memory}.py` 四文件存在,内容是该领域全部 domain service 类
-- `chariot/repos/{task,prompt,provider,memory}_repo.py` 不再持有业务规则(状态机校验 / 跨表协调 / 命名约束 / seed)
-- `chariot/prompt/composer.py` 内无模块级自由函数,无 `_xxx` 模块级 helper(都成为 `PromptComposer` 的 staticmethod)
-- `chariot/agent/config.py` 仅含 `ChariotConfig`(可保留 `ProviderEntry` re-export 一段时间)
+- `chariot/models/{task,prompt,provider,memory,context}.py` 五文件存在,内容是该领域全部业务 dataclass(第七步补 context)
+- `chariot/services/{task,prompt,provider,memory,context}.py` 五文件存在,内容是该领域全部 domain service 类(第七步补 context)
+- `chariot/repos/{task,prompt,provider,memory,context}_repo.py` 不再持有业务规则(状态机校验 / 跨表协调 / 命名约束 / seed)
+- `chariot/{prompt,context}/composer.py` 内无模块级自由函数,无 `_xxx` 模块级 helper(都成为 `PromptComposer` / `ContextComposer` 的 staticmethod)
+- `chariot/agent/config.py` 仅含 `ChariotConfig`,`ProviderEntry` re-export 已撤
 - `chariot/tasks/` 目录撤销或仅剩 re-export shim
-- `chariot/sidecar/services/{prompt,provider,memory}.py` 类名统一改 `XxxApi` 后缀(`PromptApi` / `ProviderApi` / `MemoryApi`)
+- `chariot/sidecar/services/{prompt,provider,memory,context}.py` 类名统一改 `XxxApi` 后缀(`PromptApi` / `ProviderApi` / `MemoryApi` / `ContextApi`)
 - ruff / pyright / pytest 全套通过
 - sidecar / CLI / 桌面 UI 三条 surface 行为不变,现有测试不需要改预期
 
