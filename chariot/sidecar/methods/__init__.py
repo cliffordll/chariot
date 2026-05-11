@@ -132,6 +132,7 @@ def register_methods(
     from chariot.sidecar.methods.chat import ChatMethod
     from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
+    from chariot.sidecar.methods.eval import EvalMethods
     from chariot.sidecar.methods.job import JobMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.memory import MemoryMethods
@@ -250,3 +251,9 @@ def register_methods(
     server.method("get_trace_turn")(traces.show)
     server.method("view_trace_tree")(traces.view)
     server.method("reconcile_traces")(traces.reconcile)
+
+    evals = EvalMethods(runtime)
+    server.method("list_golden_tasks")(evals.list_golden_tasks)
+    server.method("list_eval_runs")(evals.list_eval_runs)
+    server.method("get_eval_run")(evals.get_eval_run)
+    server.method("diff_eval_runs")(evals.diff_eval_runs)

@@ -3,6 +3,7 @@
 from chariot.sidecar.services.agent import AgentApi
 from chariot.sidecar.services.chat import ChatRequestDecoder, ChatService
 from chariot.sidecar.services.context import ContextApi
+from chariot.sidecar.services.eval import EvalApi
 from chariot.sidecar.services.job import JobApi
 from chariot.sidecar.services.memory import MemoryApi
 from chariot.sidecar.services.prompt import PromptApi
@@ -17,6 +18,7 @@ __all__ = [
     "ChatRequestDecoder",
     "ChatService",
     "ContextApi",
+    "EvalApi",
     "JobApi",
     "MemoryApi",
     "PromptApi",

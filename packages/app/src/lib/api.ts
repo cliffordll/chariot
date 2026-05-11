@@ -450,6 +450,99 @@ export interface ListTracesParams {
   offset?: number;
 }
 
+// Phase B2 wave 5: eval surface
+export type EvalVerdict = "PASS" | "FAIL" | "ERROR" | "SKIP";
+
+export type DiffStatus = "NEW" | "REMOVED" | "REGRESSED" | "RECOVERED" | "CHANGED" | "STABLE";
+
+export interface GoldenTaskEntry {
+  task_id: string;
+  prompt: string;
+  verifier_type: string;
+  expected: Record<string, unknown>;
+  category: string;
+  description: string;
+  max_iterations: number;
+  model: string | null;
+  system: string | null;
+}
+
+export interface EvalRunRecord {
+  task_id: string;
+  verdict: EvalVerdict;
+  reason: string;
+  turn_id: string;
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_status: string;
+  duration_seconds: number;
+  final_response: string;
+  tool_calls: Array<Record<string, unknown>>;
+  error: string | null;
+}
+
+export interface EvalRunSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  skipped: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
+  pass_rate: number;
+}
+
+export interface EvalRunMeta {
+  run_id: string;
+  created_at: string;
+  schema: number;
+  agent_profile?: string | null;
+  golden_dir?: string | null;
+  [key: string]: unknown;
+}
+
+export interface EvalRunListEntry {
+  run_id: string;
+  summary: EvalRunSummary | null;
+  meta: EvalRunMeta | null;
+}
+
+export interface EvalRunSnapshot {
+  run_id: string;
+  run_dir: string;
+  meta: EvalRunMeta;
+  summary: EvalRunSummary;
+  tasks: GoldenTaskEntry[];
+  records: EvalRunRecord[];
+}
+
+export interface DiffEntry {
+  task_id: string;
+  status: DiffStatus;
+  baseline_verdict: EvalVerdict | null;
+  current_verdict: EvalVerdict | null;
+}
+
+export interface DiffSummaryPayload {
+  new: number;
+  removed: number;
+  regressed: number;
+  recovered: number;
+  changed: number;
+  stable: number;
+  total_changes: number;
+}
+
+export interface DiffResult {
+  baseline_id: string;
+  current_id: string;
+  entries: DiffEntry[];
+  summary: DiffSummaryPayload;
+}
+
 const apiCore = {
   listConversations(): Promise<{ conversations: Conversation[] }> {
     return rpc("list_conversations");
@@ -621,6 +714,25 @@ const apiCore = {
 
   reconcileTraces(older_than_seconds?: number): Promise<{ cleaned: number }> {
     return rpc("reconcile_traces", { older_than_seconds });
+  },
+
+  // Phase B2 wave 5: eval
+  listGoldenTasks(golden_dir?: string): Promise<{ tasks: GoldenTaskEntry[]; golden_dir: string; missing: boolean }> {
+    return rpc("list_golden_tasks", golden_dir ? { golden_dir } : {});
+  },
+
+  listEvalRuns(runs_dir?: string): Promise<{ runs: EvalRunListEntry[]; runs_dir: string }> {
+    return rpc("list_eval_runs", runs_dir ? { runs_dir } : {});
+  },
+
+  getEvalRun(run_id: string, runs_dir?: string): Promise<EvalRunSnapshot> {
+    return rpc("get_eval_run", runs_dir ? { run_id, runs_dir } : { run_id });
+  },
+
+  diffEvalRuns(baseline_id: string, current_id: string, runs_dir?: string): Promise<DiffResult> {
+    const params: Record<string, string> = { baseline_id, current_id };
+    if (runs_dir) params.runs_dir = runs_dir;
+    return rpc("diff_eval_runs", params);
   },
 
   listPromptBundles(): Promise<{ bundles: PromptBundle[] }> {

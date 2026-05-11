@@ -10,7 +10,8 @@ Flags:
 - `--agent <name>`             指定 agent_profile(走 AIAgent._resolve_binding 三件套)
 - `--category <c>` / `--task <id>` 过滤
 - `--dir <path>`               golden task 目录(默认 tests/golden/)
-- `--baseline <run-id>`        以指定历史 run 为基线,跑完后输出 verdict diff
+- `--baseline <run-id>`        以指定历史 run 为基线,跑完输出 verdict 变化清单
+                               (REGRESSED / RECOVERED / NEW / REMOVED / CHANGED)
 - `--no-save`                  不落盘到 ~/.chariot/eval/<timestamp>/
 
 每次跑批默认落:`meta.json` / `tasks.json` / `records.json` / `summary.json` /
@@ -53,7 +54,10 @@ def eval_root(
     task: Annotated[str, typer.Option("--task", help="只跑该 task_id")] = "",
     agent_profile: Annotated[str, typer.Option("--agent", help="跑批用指定 agent_profile")] = "",
     golden_dir: Annotated[Path, typer.Option("--dir", help="golden task 目录")] = _DEFAULT_GOLDEN_DIR,
-    baseline: Annotated[str, typer.Option("--baseline", help="基线 run_id;跑完输出 diff")] = "",
+    baseline: Annotated[
+        str,
+        typer.Option("--baseline", help="基线 run_id(看 list-runs);设置后跑完自动输出 verdict diff"),
+    ] = "",
     no_save: Annotated[bool, typer.Option("--no-save", help="不落盘到 ~/.chariot/eval/")] = False,
 ) -> None:
     """无子命令时:跑全套。"""

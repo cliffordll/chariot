@@ -284,7 +284,7 @@ uv run chariot eval --category file          # 只跑某类
 uv run chariot eval --task file_read_pyproject  # 单 task
 uv run chariot eval list-tasks               # 列已有 task
 uv run chariot eval list-runs                # 列历史 run(从 ~/.chariot/eval/<timestamp>/)
-uv run chariot eval --baseline <run_id> --diff   # 跟基线 diff
+uv run chariot eval --baseline <run_id>      # 跟基线 diff
 uv run chariot eval --no-save                # 不落盘
 ```
 
