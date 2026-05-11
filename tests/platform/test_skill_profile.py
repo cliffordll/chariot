@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.registry import AgentRegistry
-from chariot.agent.run import AIAgent, _NO_BINDING, _AgentBinding
+from chariot.agent.run import _NO_BINDING, AIAgent, _AgentBinding
 from chariot.database.session import dispose_db, init_db
 from chariot.models.agent import UNSET
 from chariot.repos.task_repo import TaskRepo

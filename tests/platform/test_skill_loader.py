@@ -8,7 +8,6 @@ import pytest
 
 from chariot.skills.loader import SkillLoader, SkillManifestError
 
-
 # ---- 正面用例 ----
 
 

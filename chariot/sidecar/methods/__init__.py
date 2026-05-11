@@ -175,12 +175,12 @@ def register_methods(
     from chariot.sidecar.methods.critic import CriticMethods
     from chariot.sidecar.methods.eval import EvalMethods
     from chariot.sidecar.methods.guardrail import GuardrailMethods
-    from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.job import JobMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
+    from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.task import TaskMethods
     from chariot.sidecar.methods.tool import ToolMethods
     from chariot.sidecar.methods.toolset import ToolsetMethods
