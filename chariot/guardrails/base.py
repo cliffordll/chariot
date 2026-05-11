@@ -55,12 +55,17 @@ class BaseRule(ABC):
     - `description`:一句话描述(给 `chariot guardrail list` 展示)
     - `verdict`:命中后的默认 verdict
     - `daily_quota`:日配额上限(None = 不限;数字 = 每天最多放过几次)
+    - `capability_gate`(B5 wave 3):当此 capability 在 `Capabilities` 里 enabled
+      时,默认 verdict=DENY 会被引擎降级为 REQUIRE_APPROVAL;disable / 不持
+      capability 时保持原 DENY。目前只用于 `self_modify_chariot`(gate=
+      `enable_self_mod`)。
     """
 
     rule_id: ClassVar[str]
     description: ClassVar[str]
     verdict: ClassVar[Verdict]
     daily_quota: ClassVar[int | None] = None
+    capability_gate: ClassVar[str | None] = None
 
     @abstractmethod
     def matches(self, tool_name: str, args: dict[str, Any]) -> str | None:

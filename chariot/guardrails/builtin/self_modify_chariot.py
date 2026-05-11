@@ -26,6 +26,8 @@ class SelfModifyChariotRule(BaseRule):
     description = "write_file 写 `chariot/` 子树(agent 自我修改;需 enable_self_mod 才放行)"
     verdict = Verdict.DENY
     daily_quota = None
+    # B5 wave 3:enable_self_mod=True 时,引擎把 DENY 降级为 REQUIRE_APPROVAL
+    capability_gate = "enable_self_mod"
 
     def matches(self, tool_name: str, args: dict[str, Any]) -> str | None:
         if tool_name != "write_file":

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "Capabilities",
     "ChariotConfig",
     "ConfigError",
     "ConversationNotFound",
@@ -58,6 +59,36 @@ __all__ = [
     "ToolEntry",
     "ToolNotFound",
 ]
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    """capability 开关汇总(B5 wave 3)。
+
+    - `enable_self_mod`:从 DB `capabilities` 表装载;允许 agent 改 chariot 自身
+    - `yolo`:跨进程不持久化(per-process CLI `--yolo`);CLI / sidecar 启动时
+      显式传入
+
+    构造路径:
+    - `Capabilities.from_db(session, yolo=False)` —— 从 DB 装 enable_self_mod,
+      yolo 由调用方传(CLI --yolo / 程序参数)
+    - `Capabilities.default()` —— 全关,测试 / 没装 DB 时回退
+    """
+
+    enable_self_mod: bool = False
+    yolo: bool = False
+
+    @classmethod
+    def default(cls) -> Capabilities:
+        return cls()
+
+    @classmethod
+    async def from_db(cls, session: AsyncSession, *, yolo: bool = False) -> Capabilities:
+        from chariot.repos.capability_repo import CapabilityRepo
+
+        repo = CapabilityRepo(session)
+        enable_self_mod = await repo.is_enabled("enable_self_mod")
+        return cls(enable_self_mod=enable_self_mod, yolo=yolo)
 
 
 @dataclass(frozen=True)

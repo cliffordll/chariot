@@ -274,6 +274,20 @@ class SkillRow(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 
+class CapabilityRow(Base):
+    """`capabilities` 表(v21 起):capability gating 持久化(B5 wave 3)。
+
+    `name` 是主键(已知 capability 名集合有限);默认两条:`enable_self_mod` /
+    `yolo`,都 disabled。CLI `--yolo` 全局 flag 是 per-process 覆盖,不写 DB。
+    """
+
+    __tablename__ = "capabilities"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    enabled: Mapped[int] = mapped_column(default=0)  # 0/1
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
 class ProviderHealthRow(Base):
     """`provider_health` 表:v12 起的 provider 最近健康状态。"""
 
