@@ -91,6 +91,18 @@ def chat_cmd(
             ),
         ),
     ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help=(
+                "agent_profile name;非空时 AIAgent 解析后用其 binding:"
+                "provider_profile 覆盖 --provider、prompt_bundle 决定 prompt、tool_profile 做 toolset filter。"
+                "跟 --base-url / --api-key 配合需注意:那两个 patch 被 keyed 到 --provider entry,"
+                "若 agent 把路由切到别的 entry,patch 不会跟过去。"
+            ),
+        ),
+    ] = None,
 ) -> None:
     conversation_id = _resolve_conversation_id(conversation)
     asyncio.run(
@@ -102,6 +114,7 @@ def chat_cmd(
             api_key=api_key,
             max_tokens=max_tokens,
             conversation_id=conversation_id,
+            agent_profile=agent,
         )
     )
 
@@ -155,6 +168,7 @@ async def _run(
     api_key: str | None,
     max_tokens: int,
     conversation_id: str | None,
+    agent_profile: str | None,
 ) -> None:
     # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
     # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
@@ -177,6 +191,7 @@ async def _run(
                 max_tokens=max_tokens,
                 conversation_id=conversation_id,
                 model_override=model,
+                agent_profile=agent_profile,
             )
             if text is None or not text.strip():
                 from chariot.cli.repl import ChatRepl

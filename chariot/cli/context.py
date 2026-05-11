@@ -88,6 +88,11 @@ class ChatContext:
     # Provider 内部用 `req.model or self.config.model` 决定 wire body["model"]。
     # None = 不覆盖,沿用 entry.options.model(常态)
     model_override: str | None = None
+    # 0.7.2+:CLI `--agent` flag 的承载;每轮 req 透传给 `ChatRequest.agent_profile`,
+    # AIAgent 解析后:profile.provider_profile 覆盖 req.provider_name,
+    # profile.prompt_bundle 决定 prompt 注入,profile.tool_profile 做 toolset filter。
+    # None = 不绑定 agent_profile(常态;走全局 active bundle + 全量 enabled tools)
+    agent_profile: str | None = None
 
     # ---------- 状态操作 ----------
 
@@ -197,6 +202,7 @@ class ChatContext:
             model=self.model_override,
             max_tokens=self.max_tokens,
             conversation_id=self.conversation_id,
+            agent_profile=self.agent_profile,
         )
 
     def _messages_to_send(self) -> list[dict[str, Any]]:
