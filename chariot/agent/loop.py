@@ -225,11 +225,8 @@ class AgentLoop:
     async def _execute_tool_call(self, tool_use_block: dict[str, Any]) -> ChatEvent:
         tool_name = str(tool_use_block.get("name", ""))
         tool_input = tool_use_block.get("input", {})
-        tc_handle = (
-            self._turn.begin_tool_call(tool_name=tool_name, arguments=tool_input if isinstance(tool_input, dict) else {})
-            if self._turn is not None
-            else None
-        )
+        args = tool_input if isinstance(tool_input, dict) else {}
+        tc_handle = self._turn.begin_tool_call(tool_name=tool_name, arguments=args) if self._turn is not None else None
         result = await self._tool_execution.execute_tool_call(
             tool_use_id=str(tool_use_block.get("id", "")),
             tool_name=tool_name,

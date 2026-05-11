@@ -180,9 +180,7 @@ async def _trace_view(turn_id: str) -> None:
         return
 
     turn = tree.turn
-    Renderer.out(
-        f"▼ {turn.id}  [{turn.status.value}]  {turn.provider_name}{('/' + turn.model) if turn.model else ''}"
-    )
+    Renderer.out(f"▼ {turn.id}  [{turn.status.value}]  {turn.provider_name}{('/' + turn.model) if turn.model else ''}")
     Renderer.out(
         f"  duration={_fmt_dur(turn.duration_ms)}  in/out={turn.input_tokens}/{turn.output_tokens}  "
         f"cost=${turn.cost_usd if turn.cost_usd is not None else '-'}"
@@ -195,7 +193,8 @@ async def _trace_view(turn_id: str) -> None:
         Renderer.out("provider calls:")
         for pc in tree.provider_calls:
             err = f"  error={pc.error_type}" if pc.error_type else ""
-            Renderer.out(f"  - {pc.id}  {pc.provider_name}{('/' + pc.model) if pc.model else ''}  latency={_fmt_dur(pc.latency_ms)}{err}")
+            pc_model = f"/{pc.model}" if pc.model else ""
+            Renderer.out(f"  - {pc.id}  {pc.provider_name}{pc_model}  latency={_fmt_dur(pc.latency_ms)}{err}")
             if pc.response_summary:
                 Renderer.out(f"    response: {json.dumps(pc.response_summary, ensure_ascii=False)}")
 

@@ -59,15 +59,12 @@ class _ToolUsingProvider(BaseProvider):
         self.call_count += 1
         yield ChatEvent.message_start(message_id=f"m{self.call_count}", model=self.config.model)
         if self.call_count == 1:
-            yield ChatEvent.content_block_start(
+            yield ChatEvent.tool_use_block_start(
                 index=0,
-                block={"type": "tool_use", "id": "toolu_1", "name": "echo_tool", "input": {}},
+                tool_use_id="toolu_1",
+                tool_name="echo_tool",
             )
-            yield ChatEvent(
-                kind="content_block_delta",
-                index=0,
-                delta={"type": "input_json_delta", "partial_json": '{"text":"hello"}'},
-            )
+            yield ChatEvent.input_json_delta('{"text":"hello"}', index=0)
             yield ChatEvent.block_stop(index=0)
             yield ChatEvent.message_delta_done(stop_reason="tool_use")
         else:
