@@ -273,6 +273,56 @@ export interface MemoryLink {
   created_at: string;
 }
 
+// ---- B5 wave 4: Guardrails / Audit / Checkpoints / Capabilities ----
+
+export interface GuardrailRule {
+  rule_id: string;
+  description: string;
+  verdict: "allow" | "require_approval" | "deny";
+  daily_quota: number | null;
+  quota_remaining: number | null;
+}
+
+export interface GuardrailVerdict {
+  rule_id: string;
+  verdict: "allow" | "require_approval" | "deny";
+  reason: string;
+  matched_pattern: string | null;
+  quota_remaining: number | null;
+  quota_exhausted: boolean;
+}
+
+export interface AuditEvent {
+  id: string;
+  event_type: string;
+  status: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CheckpointEntry {
+  id: string;
+  name: string;
+  kind: string;
+  target: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RollbackResult {
+  git_ok: boolean;
+  db_ok: boolean;
+  config_ok: boolean;
+  restored: string[];
+  errors: string[];
+}
+
+export interface CapabilityEntry {
+  name: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
 export interface AgentProfile {
   name: string;
   role: string;
@@ -1074,6 +1124,55 @@ const apiCore = {
   async ping(): Promise<{ ok: true }> {
     await apiCore.listTools();
     return { ok: true };
+  },
+
+  // ---- B5 wave 4: Guardrails / Audit / Checkpoints / Capabilities ----
+
+  listGuardrails(): Promise<{ rules: GuardrailRule[] }> {
+    return rpc("list_guardrails", {});
+  },
+
+  tryGuardrail(params: {
+    tool_name: string;
+    args: Record<string, unknown>;
+  }): Promise<GuardrailVerdict> {
+    return rpc("try_guardrail", params as Record<string, unknown>);
+  },
+
+  listAuditEvents(params: { limit?: number } = {}): Promise<{ events: AuditEvent[] }> {
+    return rpc("list_audit_events", { ...params });
+  },
+
+  getAuditEvent(event_id: string): Promise<{ event: AuditEvent }> {
+    return rpc("get_audit_event", { event_id });
+  },
+
+  listCheckpoints(): Promise<{ checkpoints: CheckpointEntry[] }> {
+    return rpc("list_checkpoints", {});
+  },
+
+  getCheckpoint(checkpoint_id: string): Promise<{ checkpoint: CheckpointEntry }> {
+    return rpc("get_checkpoint", { checkpoint_id });
+  },
+
+  createCheckpoint(name: string): Promise<{ checkpoint: CheckpointEntry }> {
+    return rpc("create_checkpoint", { name });
+  },
+
+  rollbackCheckpoint(checkpoint_id: string): Promise<RollbackResult> {
+    return rpc("rollback_checkpoint", { checkpoint_id });
+  },
+
+  deleteCheckpoint(checkpoint_id: string): Promise<{ deleted: string }> {
+    return rpc("delete_checkpoint", { checkpoint_id });
+  },
+
+  listCapabilities(): Promise<{ capabilities: CapabilityEntry[] }> {
+    return rpc("list_capabilities", {});
+  },
+
+  setCapability(name: string, enabled: boolean): Promise<{ capability: CapabilityEntry }> {
+    return rpc("set_capability", { name, enabled });
   },
 } as const;
 

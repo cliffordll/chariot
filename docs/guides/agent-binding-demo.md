@@ -648,12 +648,28 @@ uv run pytest tests/platform/test_guardrail_integration.py tests/platform/test_a
 
 ## 7.16 桌面 Security 页(B5 wave 4)
 
-新增 `/security` 路由,Tabs 三标签:
+新增 `/security` 路由(`packages/app/src/pages/Security.tsx`),手卷 Tabs 三标签:
 
-- **Guardrails 标签**:规则列表 + 当日配额剩余 + 顶部 "Test rule" 小工具
-- **Audit 标签**:event timeline(降序)+ 按 type/status 筛 + 点行展开 payload
-- **Checkpoints 标签**:列表 + "Create checkpoint" 按钮 + 每行 Rollback / Delete
-  (带二次确认)
+- **Guardrails 标签**:13 条规则列表 + 当日配额剩余;顶部 "Test rule" 小工具
+  (输入 tool_name + args JSON → `try_guardrail` dry-run,显示 verdict /
+  rule_id / matched_pattern / quota_remaining)
+- **Audit 标签**:左侧 event timeline(时间降序)+ event_type 关键字筛;右侧
+  payload pre-formatted JSON(点行切换选中)
+- **Checkpoints 标签**:Capabilities 区块(每条 capability 一个 toggle button,
+  点 → `set_capability`)+ Create checkpoint 区(输入 name → `create_checkpoint`)
+  + 列表(每行 Rollback / Delete 带 `window.confirm` 二次确认)+ 最近一次 action
+  的 result 摘要(create/rollback/delete 都显示)
+
+API client(`packages/app/src/lib/api.ts`)加 10 个方法:
+`listGuardrails` / `tryGuardrail` / `listAuditEvents` / `getAuditEvent` /
+`listCheckpoints` / `getCheckpoint` / `createCheckpoint` / `rollbackCheckpoint` /
+`deleteCheckpoint` / `listCapabilities` / `setCapability`(+ 对应 type 定义)。
+
+`routes.tsx` 注册 `/security` 路由 + nav item。
+
+**验证**:`bun --filter @chariot/app build` + 在 dev server 跑 `/security`
+全部交互(Try rule / 切 capability / create-rollback-delete checkpoint)。
+后端单测在 B5 wave 1/2/3 commit 里已经覆盖;wave 4 是纯前端。
 
 ---
 
