@@ -293,6 +293,9 @@ function AgentDetailCard({
               {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
               {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
               {agent.provider_profile && <Badge variant="outline">{agent.provider_profile}</Badge>}
+              {agent.reflection_enabled && (
+                <Badge variant="default">reflect ×{agent.reflection_max_retries}</Badge>
+              )}
             </div>
             <div className="grid gap-1 text-sm text-muted-foreground">
               <span>created: {formatDateTime(agent.created_at)}</span>
@@ -361,6 +364,8 @@ function CreateAgentDialog({
   const [providerProfile, setProviderProfile] = useState("");
   const [budget, setBudget] = useState("{}");
   const [meta, setMeta] = useState("{}");
+  const [reflectionEnabled, setReflectionEnabled] = useState(false);
+  const [reflectionMaxRetries, setReflectionMaxRetries] = useState(2);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -385,6 +390,8 @@ function CreateAgentDialog({
         provider_profile: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
+        reflection_enabled: reflectionEnabled,
+        reflection_max_retries: reflectionMaxRetries,
       });
       onCreated(name);
     } catch (e) {
@@ -446,6 +453,28 @@ function CreateAgentDialog({
               <Textarea value={meta} onChange={(e) => setMeta(e.target.value)} className="min-h-28 font-mono text-xs" />
             </Field>
           </div>
+          <div className="grid gap-3 md:grid-cols-2 items-end">
+            <Field label="Reflection (B4)">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={reflectionEnabled}
+                  onChange={(e) => setReflectionEnabled(e.target.checked)}
+                />
+                <span>Enable reflect-then-retry</span>
+              </label>
+            </Field>
+            <Field label="Reflection max retries">
+              <Input
+                type="number"
+                min={0}
+                max={20}
+                value={reflectionMaxRetries}
+                onChange={(e) => setReflectionMaxRetries(parseInt(e.target.value, 10) || 0)}
+                disabled={!reflectionEnabled}
+              />
+            </Field>
+          </div>
           {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
         </div>
         <DialogFooter>
@@ -474,6 +503,8 @@ function EditAgentDialog({
   const [providerProfile, setProviderProfile] = useState(agent.provider_profile ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
   const [meta, setMeta] = useState(JSON.stringify(agent.meta, null, 2));
+  const [reflectionEnabled, setReflectionEnabled] = useState(agent.reflection_enabled);
+  const [reflectionMaxRetries, setReflectionMaxRetries] = useState(agent.reflection_max_retries);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -497,6 +528,8 @@ function EditAgentDialog({
         provider_profile: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
+        reflection_enabled: reflectionEnabled,
+        reflection_max_retries: reflectionMaxRetries,
       });
       onSaved(agent.name);
     } catch (e) {
@@ -549,6 +582,28 @@ function EditAgentDialog({
             </Field>
             <Field label="Meta JSON">
               <Textarea value={meta} onChange={(e) => setMeta(e.target.value)} className="min-h-28 font-mono text-xs" />
+            </Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 items-end">
+            <Field label="Reflection (B4)">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={reflectionEnabled}
+                  onChange={(e) => setReflectionEnabled(e.target.checked)}
+                />
+                <span>Enable reflect-then-retry</span>
+              </label>
+            </Field>
+            <Field label="Reflection max retries">
+              <Input
+                type="number"
+                min={0}
+                max={20}
+                value={reflectionMaxRetries}
+                onChange={(e) => setReflectionMaxRetries(parseInt(e.target.value, 10) || 0)}
+                disabled={!reflectionEnabled}
+              />
             </Field>
           </div>
           {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}

@@ -47,9 +47,13 @@ class TaskRepo:
         provider_profile: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        reflection_enabled: bool = False,
+        reflection_max_retries: int = 2,
     ) -> AgentProfile:
         self._require_non_empty(name, "agent profile name")
         self._require_non_empty(role, "agent profile role")
+        if reflection_max_retries < 0:
+            raise ConfigError(f"reflection_max_retries 必须 >= 0,got {reflection_max_retries}")
         row = AgentProfileRow(
             name=name,
             role=role,
@@ -58,6 +62,8 @@ class TaskRepo:
             provider_profile=provider_profile,
             budget=self._serialize_object("budget", budget or {}),
             meta=self._serialize_object("meta", meta or {}),
+            reflection_enabled=1 if reflection_enabled else 0,
+            reflection_max_retries=reflection_max_retries,
         )
         self.session.add(row)
         try:
@@ -86,6 +92,8 @@ class TaskRepo:
         provider_profile: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
+        reflection_enabled: bool | None = None,
+        reflection_max_retries: int | None = None,
     ) -> AgentProfile:
         row = await self._require_agent_profile_row(name)
         if role is not None:
@@ -101,6 +109,12 @@ class TaskRepo:
             row.budget = self._serialize_object("budget", budget)
         if meta is not None:
             row.meta = self._serialize_object("meta", meta)
+        if reflection_enabled is not None:
+            row.reflection_enabled = 1 if reflection_enabled else 0
+        if reflection_max_retries is not None:
+            if reflection_max_retries < 0:
+                raise ConfigError(f"reflection_max_retries 必须 >= 0,got {reflection_max_retries}")
+            row.reflection_max_retries = reflection_max_retries
         await self.session.commit()
         await self.session.refresh(row)
         return self._row_to_agent_profile(row)
@@ -363,6 +377,8 @@ class TaskRepo:
             provider_profile=row.provider_profile,
             budget=cls._deserialize_object("budget", row.budget),
             meta=cls._deserialize_object("meta", row.meta),
+            reflection_enabled=bool(row.reflection_enabled),
+            reflection_max_retries=row.reflection_max_retries,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

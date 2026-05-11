@@ -25,7 +25,7 @@ from chariot.repos.auxiliary_repo import AuxiliaryRepo
 
 auxiliary_app = typer.Typer(
     name="auxiliary",
-    help="管理 auxiliary clients(副 model;`aux` 是兼容别名)",
+    help="管理 auxiliary clients(副 model)",
     no_args_is_help=True,
 )
 
@@ -216,4 +216,3 @@ async def _delete(name: str) -> None:
 
 def register(app: typer.Typer) -> None:
     app.add_typer(auxiliary_app)
-    app.add_typer(auxiliary_app, name="aux")

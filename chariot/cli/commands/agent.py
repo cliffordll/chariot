@@ -61,6 +61,17 @@ def agent_add_cmd(
     provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
+    reflection_enabled: Annotated[
+        bool,
+        typer.Option(
+            "--reflection-on/--reflection-off",
+            help="B4 wave 3:开 reflect-then-retry(需 critic 装载)",
+        ),
+    ] = False,
+    reflect_retries: Annotated[
+        int,
+        typer.Option("--reflect-retries", help="reflection 最多重试次数(默认 2)"),
+    ] = 2,
 ) -> None:
     asyncio.run(
         _agent_add(
@@ -71,6 +82,8 @@ def agent_add_cmd(
             provider_profile=provider_profile or None,
             budget=budget,
             meta=meta,
+            reflection_enabled=reflection_enabled,
+            reflection_max_retries=reflect_retries,
         )
     )
 
@@ -93,7 +106,29 @@ def agent_update_cmd(
     ] = None,
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
+    reflection_on: Annotated[
+        bool,
+        typer.Option("--reflection-on", help="B4 wave 3:打开 reflection"),
+    ] = False,
+    reflection_off: Annotated[
+        bool,
+        typer.Option("--reflection-off", help="B4 wave 3:关闭 reflection"),
+    ] = False,
+    reflect_retries: Annotated[
+        int | None,
+        typer.Option("--reflect-retries", help="新的 reflection_max_retries 值"),
+    ] = None,
 ) -> None:
+    if reflection_on and reflection_off:
+        Renderer.die("--reflection-on 和 --reflection-off 互斥")
+        return
+    reflection_enabled: bool | None
+    if reflection_on:
+        reflection_enabled = True
+    elif reflection_off:
+        reflection_enabled = False
+    else:
+        reflection_enabled = None
     asyncio.run(
         _agent_update(
             name=name,
@@ -103,6 +138,8 @@ def agent_update_cmd(
             provider_profile=_to_clearable(provider_profile),
             budget=budget,
             meta=meta,
+            reflection_enabled=reflection_enabled,
+            reflection_max_retries=reflect_retries,
         )
     )
 
@@ -160,6 +197,8 @@ async def _agent_show(name: str) -> None:
             "prompt_bundle": entry.prompt_bundle or "-",
             "tool_profile": entry.tool_profile or "-",
             "provider_profile": entry.provider_profile or "-",
+            "reflection_enabled": str(entry.reflection_enabled).lower(),
+            "reflection_max_retries": str(entry.reflection_max_retries),
             "created_at": _fmt_dt(entry.created_at),
             "updated_at": _fmt_dt(entry.updated_at),
         }
@@ -181,6 +220,8 @@ async def _agent_add(
     provider_profile: str | None,
     budget: str,
     meta: str,
+    reflection_enabled: bool = False,
+    reflection_max_retries: int = 2,
 ) -> None:
     if not name.strip() or not role.strip():
         Renderer.die("--name and --role are required")
@@ -196,6 +237,8 @@ async def _agent_add(
             provider_profile=provider_profile,
             budget=parsed_budget,
             meta=parsed_meta,
+            reflection_enabled=reflection_enabled,
+            reflection_max_retries=reflection_max_retries,
         )
     Renderer.out(f"+ {entry.name} {entry.role}")
 
@@ -209,6 +252,8 @@ async def _agent_update(
     provider_profile: ClearableStr,
     budget: str,
     meta: str,
+    reflection_enabled: bool | None = None,
+    reflection_max_retries: int | None = None,
 ) -> None:
     parsed_budget = _parse_meta(budget) if budget.strip() else None
     parsed_meta = _parse_meta(meta) if meta.strip() else None
@@ -223,6 +268,8 @@ async def _agent_update(
                 provider_profile=provider_profile,
                 budget=parsed_budget,
                 meta=parsed_meta,
+                reflection_enabled=reflection_enabled,
+                reflection_max_retries=reflection_max_retries,
             )
         except ValueError as exc:
             Renderer.die(str(exc))

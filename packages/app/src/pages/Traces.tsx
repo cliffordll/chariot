@@ -277,11 +277,48 @@ function TurnDetailCard({ detail }: { detail: DetailState }) {
           </div>
         </div>
 
+        <ReflectionPanel meta={turn.meta} />
         <SectionList title={`Provider calls (${provider_calls.length})`} items={provider_calls.map(formatProviderCall)} />
         <SectionList title={`Tool calls (${tool_calls.length})`} items={tool_calls.map(formatToolCall)} />
         <SectionList title={`Checkpoints (${checkpoints.length})`} items={checkpoints.map((cp) => ({ key: cp.id, line: `${cp.kind} @ ${formatDateTime(cp.created_at)}`, details: cp.snapshot_id ? `snapshot=${cp.snapshot_id}` : null }))} />
       </div>
     </Panel>
+  );
+}
+
+function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
+  // B4 wave 2/3:_run_chat_once 写 reflection_iteration / reflection_trigger /
+  // reflection_previous_verdict / reflection_previous_reason 进 trace_turns.meta。
+  // 首轮 turn 没这些字段;反思触发的第 N 轮 turn 才有。
+  const iteration = typeof meta.reflection_iteration === "number" ? meta.reflection_iteration : null;
+  if (iteration === null) return null;
+  const trigger = typeof meta.reflection_trigger === "string" ? meta.reflection_trigger : "?";
+  const verdict = typeof meta.reflection_previous_verdict === "string" ? meta.reflection_previous_verdict : "?";
+  const reason = typeof meta.reflection_previous_reason === "string" ? meta.reflection_previous_reason : "";
+  return (
+    <div className="rounded-lg border border-border bg-muted/10 p-4">
+      <div className="mb-2 text-sm font-medium">Reflection (B4)</div>
+      <div className="space-y-1 text-xs">
+        <div>
+          <span className="font-mono text-muted-foreground">iteration:</span> {iteration}
+        </div>
+        <div>
+          <span className="font-mono text-muted-foreground">trigger:</span> {trigger}
+        </div>
+        <div>
+          <span className="font-mono text-muted-foreground">previous verdict:</span>{" "}
+          <Badge variant={verdict === "FAIL" ? "destructive" : verdict === "PASS" ? "default" : "secondary"}>
+            {verdict}
+          </Badge>
+        </div>
+        {reason && (
+          <div className="pt-1">
+            <span className="font-mono text-muted-foreground">reason:</span>
+            <pre className="mt-1 whitespace-pre-wrap break-all text-[11px]">{reason}</pre>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

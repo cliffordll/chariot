@@ -284,12 +284,35 @@ class AIAgent:
         B4 wave 2:`req.reflection_enabled=True` 且 critic 已装载时,委托给
         `_run_chat_reflective` 反思-重试编排;否则走单轮 `_run_chat_once`。
         """
+        # B4 wave 3:agent_profile.reflection_* 透传到 ChatRequest(profile 字段比
+        # request 字段优先,只在 req 显式 reflection_enabled=False 才不覆盖)。
+        req = await self._apply_profile_reflection(req)
         if req.reflection_enabled and self._critic_agent is not None and req.reflection_max_retries > 0:
             async for ev in self._run_chat_reflective(req):
                 yield ev
             return
         async for ev in self._run_chat_once(req):
             yield ev
+
+    async def _apply_profile_reflection(self, req: ChatRequest) -> ChatRequest:
+        """req.agent_profile.reflection_enabled=True → 覆盖 req 的 reflection_*。
+
+        逻辑:
+        - 解析 agent_profile;若 profile.reflection_enabled=True 且 req 还没显式开
+          → 透传 profile 的 reflection_enabled + reflection_max_retries
+        - profile 不存在 / 关 reflection → req 字段保持(可能调用方手动开了)
+        """
+        if req.agent_profile is None or req.reflection_enabled:
+            return req  # 已显式开,不覆盖
+        binding = await self._resolve_binding(req)
+        profile = binding.profile
+        if profile is None or not profile.reflection_enabled:
+            return req
+        return dataclasses.replace(
+            req,
+            reflection_enabled=True,
+            reflection_max_retries=profile.reflection_max_retries,
+        )
 
     async def _run_chat_once(
         self,
