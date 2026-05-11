@@ -27,13 +27,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.agent.config import (
-    ConfigError,
-    DuplicateProviderName,
-    ProviderEntry,
-    ProviderNotFound,
-)
+from chariot.agent.config import ConfigError, DuplicateProviderName, ProviderNotFound
 from chariot.database.models import ProviderRow
+from chariot.models.provider import ProviderEntry
 
 
 class ProviderRepo:

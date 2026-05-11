@@ -1,10 +1,10 @@
-"""Provider service for sidecar admin methods."""
+"""Provider API surface for sidecar admin methods."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.agent.config import ProviderEntry
+from chariot.models.provider import ProviderEntry
 from chariot.providers.prober import ProviderProber
 from chariot.providers.registry import ProviderRegistry
 from chariot.repos.provider_health_repo import ProviderHealthRepo
@@ -13,7 +13,7 @@ from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
-class ProviderService:
+class ProviderApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 

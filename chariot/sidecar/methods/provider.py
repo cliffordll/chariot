@@ -7,13 +7,13 @@ from typing import Any
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
 from chariot.sidecar.runtime import SidecarRuntime
-from chariot.sidecar.services import ProviderService
+from chariot.sidecar.services import ProviderApi
 
 
 class ProviderMethods(MethodBase):
     def __init__(self, runtime: SidecarRuntime) -> None:
         super().__init__(runtime)
-        self._service = ProviderService(runtime)
+        self._service = ProviderApi(runtime)
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
