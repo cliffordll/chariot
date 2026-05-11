@@ -14,6 +14,7 @@ from chariot.cli.commands import context as context_mod
 from chariot.cli.commands import conversation as conversation_mod
 from chariot.cli.commands import critic as critic_mod
 from chariot.cli.commands import evals as eval_mod
+from chariot.cli.commands import guardrail as guardrail_mod
 from chariot.cli.commands import job as job_mod
 from chariot.cli.commands import logs as logs_mod
 from chariot.cli.commands import memory as memory_mod
@@ -71,6 +72,7 @@ for mod in (
     trace_mod,
     auxiliary_mod,
     critic_mod,
+    guardrail_mod,
 ):
     mod.register(app)
 

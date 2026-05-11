@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.agent.reflection import CriticAgent
+    from chariot.guardrails import GuardrailEngine
 
 __all__ = ["register_methods"]
 
@@ -41,6 +42,9 @@ class SidecarAgent(Protocol):
 
     @property
     def critic_agent(self) -> CriticAgent | None: ...
+
+    @property
+    def guardrail_engine(self) -> GuardrailEngine | None: ...
 
 
 class MethodBase:
@@ -151,6 +155,7 @@ def register_methods(
     from chariot.sidecar.methods.conversation import ConversationMethods
     from chariot.sidecar.methods.critic import CriticMethods
     from chariot.sidecar.methods.eval import EvalMethods
+    from chariot.sidecar.methods.guardrail import GuardrailMethods
     from chariot.sidecar.methods.job import JobMethods
     from chariot.sidecar.methods.log import LogMethods
     from chariot.sidecar.methods.memory import MemoryMethods
@@ -203,6 +208,10 @@ def register_methods(
     critics = CriticMethods(runtime)
     server.method("critique_text")(critics.critique)
     server.method("get_critic_config")(critics.config)
+
+    guardrails = GuardrailMethods(runtime)
+    server.method("list_guardrails")(guardrails.list_)
+    server.method("try_guardrail")(guardrails.try_)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

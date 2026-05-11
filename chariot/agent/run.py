@@ -39,6 +39,8 @@ if TYPE_CHECKING:
     from chariot.agent.reflection import CriticAgent
     from chariot.context.compressor import ContextCompressor
     from chariot.context.references import ReferenceExpander
+    from chariot.guardrails import GuardrailEngine
+    from chariot.guardrails.approval import ApprovalPolicy
     from chariot.models.agent import AgentProfile
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
@@ -101,7 +103,10 @@ class AIAgent:
         context_compressor: ContextCompressor | None = None,
         reference_expander: ReferenceExpander | None = None,
         critic_agent: CriticAgent | None = None,
+        guardrail_engine: GuardrailEngine | None = None,
+        approval_policy: ApprovalPolicy | None = None,
     ) -> None:
+        from chariot.guardrails.approval import ApprovalPolicy as _ApprovalPolicy
         from chariot.trace import TraceWriter
 
         self._providers = dict(providers)
@@ -118,6 +123,11 @@ class AIAgent:
         # B4 wave 1:可选 critic 副 LLM;auxiliary_clients.name='critic' 行装上。
         # 装上不等于自动跑 reflection — wave 3 起 agent_profile.reflection_enabled 才触发。
         self._critic_agent = critic_agent
+        # B5 wave 1:可选 guardrail 引擎;bootstrap 默认装 13 内置规则。
+        # 不装 = 不拦截(向后兼容 / 测试用)。
+        self._guardrail_engine = guardrail_engine
+        # B5 wave 1:approval policy(REQUIRE_APPROVAL → 放/不放);wave 3 接 yolo。
+        self._approval_policy = approval_policy or _ApprovalPolicy()
 
     # ---- 装载 ----
 
@@ -209,6 +219,12 @@ class AIAgent:
 
         critic = CriticAgent.from_auxiliary_clients(aux_entries, providers)
 
+        # B5 wave 1:装 GuardrailEngine —— 13 内置规则,REQUIRE_APPROVAL 在 wave 3
+        # 接 capabilities.yolo / per-tool 白名单后才放行;现在保守拒。
+        from chariot.guardrails import GuardrailEngine
+
+        guardrails = GuardrailEngine.with_defaults()
+
         return cls(
             providers=providers,
             tools=tools,
@@ -216,6 +232,7 @@ class AIAgent:
             context_compressor=compressor,
             reference_expander=expander,
             critic_agent=critic,
+            guardrail_engine=guardrails,
         )
 
     @staticmethod
@@ -261,6 +278,11 @@ class AIAgent:
         """已装载的 CriticAgent(B4 wave 1)。未装载 = auxiliary_clients 里无
         `name='critic'` 行或 provider entry dangling;调用方需 None-check。"""
         return self._critic_agent
+
+    @property
+    def guardrail_engine(self) -> GuardrailEngine | None:
+        """已装载的 GuardrailEngine(B5 wave 1)。bootstrap 默认装 13 内置规则。"""
+        return self._guardrail_engine
 
     # ---- 主入口 ----
 
@@ -466,6 +488,8 @@ class AIAgent:
             repo=None,
             conversation_id=None,
             turn=turn,
+            guardrail_engine=self._guardrail_engine,
+            approval_policy=self._approval_policy,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -582,6 +606,8 @@ class AIAgent:
             repo=repo,
             conversation_id=conversation_id,
             turn=turn,
+            guardrail_engine=self._guardrail_engine,
+            approval_policy=self._approval_policy,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None

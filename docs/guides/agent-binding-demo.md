@@ -52,6 +52,12 @@ uv run chariot provider probe claude                             # 探活
 uv run chariot provider use claude                               # 设为默认
 ```
 
+### 验证
+
+```powershell
+uv run pytest tests/providers/ tests/sidecar/test_provider_methods_extra.py tests/cli/test_provider_parse.py tests/cli/test_provider_status_help.py -q
+```
+
 ---
 
 ## 2. 配 prompt bundle
@@ -64,6 +70,12 @@ uv run chariot prompt show research
 # 注意:add 命令会把新 bundle 设为 active;如不希望 research 是全局 active,
 # 跑完后再 activate 回 default:
 uv run chariot prompt activate default
+```
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_prompt_management.py tests/agent/test_prompt_system.py tests/cli/test_prompt_commands.py -q
 ```
 
 ---
@@ -80,6 +92,12 @@ uv run chariot toolset show fs_safe
 uv run chariot toolset list
 ```
 
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_toolset_foundations.py tests/sidecar/test_tool_methods.py tests/sidecar/test_toolset_methods.py tests/cli/test_tool_commands.py tests/cli/test_toolset_commands.py tests/agent/test_tool_execution.py -q
+```
+
 ---
 
 ## 4. 配 agent_profile 绑三件套
@@ -87,6 +105,12 @@ uv run chariot toolset list
 ```powershell
 uv run chariot agent add --name researcher --role research --provider-profile ollama-qwen --prompt-bundle research --tool-profile fs_safe
 uv run chariot agent show researcher
+```
+
+### 验证
+
+```powershell
+uv run pytest tests/agent/test_agent_profile_binding.py -q
 ```
 
 ---
@@ -128,6 +152,12 @@ uv run chariot chat --agent researcher
 REPL 内 agent binding 一次性绑定到本次 session,中途切 `/provider` 只覆盖本次会话的
 provider,不动 agent_profile 解析;退出后下次重新进入会重新读 agent。
 
+### 验证
+
+```powershell
+uv run pytest tests/agent/test_run.py tests/agent/test_loop.py tests/agent/test_chat_request.py tests/agent/test_chat_event.py tests/sidecar/test_chat_method.py tests/cli/test_repl_slash.py tests/cli/test_repl_tool_render.py -q
+```
+
 ---
 
 ## 6. 通过 task 跑(B1 trace 自动记录)
@@ -140,6 +170,12 @@ uv run chariot task start <task-id>
 
 跟 chat 直接调用等价,但走 task 路径会留下完整 trace。
 
+### 验证
+
+```powershell
+uv run pytest tests/sidecar/test_task_methods.py tests/cli/test_task_commands.py -q
+```
+
 ---
 
 ## 7. trace 反查(B1 phase 4 起)
@@ -149,6 +185,12 @@ uv run chariot trace list                                        # 列最近 tur
 uv run chariot trace list --agent-profile researcher             # (B1 当前用 task / conversation 过滤)
 uv run chariot trace list --task <task-id>
 uv run chariot trace view <turn-id>                              # 树形展开 provider + tool + checkpoint
+```
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_trace_foundations.py tests/platform/test_trace_writer.py tests/agent/test_trace_integration.py tests/sidecar/test_trace_methods.py tests/cli/test_trace_commands.py -q
 ```
 
 ---
@@ -197,6 +239,12 @@ uv run chariot eval --baseline <baseline-run-id>
 桌面 UI 同款链路:Evals 页 → 选 run → 选 baseline → 点 "Diff vs baseline" →
 点 record 行的 turn_id → 跳 Traces 页。
 
+### 验证
+
+```powershell
+uv run pytest tests/sidecar/test_eval_methods.py -q
+```
+
 ---
 
 ## 7.6 conversation 全文搜索(B3 wave 1)
@@ -239,6 +287,12 @@ FTS5 表达式速查(透传给 SQLite,不做语法糖):
 - `hello*`  前缀(`hello` / `hellos` / `hello_world` 都命中)
 - `hello NOT world`
 
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_conversation_search.py tests/sidecar/test_conversation_search_methods.py -q
+```
+
 ---
 
 ## 7.7 Context 自动压缩(B3 wave 2)
@@ -271,6 +325,12 @@ uv run chariot trace view <turn-id>
 压缩透明(主调用方不感知);只有 `summarizer` 这一条 entry 名字会被 AIAgent
 bootstrap 时认得 —— 其它名字的 aux client 可以共存,但当前 wave 不用;预留给
 B4 critic / B5 guardrails 等副任务路由。
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_auxiliary_repo.py tests/platform/test_auxiliary_client.py tests/platform/test_context_compressor.py tests/platform/test_context_compression_e2e.py tests/sidecar/test_auxiliary_methods.py -q
+```
 
 ---
 
@@ -308,6 +368,12 @@ agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silen
 - `@diff:` subprocess 限超时 + 输出截断
 - `@session:` 仅当前 user 可见会话(多租户上线后强制 owner 过滤)
 
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_reference_resolvers.py tests/platform/test_reference_expander.py tests/platform/test_reference_e2e.py -q
+```
+
 ---
 
 ## 7.9 桌面 Conversations 页(B3 wave 4)
@@ -326,6 +392,12 @@ agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silen
 
 注:hit snippet 用 `dangerouslySetInnerHTML` 渲染 `<mark>` 标签;FTS5 snippet
 不会引入用户可控 HTML(只标记关键词),不需要额外 sanitization。
+
+### 验证
+
+```powershell
+cd packages/app && bun run typecheck && bun run build
+```
 
 ---
 
@@ -350,6 +422,12 @@ uv run chariot critic try "写一个排序函数" --produced "def sort(x): retur
 
 VERDICT parser 兜底:critic 输出**不符合契约**时 → verdict=UNSURE,reason 记原始
 输出前 200 char(给人复盘 critic prompt 是不是要调)。
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_critic_agent.py tests/sidecar/test_critic_methods.py -q
+```
 
 ---
 
@@ -385,6 +463,12 @@ uv run chariot trace view <turn-id>
 **UNSURE 不消耗 retry**:critic 给不了明确信号(产出格式不符 / 输出为空)→
 直接停止,不浪费预算。
 
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_reflection_loop.py tests/platform/test_reflection_e2e.py -q
+```
+
 ---
 
 ## 7.12 agent_profile reflection 开关 + 桌面 UI(B4 wave 3)
@@ -411,6 +495,133 @@ uv run chariot agent update trace_demo --reflection-off
 
 **Traces 桌面详情页**:trace_turns.meta 含 `reflection_iteration` 字段时,在
 turn 详情下方插 "Reflection" panel,显示触发原因 + 上一轮 verdict + reason。
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_agent_profile_reflection.py -q
+cd packages/app && bun run typecheck && bun run build
+```
+
+---
+
+## 7.13 Guardrails(B5 wave 1)
+
+工具调用拦截层 —— 13 条内置规则盯 `shell_exec` / `write_file` / `http_get`
+等工具的参数,危险动作(`rm -rf` / `chmod 777` / `git push --force` / DB drop / ...)
+直接 DENY 或 REQUIRE_APPROVAL。
+
+```powershell
+# 列规则 + 当日配额剩余
+uv run chariot guardrail list
+
+# dry-run 评估某次调用会不会被拦
+uv run chariot guardrail try shell_exec --args '{"command":"rm -rf /tmp/x"}'
+# 期望:verdict=DENY  rule=shell_rm_rf
+
+uv run chariot guardrail try shell_exec --args '{"command":"chmod 777 /opt"}'
+# 期望:verdict=REQUIRE_APPROVAL  rule=shell_chmod_unsafe  quota_remaining=5
+```
+
+实际跑 chat 时,被拦的工具调用直接进 `tool_result(is_error=True)`,主 agent
+读到 'guardrail denied: ...' 文本 → 自己改 plan(配 B4 reflection 后还会触发
+critic 重试)。
+
+**配额机制**:per-rule `daily_quota`(UTC 0 点 reset);超限 → 自动降级为 DENY。
+DENY 类不带配额(永远拒)。
+
+### 验证
+
+```powershell
+uv run pytest tests/platform/test_guardrail_rules.py tests/platform/test_guardrail_engine.py tests/platform/test_guardrail_integration.py tests/sidecar/test_guardrail_methods.py -q
+```
+
+---
+
+## 7.14 Audit 自动 hook(B5 wave 2)
+
+五类自动 event 落 `audit_events` 表,全自动写,主流程无感:
+`tool_call_pre` / `tool_call_post` / `guardrail_verdict` / `memory_store` /
+`checkpoint_create` / `rollback`。
+
+```powershell
+# 看最近 50 条 audit 事件
+uv run chariot audit list
+
+# 按类型筛
+uv run chariot audit list --type tool_call_pre --limit 20
+uv run chariot audit list --type guardrail_verdict
+
+# 展开单条 event 的 payload
+uv run chariot audit show <event_id>
+
+# 实时 tail(每秒轮询)
+uv run chariot audit tail
+```
+
+跟 B1 trace 关系:trace_turns 是 "每个 turn 一行";audit_events 是 "每个细粒度
+事件一行"。两者用 turn_id 串通(payload.turn_id 当 join key)。
+
+---
+
+## 7.15 Checkpoint + Capability gating(B5 wave 3)
+
+`chariot checkpoint create <name>` 三件套打 snapshot:git stash + SQLite
+backup + `~/.chariot/{config.yaml,.env}` tarball。`rollback` 走反向。
+
+```powershell
+# 全量 snapshot
+uv run chariot checkpoint create before_refactor
+
+# 列所有 checkpoint
+uv run chariot checkpoint list
+
+# 看单条详情(git stash id / sqlite 文件 / tarball 路径)
+uv run chariot checkpoint show <id>
+
+# rollback 全量
+uv run chariot checkpoint rollback <id>
+
+# rollback 单组件(只回 DB,git / config 不动)
+uv run chariot checkpoint rollback <id> --db-only
+
+# 删除(rm 落盘 sqlite/tgz + DB 记录)
+uv run chariot checkpoint delete <id>
+```
+
+**Capability gating**(默认全关):
+
+```powershell
+# 看当前 capabilities
+uv run chariot capability list
+
+# 打开 self-mod(允许 agent 改 chariot/ 下文件;guardrail 改判 REQUIRE_APPROVAL)
+uv run chariot capability enable enable_self_mod
+
+# 关掉
+uv run chariot capability disable enable_self_mod
+```
+
+**`--yolo` 全局 flag**(per-process,不持久化):
+
+```powershell
+# 跳过所有 REQUIRE_APPROVAL,但不影响 DENY(危险动作仍拒)
+uv run chariot --yolo chat "..."
+```
+
+⚠️ `--yolo` **只用于沙箱机器 / CI**;生产 / 本地开发不建议。即使 `--yolo`,
+guardrail 仍写 audit,只是不阻断。
+
+---
+
+## 7.16 桌面 Security 页(B5 wave 4)
+
+新增 `/security` 路由,Tabs 三标签:
+
+- **Guardrails 标签**:规则列表 + 当日配额剩余 + 顶部 "Test rule" 小工具
+- **Audit 标签**:event timeline(降序)+ 按 type/status 筛 + 点行展开 payload
+- **Checkpoints 标签**:列表 + "Create checkpoint" 按钮 + 每行 Rollback / Delete
+  (带二次确认)
 
 ---
 
