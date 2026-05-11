@@ -136,6 +136,15 @@ class ChatRequest:
     dangling reference(profile name 不存在)走 fallback,不阻断 task。
     """
 
+    reflection_enabled: bool = False
+    """B4 wave 2:是否走 reflect-then-retry。需 AIAgent 装载了 critic
+    (`auxiliary_clients.name='critic'`)才生效;否则字段被忽略。
+    wave 3 起从 agent_profile.reflection_enabled 透传。
+    """
+
+    reflection_max_retries: int = 2
+    """B4 wave 2:reflection 最多 retry 几次;默认 2(初次跑 + 至多 2 次 retry)。"""
+
     # ---- 查询便利方法(逻辑收进类,不散成模块级 helper) ----
 
     def is_stateful(self) -> bool:

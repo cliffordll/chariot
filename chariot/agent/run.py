@@ -280,7 +280,25 @@ class AIAgent:
 
         Phase B1:整段包在 trace turn 内,begin_turn / finalize 由本方法收口;
         AgentLoop 内部的 provider call / tool call 也通过 turn handle 写入。
+
+        B4 wave 2:`req.reflection_enabled=True` 且 critic 已装载时,委托给
+        `_run_chat_reflective` 反思-重试编排;否则走单轮 `_run_chat_once`。
         """
+        if req.reflection_enabled and self._critic_agent is not None and req.reflection_max_retries > 0:
+            async for ev in self._run_chat_reflective(req):
+                yield ev
+            return
+        async for ev in self._run_chat_once(req):
+            yield ev
+
+    async def _run_chat_once(
+        self,
+        req: ChatRequest,
+        *,
+        turn_meta: dict[str, Any] | None = None,
+    ) -> AsyncIterator[ChatEvent]:
+        """单轮 chat(原 run_chat 主体)。`turn_meta` 写进 trace_turns.meta
+        (B4 wave 2 用,记 reflection iteration 入口信息)。"""
         from chariot.models.trace import TurnStatus
 
         binding = await self._resolve_binding(req)
@@ -303,6 +321,7 @@ class AIAgent:
             conversation_id=req.conversation_id,
             agent_profile=binding.profile.name if binding.profile is not None else None,
             model=provider.config.model,
+            meta=turn_meta,
         )
         last_usage: dict[str, Any] | None = None
         last_stop_reason: str | None = None
@@ -335,6 +354,42 @@ class AIAgent:
                 cache_read_tokens=(last_usage or {}).get("cache_read_input_tokens"),
                 cache_write_tokens=(last_usage or {}).get("cache_creation_input_tokens"),
             )
+
+    async def _run_chat_reflective(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        """B4 wave 2 反思-重试编排。
+
+        循环:跑 `_run_chat_once` → buffer accumulate → `ReflectionLoop.step`
+        → 若 retry,把 [REFLECTION] 注入 messages 跑下一轮;否则结束。
+
+        每一轮 retry 跑一个独立 trace turn;turn.meta 注入 reflection iteration
+        入口信息(前一轮的 verdict / trigger / reason),给 trace UI 显示用。
+        """
+        from chariot.agent.reflection import AssistantBuffer, ReflectionLoop
+
+        assert self._critic_agent is not None  # run_chat 已 gate
+        reflection = ReflectionLoop(
+            critic=self._critic_agent,
+            max_retries=req.reflection_max_retries,
+        )
+        current_req = req
+        entry_meta: dict[str, Any] | None = None
+
+        while True:
+            buffer = AssistantBuffer()
+            async for ev in self._run_chat_once(current_req, turn_meta=entry_meta):
+                buffer.accept(ev)
+                yield ev
+            step = await reflection.step(buffer=buffer, original_req=current_req)
+            if step is None or not step.should_retry:
+                return
+            entry_meta = {
+                "reflection_iteration": step.record.iteration,
+                "reflection_trigger": step.record.trigger,
+                "reflection_previous_verdict": step.record.verdict,
+                "reflection_previous_reason": step.record.reason,
+            }
+            assert step.revised_req is not None
+            current_req = step.revised_req
 
     async def _resolve_binding(self, req: ChatRequest) -> _AgentBinding:
         """req.agent_profile 非空 → 加载 AgentProfile + 解析 toolset 成员;

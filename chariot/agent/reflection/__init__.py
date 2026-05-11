@@ -12,8 +12,18 @@
 """
 
 from chariot.agent.reflection.critic import CriticAgent, CriticVerdict
+from chariot.agent.reflection.loop import (
+    AssistantBuffer,
+    ReflectionLoop,
+    ReflectionRecord,
+    ReflectionStep,
+)
 
 __all__ = [
+    "AssistantBuffer",
     "CriticAgent",
     "CriticVerdict",
+    "ReflectionLoop",
+    "ReflectionRecord",
+    "ReflectionStep",
 ]
