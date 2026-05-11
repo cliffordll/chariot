@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.conversation_repo import Conversation, ConversationRepo
+from chariot.repos.conversation_repo import Conversation, ConversationRepo, MessageSearchHit
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
 from chariot.sidecar.methods import MethodBase
 
@@ -59,6 +59,38 @@ class ConversationMethods(MethodBase):
         async with self._session() as session:
             await ConversationRepo(session).delete(conversation_id)
         return {"deleted": conversation_id}
+
+    async def search(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """`search_conversation`(B3 wave 1):FTS5 全文搜索 messages。
+
+        params:`{"query": str, "limit"?: int, "conversation_id"?: str}`
+        返:`{"hits": [{message_id, conversation_id, role, snippet, rank}, ...]}`
+        """
+        del ctx
+        query = self._require_str(params, "query")
+        limit_raw = params.get("limit")
+        limit = int(limit_raw) if isinstance(limit_raw, int) and not isinstance(limit_raw, bool) else 20
+        conversation_id = self._optional_str(params, "conversation_id")
+        async with self._session() as session:
+            hits = await ConversationRepo(session).search(query, limit=limit, conversation_id=conversation_id)
+        return {"hits": [self._serialize_hit(h) for h in hits]}
+
+    async def rebuild_fts(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """`rebuild_conversation_fts`(B3 wave 1):灾备清空 + 全量回填 messages_fts。"""
+        del params, ctx
+        async with self._session() as session:
+            rebuilt = await ConversationRepo(session).rebuild_fts()
+        return {"rebuilt": rebuilt}
+
+    @staticmethod
+    def _serialize_hit(hit: MessageSearchHit) -> dict[str, Any]:
+        return {
+            "message_id": hit.message_id,
+            "conversation_id": hit.conversation_id,
+            "role": hit.role,
+            "snippet": hit.snippet,
+            "rank": hit.rank,
+        }
 
     @staticmethod
     def _serialize(conversation: Conversation) -> dict[str, Any]:

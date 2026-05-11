@@ -172,6 +172,8 @@ def register_methods(
     server.method("get_convo")(conversations.get)
     server.method("rename_convo")(conversations.rename)
     server.method("delete_convo")(conversations.delete)
+    server.method("search_conversation")(conversations.search)
+    server.method("rebuild_conversation_fts")(conversations.rebuild_fts)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

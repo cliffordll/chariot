@@ -329,6 +329,8 @@ uv run chariot eval --no-save                # 不落盘
 - **Context 自动压缩** — `prompt_tokens > context_length × 0.7` 时 auxiliary LLM 把"最早 N turn"摘要成 `[context-summary]`,失败 fallback oldest-pair pruning
 - **@reference 解析** — `@file:` / `@diff[:ref]` / `@url:` / `@session:<id|prefix>` 在 user 消息里展开为 `<reference type=... key=...>...</reference>` 块
 
+**详细设计**:`docs/B3-memory-context-design.md`(wave 拆分 + 每 wave 的 schema / API / 接入点 / 安全限制)。
+
 ### B4 Reflection & Critic(补 phalanx §2.8.c)
 
 - **AuxiliaryClient** — 副 model 路径,模型 / temperature / budget 跟主独立

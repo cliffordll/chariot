@@ -164,6 +164,43 @@ async def _rename(conversation_id: str, title: str) -> None:
     Renderer.out(f"~ {conversation.id}: {conversation.title or '(无标题)'}")
 
 
+# ---------- search(B3 wave 1)----------
+
+
+@conversation_app.command("search", help="FTS5 全文搜索 messages(bm25 排序)")
+def search_cmd(
+    query: Annotated[str, typer.Argument(help="FTS5 MATCH 表达式;空格分隔多词≈AND")],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="返回上限")] = 20,
+    conversation: Annotated[str, typer.Option("--conversation", help="只搜某个 conversation 内")] = "",
+) -> None:
+    asyncio.run(_search(query, limit, conversation or None))
+
+
+async def _search(query: str, limit: int, conversation_id: str | None) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        hits = await ConversationRepo(session).search(query, limit=limit, conversation_id=conversation_id)
+    if not hits:
+        Renderer.out("(无命中)")
+        return
+    for h in hits:
+        Renderer.out(f"- msg_id={h.message_id}  conv={h.conversation_id}  role={h.role}")
+        Renderer.out(f"    rank={h.rank:.3f}  snippet={h.snippet}")
+
+
+# ---------- rebuild-fts(灾备)----------
+
+
+@conversation_app.command("rebuild-fts", help="灾备:清空 messages_fts 并从 messages 全量回填")
+def rebuild_fts_cmd() -> None:
+    asyncio.run(_rebuild_fts())
+
+
+async def _rebuild_fts() -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        n = await ConversationRepo(session).rebuild_fts()
+    Renderer.out(f"rebuilt FTS index for {n} message(s)")
+
+
 def register(app: typer.Typer) -> None:
     app.add_typer(conversation_app)
     app.add_typer(conversation_app, name="convo")

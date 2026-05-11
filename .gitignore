@@ -91,3 +91,7 @@ secrets.json
 *.log
 logs/
 tmp/
+
+# ─── 用户本地 scratch / 笔记 ─────────────────────────────
+# docs/others/ 是开发者个人草稿、todo、临时计划等;不进仓库
+docs/others/
