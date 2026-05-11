@@ -312,12 +312,20 @@ agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silen
 
 ## 7.9 桌面 Conversations 页(B3 wave 4)
 
-新增 `/conversations` 路由 + `/conversations/<id>` 详情:
+新增 `/conversations` 路由(`packages/app/src/pages/Conversations.tsx`):
 
-- 顶部全局搜索框 → 调 `search_conversation` RPC → hit 列表
-- 单 conversation 详情页内嵌搜索 → 高亮命中 message,点 hit 直接滚到该
-  message
-- 跟 Traces / Evals 页风格一致(Tabs 列表 + 右侧详情)
+- **列表区**:所有 conversation,按 `updated_at` 降序,显示 id / title /
+  last_model / 消息数;点 "Open" 折叠展开详情(底部出 messages 全文)
+- **顶部搜索框**:
+  - 详情未展开 → 全局搜索(调 `search_conversation` RPC,无 `conversation_id`)
+  - 详情已展开 → 搜索 scope 自动 narrow 到该 conversation(`conversation_id` 传入)
+- **hit 卡片**:展示 snippet(包含 FTS5 `<mark>` 高亮)+ bm25 rank;点击 hit
+  自动 open 对应 conversation 详情
+- **Rebuild FTS 按钮**:调 `rebuild_conversation_fts`,index 跟 messages 不同步
+  时灾备用(`chariot conversation rebuild-fts` 的桌面端等价)
+
+注:hit snippet 用 `dangerouslySetInnerHTML` 渲染 `<mark>` 标签;FTS5 snippet
+不会引入用户可控 HTML(只标记关键词),不需要额外 sanitization。
 
 ---
 
