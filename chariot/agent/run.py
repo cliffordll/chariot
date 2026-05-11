@@ -177,7 +177,7 @@ class AIAgent:
         场景)。
         """
         from chariot.agent.auxiliary_client import AuxiliaryClient
-        from chariot.agent.config import ChariotConfig, ToolConfig
+        from chariot.agent.config import Capabilities, ChariotConfig, ToolConfig
         from chariot.context.compressor import ContextCompressor
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
@@ -186,8 +186,6 @@ class AIAgent:
         from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
-
-        from chariot.agent.config import Capabilities
 
         sm = await init_db(db_path)
         async with sm() as session:

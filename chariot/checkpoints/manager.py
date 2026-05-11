@@ -22,6 +22,7 @@ best-effort 错误处理:每一段独立 try / except,失败的段在 `payload['
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import sqlite3
 import subprocess
@@ -382,10 +383,9 @@ class CheckpointManager:
                     continue
                 path = Path(path_str)
                 if path.exists():
-                    try:
+                    # best-effort 删:文件占用 / 权限不够 → 留给用户手工清,不阻 row 删
+                    with contextlib.suppress(OSError):
                         path.unlink()
-                    except OSError:  # pragma: no cover - best-effort 删
-                        pass
             await CheckpointRepo(session).delete(checkpoint_id)
         return True
 
