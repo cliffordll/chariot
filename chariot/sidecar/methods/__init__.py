@@ -180,6 +180,7 @@ def register_methods(
     from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
+    from chariot.sidecar.methods.rl import RLMethods
     from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.task import TaskMethods
     from chariot.sidecar.methods.tool import ToolMethods
@@ -256,6 +257,9 @@ def register_methods(
     server.method("disable_skill")(skills.disable)
     server.method("delete_skill")(skills.delete)
     server.method("curate_skills")(skills.curate)
+
+    rl_methods = RLMethods(runtime)
+    server.method("export_trajectory")(rl_methods.export_trajectory)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

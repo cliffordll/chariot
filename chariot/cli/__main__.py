@@ -22,6 +22,7 @@ from chariot.cli.commands import logs as logs_mod
 from chariot.cli.commands import memory as memory_mod
 from chariot.cli.commands import prompt as prompt_mod
 from chariot.cli.commands import provider as provider_mod
+from chariot.cli.commands import rl as rl_mod
 from chariot.cli.commands import skill as skill_mod
 from chariot.cli.commands import stats as stats_mod
 from chariot.cli.commands import status as status_mod
@@ -77,6 +78,7 @@ for mod in (
     memory_mod,
     prompt_mod,
     eval_mod,
+    rl_mod,
     skill_mod,
     checkpoint_mod,
     context_mod,

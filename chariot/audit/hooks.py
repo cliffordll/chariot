@@ -50,6 +50,7 @@ class AuditHookManager:
     EVENT_ROLLBACK: ClassVar[str] = "rollback"
     EVENT_SKILL_STORE: ClassVar[str] = "skill_store"  # B6 wave 1:create/update/delete/enable/disable
     EVENT_SKILL_ACTIVATE: ClassVar[str] = "skill_activate"  # B6 wave 4:每次 skill 注入 request
+    EVENT_RL_EXPORT: ClassVar[str] = "rl_export"  # B7 wave 1:trajectory 导出到 disk
 
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession] | None) -> None:
         self._sessionmaker = sessionmaker
@@ -218,6 +219,33 @@ class AuditHookManager:
                 "conversation_id": conversation_id,
                 "agent_profile": agent_profile,
                 "is_error": is_error,
+            },
+        )
+
+    async def record_rl_export(
+        self,
+        *,
+        conversation_id: str,
+        out_path: str,
+        row_count: int,
+        scrub_mode: str = "default",  # 'default' / 'raw'
+    ) -> None:
+        """B7 wave 1:每次 `chariot rl export` 落 disk 后写一条。
+
+        - `conversation_id`:导出的源 conversation
+        - `out_path`:落盘绝对路径
+        - `row_count`:JSONL 行数
+        - `scrub_mode`:`default` 走 SecretScrubber;`raw` 走 NullScrubber(本地训
+          练自用,慎用)
+        """
+        await self.record(
+            self.EVENT_RL_EXPORT,
+            status="ok",
+            payload={
+                "conversation_id": conversation_id,
+                "out_path": out_path,
+                "row_count": row_count,
+                "scrub_mode": scrub_mode,
             },
         )
 
