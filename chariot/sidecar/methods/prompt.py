@@ -41,7 +41,9 @@ class PromptMethods(MethodBase):
         bundle_name = self._require_str(params, "bundle_name")
         version = self._require_str(params, "version")
         async with self._session() as session:
-            entry = await self._service.get_version(session, bundle_name=bundle_name, version=version)
+            entry = await self._service.get_version(
+                session, bundle_name=bundle_name, version=version
+            )
         return {"version": entry}
 
     async def traces(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -85,7 +87,11 @@ class PromptMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         description = params.get("description", _MISSING)
-        if description is not _MISSING and description is not None and not isinstance(description, str):
+        if (
+            description is not _MISSING
+            and description is not None
+            and not isinstance(description, str)
+        ):
             raise TypeError("description must be a string or null")
         layers = self._optional_list_of_dicts(params, "layers")
         async with self._session() as session:

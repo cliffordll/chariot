@@ -6,9 +6,9 @@ import asyncio
 
 import typer
 
-from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
+from chariot.repos.checkpoint_repo import CheckpointRepo
 
 checkpoint_app = typer.Typer(
     name="checkpoint",

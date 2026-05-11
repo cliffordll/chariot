@@ -114,8 +114,8 @@ class AIAgent:
         from chariot.agent.config import ChariotConfig, ToolConfig
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
-        from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.prompt_repo import PromptRepo
+        from chariot.repos.provider_repo import ProviderRepo
         from chariot.repos.tool_repo import ToolRepo
         from chariot.tools.registry import ToolRegistry
 
@@ -285,8 +285,8 @@ class AIAgent:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
         from chariot.context.composer import build_snapshot as build_context_snapshot
-        from chariot.repos.conversation_repo import ConversationRepo
         from chariot.repos.context_repo import ContextRepo
+        from chariot.repos.conversation_repo import ConversationRepo
 
         repo = ConversationRepo(session)
         await repo.ensure_exists(conversation_id)

@@ -74,7 +74,9 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
+    Renderer.table(
+        ["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles"
+    )
 
 
 def _render_layers_table(layers: list[dict[str, Any]]) -> None:
@@ -157,7 +159,7 @@ def _parse_layer_mapping(raw: str) -> dict[str, Any]:
     if not parts:
         Renderer.die(
             "layer 不能为空。\n"
-            "模板: --layer '{\"name\":\"base_system\",\"source\":\"user\",\"content\":\"...\"}'\n"
+            '模板: --layer \'{"name":"base_system","source":"user","content":"..."}\'\n'
             "或: --layer 'name=base_system,source=user,content=...'",
         )
         raise SystemExit(1)
@@ -168,8 +170,7 @@ def _parse_layer_mapping(raw: str) -> dict[str, Any]:
             key, _, value = part.partition(":")
         else:
             Renderer.die(
-                "layer 必须是 JSON 对象，或 key=value / key:value 形式。\n"
-                f"收到: {raw!r}",
+                f"layer 必须是 JSON 对象，或 key=value / key:value 形式。\n收到: {raw!r}",
             )
             raise SystemExit(1)
         key = key.strip()
@@ -188,7 +189,9 @@ def _append_layer(target: list[dict[str, Any]], item: Any, *, raw: str) -> None:
 
 
 def _looks_like_json(raw: str) -> bool:
-    return (raw.startswith("{") and raw.endswith("}")) or (raw.startswith("[") and raw.endswith("]"))
+    return (raw.startswith("{") and raw.endswith("}")) or (
+        raw.startswith("[") and raw.endswith("]")
+    )
 
 
 def _layers_or_default(values: list[str] | None) -> list[dict[str, Any]]:
@@ -252,7 +255,11 @@ async def _versions(name: str | None) -> None:
         )
         for entry in versions
     ]
-    Renderer.table(["version", "active", "layers", "created_at", "updated_at"], rows, title=f"versions of {bundle.name}")
+    Renderer.table(
+        ["version", "active", "layers", "created_at", "updated_at"],
+        rows,
+        title=f"versions of {bundle.name}",
+    )
 
 
 @prompt_app.command("version", help="查看某个 bundle 的指定版本")

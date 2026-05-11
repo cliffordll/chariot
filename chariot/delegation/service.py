@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from chariot.tasks.service import TaskService
 from chariot.delegation.models import DelegationRequest, DelegationResult
+from chariot.services.task import TaskService
 
 
 class DelegationService:

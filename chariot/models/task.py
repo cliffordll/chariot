@@ -1,7 +1,8 @@
-"""Core object model for task management.
+"""Task domain model.
 
-This module intentionally defines stable Python-side contracts first. The SQL
-schema and repo implementation can follow without changing the service surface.
+Stable Python-side contracts for tasks and task runs. SQL schema and repo
+implementation may evolve under these contracts without changing the
+service surface.
 """
 
 from __future__ import annotations
@@ -58,19 +59,6 @@ class TaskRunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-@dataclass(frozen=True)
-class AgentProfile:
-    name: str
-    role: str
-    prompt_bundle: str | None = None
-    tool_profile: str | None = None
-    provider_profile: str | None = None
-    budget: dict[str, Any] = field(default_factory=dict)
-    meta: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=_utcnow)
-    updated_at: datetime = field(default_factory=_utcnow)
 
 
 @dataclass(frozen=True)
@@ -143,29 +131,3 @@ class TaskRun:
             error=error,
             finished_at=_utcnow(),
         )
-
-
-@dataclass(frozen=True)
-class ScheduledJob:
-    name: str
-    goal: str
-    cron: str
-    enabled: bool = True
-    agent_profile: str | None = None
-    last_run_status: str | None = None
-    last_run_at: datetime | None = None
-    next_run_at: datetime | None = None
-    meta: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=_utcnow)
-    updated_at: datetime = field(default_factory=_utcnow)
-
-
-@dataclass(frozen=True)
-class JobRunRecord:
-    id: str
-    job_name: str
-    task_id: str | None = None
-    status: str = "queued"
-    error: str | None = None
-    started_at: datetime = field(default_factory=_utcnow)
-    finished_at: datetime | None = None

@@ -60,9 +60,9 @@ class SidecarRuntime:
         if api_key is not None:
             options["api_key"] = api_key
 
-        digest = hashlib.sha256(
-            json.dumps(options, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
+        digest = hashlib.sha256(json.dumps(options, sort_keys=True).encode("utf-8")).hexdigest()[
+            :16
+        ]
         session_key = f"{self._OVERRIDE_SESSION_PREFIX}{provider_name}:{digest}"
         return await AgentRegistry.reserve(
             session_key,

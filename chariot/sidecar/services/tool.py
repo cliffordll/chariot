@@ -9,8 +9,8 @@ from chariot.agent.config import ToolEntry
 from chariot.agent.exceptions import ConfigError
 from chariot.repos.tool_repo import ToolRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
-from chariot.tools.registry import ToolRegistry
 from chariot.sidecar.runtime import SidecarRuntime
+from chariot.tools.registry import ToolRegistry
 
 
 class ToolService:
@@ -45,9 +45,7 @@ class ToolService:
         latency_ms = int((time.perf_counter() - start) * 1000)
         return {"ok": True, "latency_ms": latency_ms, "error": None}
 
-    async def set_enabled(
-        self, session: Any, *, name: str, enabled: bool
-    ) -> dict[str, Any]:
+    async def set_enabled(self, session: Any, *, name: str, enabled: bool) -> dict[str, Any]:
         entry = await ToolRepo(session).update(name, enabled=enabled)
         await self._runtime.reload()
         return self.serialize(entry)

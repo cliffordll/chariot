@@ -28,7 +28,12 @@ def __getattr__(name: str) -> Any:
             "MemoryCaptureService": MemoryCaptureService,
         }[name]
     if name in {"MemoryEntry", "MemoryEventEntry", "MemoryLinkEntry", "MemoryRepo"}:
-        from chariot.repos.memory_repo import MemoryEntry, MemoryEventEntry, MemoryLinkEntry, MemoryRepo
+        from chariot.repos.memory_repo import (
+            MemoryEntry,
+            MemoryEventEntry,
+            MemoryLinkEntry,
+            MemoryRepo,
+        )
 
         return {
             "MemoryEntry": MemoryEntry,

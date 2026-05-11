@@ -78,7 +78,9 @@ def add_cmd(
     kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "preference",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
-    conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],
+    conversation: Annotated[
+        list[str], typer.Option("--conversation", help="关联 conversation id")
+    ] = [],
     provider: Annotated[list[str], typer.Option("--provider", help="关联 provider name")] = [],
     tag: Annotated[list[str], typer.Option("--tag", help="关联 tag")] = [],
     pinned: Annotated[bool, typer.Option("--pinned", help="是否置顶")] = False,
@@ -104,7 +106,9 @@ def update_cmd(
     kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
-    conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],
+    conversation: Annotated[
+        list[str], typer.Option("--conversation", help="关联 conversation id")
+    ] = [],
     provider: Annotated[list[str], typer.Option("--provider", help="关联 provider name")] = [],
     tag: Annotated[list[str], typer.Option("--tag", help="关联 tag")] = [],
     pinned: Annotated[str, typer.Option("--pinned", help="yes/no/empty")] = "",
@@ -162,14 +166,14 @@ def restore_cmd(
 
 @memory_app.command("events", help="列出 memory events")
 def events_cmd(
-    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory") ] = "",
+    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory")] = "",
 ) -> None:
     asyncio.run(_events(memory_id or None))
 
 
 @memory_app.command("links", help="列出 memory links")
 def links_cmd(
-    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory") ] = "",
+    memory_id: Annotated[str, typer.Option("--memory-id", help="仅看某条 memory")] = "",
 ) -> None:
     asyncio.run(_links(memory_id or None))
 
@@ -352,10 +356,7 @@ async def _events(memory_id: str | None) -> None:
     if not entries:
         Renderer.out("(没有 memory events)")
         return
-    rows = [
-        (event.memory_id, event.event_type, _fmt_dt(event.created_at))
-        for event in entries
-    ]
+    rows = [(event.memory_id, event.event_type, _fmt_dt(event.created_at)) for event in entries]
     Renderer.table(["memory", "event", "created_at"], rows, title="memory events")
 
 

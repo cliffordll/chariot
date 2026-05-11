@@ -39,7 +39,9 @@ class ConversationMethods(MethodBase):
             repo = ConversationRepo(session)
             conversation = await repo.get(conversation_id)
             if conversation is None:
-                raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"conversation {conversation_id!r} not found")
+                raise RpcError(
+                    JsonRpcServer.ERR_NOT_FOUND, f"conversation {conversation_id!r} not found"
+                )
             messages = await repo.load_messages_as_anthropic(conversation_id)
         return {"conversation": self._serialize(conversation), "messages": messages}
 

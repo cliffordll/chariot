@@ -10,11 +10,10 @@ from typing import Any, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chariot.agent.config import ConfigError
 from chariot.agent.chat_request import ChatRequest
+from chariot.agent.config import ConfigError
 from chariot.database.models import PromptBundleRow, PromptTraceRow, PromptVersionRow
 from chariot.prompt.composer import build_snapshot
-
 
 DEFAULT_BUNDLE_NAME = "default"
 DEFAULT_VERSION = "v1"

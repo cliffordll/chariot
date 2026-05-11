@@ -9,8 +9,8 @@ from typer.testing import CliRunner
 
 from chariot.cli.__main__ import app
 from chariot.repos.task_repo import TaskRepo
-from chariot.tasks.models import TaskCreate, TaskRunCreate
-from chariot.tasks.service import TaskService
+from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.services.task import TaskService
 
 runner = CliRunner()
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")

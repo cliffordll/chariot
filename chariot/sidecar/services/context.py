@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.repos.context_repo import ContextRepo
+from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -31,7 +31,9 @@ class ContextService:
     async def get_snapshot(self, session: Any, *, snapshot_id: str) -> dict[str, Any]:
         entry = await ContextRepo(session).get_snapshot(snapshot_id)
         if entry is None:
-            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"context snapshot {snapshot_id!r} not found")
+            raise RpcError(
+                JsonRpcServer.ERR_NOT_FOUND, f"context snapshot {snapshot_id!r} not found"
+            )
         return self._snapshot_to_dict(entry)
 
     async def list_traces(

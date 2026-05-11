@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.repos.memory_repo import MemoryRepo
+from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -94,7 +94,9 @@ class MemoryService:
         await MemoryRepo(session).delete(memory_id)
         return {"deleted": memory_id}
 
-    async def pin_entry(self, session: Any, *, memory_id: str, pinned: bool = True) -> dict[str, Any]:
+    async def pin_entry(
+        self, session: Any, *, memory_id: str, pinned: bool = True
+    ) -> dict[str, Any]:
         entry = await MemoryRepo(session).pin(memory_id, pinned=pinned)
         return self._entry_to_dict(entry)
 
@@ -108,7 +110,9 @@ class MemoryService:
         entry = await MemoryRepo(session).archive(memory_id, archived=archived)
         return self._entry_to_dict(entry)
 
-    async def list_events(self, session: Any, *, memory_id: str | None = None) -> list[dict[str, Any]]:
+    async def list_events(
+        self, session: Any, *, memory_id: str | None = None
+    ) -> list[dict[str, Any]]:
         entries = await MemoryRepo(session).list_events(memory_id=memory_id)
         return [self._event_to_dict(entry) for entry in entries]
 

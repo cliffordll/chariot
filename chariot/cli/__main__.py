@@ -6,11 +6,13 @@ from typing import Annotated
 
 import typer
 
+from chariot.cli.commands import agent as agent_mod
 from chariot.cli.commands import chat as chat_mod
 from chariot.cli.commands import checkpoint as checkpoint_mod
 from chariot.cli.commands import context as context_mod
 from chariot.cli.commands import conversation as conversation_mod
 from chariot.cli.commands import evals as eval_mod
+from chariot.cli.commands import job as job_mod
 from chariot.cli.commands import logs as logs_mod
 from chariot.cli.commands import memory as memory_mod
 from chariot.cli.commands import prompt as prompt_mod
@@ -51,7 +53,9 @@ for mod in (
     chat_mod,
     provider_mod,
     tool_mod,
+    agent_mod,
     task_mod,
+    job_mod,
     conversation_mod,
     memory_mod,
     prompt_mod,

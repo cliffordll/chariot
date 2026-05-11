@@ -17,8 +17,8 @@ from chariot.database.session import dispose_db
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
-from chariot.tasks.models import TaskCreate, TaskRunCreate
-from chariot.tasks.service import TaskService
+from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.services.task import TaskService
 
 
 def _make_reader(data: bytes) -> asyncio.StreamReader:

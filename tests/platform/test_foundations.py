@@ -16,8 +16,8 @@ from chariot.repos.memory_repo import MemoryRepo
 from chariot.repos.prompt_repo import PromptRepo
 from chariot.repos.skill_repo import SkillRepo
 from chariot.repos.task_repo import TaskRepo
-from chariot.tasks.models import TaskCreate, TaskRunCreate
-from chariot.tasks.service import TaskService
+from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.services.task import TaskService
 
 
 @pytest_asyncio.fixture
