@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.agent.reflection import CriticAgent
+    from chariot.audit import AuditHookManager
     from chariot.guardrails import GuardrailEngine
 
 __all__ = ["register_methods"]
@@ -45,6 +46,9 @@ class SidecarAgent(Protocol):
 
     @property
     def guardrail_engine(self) -> GuardrailEngine | None: ...
+
+    @property
+    def audit_hooks(self) -> AuditHookManager: ...
 
 
 class MethodBase:
@@ -149,6 +153,7 @@ def register_methods(
     runtime = SidecarRuntime(agent, db_path=db_path, session_key=session_key)
 
     from chariot.sidecar.methods.agent import AgentMethods
+    from chariot.sidecar.methods.audit import AuditMethods
     from chariot.sidecar.methods.auxiliary import AuxiliaryMethods
     from chariot.sidecar.methods.chat import ChatMethod
     from chariot.sidecar.methods.context import ContextMethods
@@ -212,6 +217,10 @@ def register_methods(
     guardrails = GuardrailMethods(runtime)
     server.method("list_guardrails")(guardrails.list_)
     server.method("try_guardrail")(guardrails.try_)
+
+    audits = AuditMethods(runtime)
+    server.method("list_audit_events")(audits.list_)
+    server.method("get_audit_event")(audits.show)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

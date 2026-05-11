@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.agent.reflection import CriticAgent
+    from chariot.audit import AuditHookManager
     from chariot.context.compressor import ContextCompressor
     from chariot.context.references import ReferenceExpander
     from chariot.guardrails import GuardrailEngine
@@ -105,7 +106,9 @@ class AIAgent:
         critic_agent: CriticAgent | None = None,
         guardrail_engine: GuardrailEngine | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        audit_hooks: AuditHookManager | None = None,
     ) -> None:
+        from chariot.audit import AuditHookManager as _AuditHookManager
         from chariot.guardrails.approval import ApprovalPolicy as _ApprovalPolicy
         from chariot.trace import TraceWriter
 
@@ -128,6 +131,9 @@ class AIAgent:
         self._guardrail_engine = guardrail_engine
         # B5 wave 1:approval policy(REQUIRE_APPROVAL → 放/不放);wave 3 接 yolo。
         self._approval_policy = approval_policy or _ApprovalPolicy()
+        # B5 wave 2:audit hook manager(best-effort 写 audit_events);默认绑
+        # sessionmaker;无 sm 时退化 no-op。
+        self._audit_hooks = audit_hooks or _AuditHookManager(sessionmaker)
 
     # ---- 装载 ----
 
@@ -283,6 +289,12 @@ class AIAgent:
     def guardrail_engine(self) -> GuardrailEngine | None:
         """已装载的 GuardrailEngine(B5 wave 1)。bootstrap 默认装 13 内置规则。"""
         return self._guardrail_engine
+
+    @property
+    def audit_hooks(self) -> AuditHookManager:
+        """已装载的 AuditHookManager(B5 wave 2)。bootstrap 默认绑 sessionmaker;
+        测试路径若没传 sessionmaker 也没传 audit_hooks → disabled no-op manager。"""
+        return self._audit_hooks
 
     # ---- 主入口 ----
 
@@ -490,6 +502,7 @@ class AIAgent:
             turn=turn,
             guardrail_engine=self._guardrail_engine,
             approval_policy=self._approval_policy,
+            audit_hooks=self._audit_hooks,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -608,6 +621,7 @@ class AIAgent:
             turn=turn,
             guardrail_engine=self._guardrail_engine,
             approval_policy=self._approval_policy,
+            audit_hooks=self._audit_hooks,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -856,7 +870,7 @@ class AIAgent:
     ) -> None:
         from chariot.repos.memory_repo import MemoryRepo
 
-        capture = MemoryCaptureService(MemoryRepo(session))
+        capture = MemoryCaptureService(MemoryRepo(session), audit_hooks=self._audit_hooks)
         await capture.capture_turn(
             req=req,
             provider_name=provider.config.name,
@@ -878,7 +892,7 @@ class AIAgent:
     ) -> None:
         from chariot.repos.memory_repo import MemoryRepo
 
-        capture = MemoryCaptureService(MemoryRepo(session))
+        capture = MemoryCaptureService(MemoryRepo(session), audit_hooks=self._audit_hooks)
         if error_event.error_type is None or error_event.error_message is None:
             return
         await capture.capture_error(

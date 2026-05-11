@@ -540,27 +540,43 @@ uv run pytest tests/platform/test_guardrail_rules.py tests/platform/test_guardra
 
 ## 7.14 Audit 自动 hook(B5 wave 2)
 
-五类自动 event 落 `audit_events` 表,全自动写,主流程无感:
-`tool_call_pre` / `tool_call_post` / `guardrail_verdict` / `memory_store` /
-`checkpoint_create` / `rollback`。
+六类自动 event 落 `audit_events` 表,主流程无感(`AuditHookManager` 在
+ToolExecutionService / MemoryRepo 包装层 / wave 3 CheckpointManager 上自动
+触发):`tool_call_pre` / `tool_call_post` / `guardrail_verdict` /
+`memory_store` / `checkpoint_create` / `rollback`。
+
+写入是 best-effort —— 失败只 warn log,不阻断 tool 调用 / memory 操作。
+sessionmaker=None 时整个 manager 退化为 no-op(测试路径不污染主路径)。
 
 ```powershell
-# 看最近 50 条 audit 事件
+# 列最近 50 条 audit 事件
 uv run chariot audit list
 
-# 按类型筛
-uv run chariot audit list --type tool_call_pre --limit 20
-uv run chariot audit list --type guardrail_verdict
+# 限制条数
+uv run chariot audit list --limit 20
 
-# 展开单条 event 的 payload
+# 展开单条 event 的 payload(JSON)
 uv run chariot audit show <event_id>
 
-# 实时 tail(每秒轮询)
-uv run chariot audit tail
+# tail = list 别名,语义更明确
+uv run chariot audit tail --limit 10
 ```
 
+桌面/sidecar 路径用 `list_audit_events` / `get_audit_event` JSON-RPC。
+
 跟 B1 trace 关系:trace_turns 是 "每个 turn 一行";audit_events 是 "每个细粒度
-事件一行"。两者用 turn_id 串通(payload.turn_id 当 join key)。
+事件一行"。两者用 tool_use_id 串通(`tool_call_pre/post`/`guardrail_verdict`
+都带 tool_use_id 字段)。
+
+**验证**:
+
+```powershell
+# 单元 + 集成测试(AuditHookManager 6 类事件 + ToolExecutionService 集成)
+uv run pytest tests/platform/test_audit_hooks.py -q
+
+# sidecar list_audit_events / get_audit_event RPC + memory_store hook 落库
+uv run pytest tests/sidecar/test_audit_methods.py -q
+```
 
 ---
 

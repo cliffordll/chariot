@@ -66,6 +66,12 @@ class MemoryMethods(MethodBase):
                 archived=archived,
                 links=links,
             )
+        await self.agent.audit_hooks.record_memory_store(
+            memory_id=entry["id"],
+            action="create",
+            kind=entry.get("kind"),
+            pinned=entry.get("pinned"),
+        )
         return {"memory": entry}
 
     async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -92,6 +98,12 @@ class MemoryMethods(MethodBase):
                 archived=archived,
                 links=links,
             )
+        await self.agent.audit_hooks.record_memory_store(
+            memory_id=entry["id"],
+            action="update",
+            kind=entry.get("kind"),
+            pinned=entry.get("pinned"),
+        )
         return {"memory": entry}
 
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -99,6 +111,10 @@ class MemoryMethods(MethodBase):
         memory_id = self._require_str(params, "memory_id")
         async with self._session() as session:
             result = await self._service.delete_entry(session, memory_id=memory_id)
+        await self.agent.audit_hooks.record_memory_store(
+            memory_id=memory_id,
+            action="delete",
+        )
         return result
 
     async def pin(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -107,6 +123,12 @@ class MemoryMethods(MethodBase):
         pinned = bool(params.get("pinned", True))
         async with self._session() as session:
             entry = await self._service.pin_entry(session, memory_id=memory_id, pinned=pinned)
+        await self.agent.audit_hooks.record_memory_store(
+            memory_id=entry["id"],
+            action="pin" if pinned else "unpin",
+            kind=entry.get("kind"),
+            pinned=entry.get("pinned"),
+        )
         return {"memory": entry}
 
     async def archive(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -115,6 +137,12 @@ class MemoryMethods(MethodBase):
         archived = bool(params.get("archived", True))
         async with self._session() as session:
             entry = await self._service.archive_entry(session, memory_id=memory_id, archived=archived)
+        await self.agent.audit_hooks.record_memory_store(
+            memory_id=entry["id"],
+            action="archive" if archived else "restore",
+            kind=entry.get("kind"),
+            pinned=entry.get("pinned"),
+        )
         return {"memory": entry}
 
     async def events(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
