@@ -212,6 +212,8 @@ class AIAgent:
                     memory_entries,
                     memory_policy,
                 )
+        else:
+            req = self._normalize_request(req, provider)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,

@@ -15,8 +15,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
-
 import pytest
 
 from chariot.agent.chat_event import ChatEvent
@@ -200,19 +198,21 @@ class TestRequestNormalization:
 
 
 class TestStatelessPath:
-    async def test_no_session_opened(self) -> None:
-        """无 conversation_id → AIAgent.run_chat 不调 sessionmaker。"""
+    async def test_no_sessionmaker_still_runs(self) -> None:
+        """无 conversation_id + sessionmaker=None → stateless 路径仍能正常跑通。
+
+        早期设计是"stateless = 不调 sessionmaker",后来引入 prompt bundle /
+        memory / trace 后 stateless 在 sessionmaker 存在时也会用它(只是不进
+        conversation lock)。这条测试只验证 sessionmaker=None 时核心流不挂。
+        """
         provider = _CapturingProvider("p")
-        sm_mock = AsyncMock()  # 任何调用都失败/记录
-        agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=sm_mock)
+        agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=None)
 
         req = ChatRequest(
             provider_name="p",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
-        # sessionmaker 没被调
-        assert sm_mock.call_count == 0
         # 流正常收尾(stream_done 或 message_stop 末尾)
         kinds = [ev.kind for ev in events]
         assert "stream_done" in kinds or "message_stop" in kinds
