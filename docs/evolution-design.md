@@ -384,11 +384,23 @@ B6 skill propose 是这套安全网的第一个考验:`propose_skill` 走 guardr
 - **R4.** B7 RL 训练接 Atropos / Tinker 是独立工程(对照 phalanx `tinker-atropos/` 子项目),不是 chariot 主仓库范围
 - **R5.** phalanx 的 `@reference` 在 chariot 当前 ChatRequest 形态下需要 user message 预处理钩子(B3 会触及 `ChatRequest.messages` 解析),设计 B3 时再细化
 
-## 10. 待你拍板的决策点
+## 10. 已拍板的决策(2026-05-11)
 
-1. **B1 trace 数据粒度** — 摘要 vs 完整 request/response payload(后者磁盘 ~10x,reflection 用得着但隐私 / 大小代价大)
-2. **B2 verifier 类型** — 起步 3 种(exact_match / tool_called / file_state)够不够;是否在 B2 wave 1 就加 `output_schema`(检查 JSON 输出符合 schema)和 `assert_python`(执行片段断言)
-3. **是否独立 milestone 分支** — 全在 `feat/0.8.0-evolution` 还是每个 minor 拆分支(7 节方案 A/B)
-4. **Skill 存储位置** — 沿用 `skills` 表 + DB 内的 manifest JSON,还是改成 phalanx 风格 `~/.chariot/skills/<name>/manifest.yaml`(用户可独立 git 版本管理 + 编辑)
-5. **Reflection 是否独立模块** — `chariot/reflection/` 独立,还是合并进 `chariot/agent/`(reflection 是 agent 行为的一部分)
-6. **`audit_events` 表是否扩** — phalanx 用 `event_log`(schema_version 13);chariot 已有 `audit_events`,字段够不够要单独检
+| # | 决策 | 选择 | 影响 |
+|---|---|---|---|
+| 1 | **B1 trace 数据粒度** | 选简单的:**只存摘要**(`request_summary` / `response_summary` JSON,`result_summary` 前 N 字)。不存完整 request / response payload | 磁盘可控;完整 wire payload 仍可通过 `logs` 表反查(`trace_provider_calls.log_id` 关联) |
+| 2 | **B2 verifier 类型** | 起步 4 种:`exact_match` / `tool_called` / `file_state` / **`output_schema`**(检查 final_response 解析后符合 JSON Schema) | 多覆盖一类"结构化输出"任务 |
+| 3 | **分支策略** | **全在 `feat/0.8.0-evolution`**,不拆每个 minor 分支 | 单一长 commit 链;落地完按 milestone 打 tag 归档 |
+| 4 | **Skill 存储位置** | **phalanx 风格** `~/.chariot/skills/<name>/manifest.yaml` + 资源文件 — 用户可独立 git / 编辑 / 分发 | `skills` 表降级为 "活动状态 + 用量统计"索引层;manifest 是 source of truth |
+| 5 | **Reflection 模块** | **参考 phalanx → 合并进 `chariot/agent/`**:`agent/auxiliary_client.py`(副 model 客户端)+ 走现有 `delegate` 派生 critic / planner role | 不开新顶层目录,reflection 是 agent 行为 |
+| 6 | **audit_events 扩字段** | **参考 phalanx `event_log`** schema:加 `session_id` / `agent_id` / `target` / `content_hash` / 索引 `(event_type, created_at)` / `(session_id, created_at)`;原 `audit_events` 表名保留 | 跟 phalanx 兼容,后续 trajectory 导出 / RL reward 信号都从这一张表读 |
+
+## 11. 落地启动方式
+
+按 6 个决策定稿后:
+
+1. 下一个动作 = 写 **`docs/B1-trace-design.md` 子设计文档**(参考 `tool-profile-design.md` 风格,~150 行,聚焦数据模型 + TraceWriter 接口 + 6 commit 拆分细化)
+2. 然后是 **`docs/B2-eval-design.md`** —— 4 wave + 10 种子 task + 4 verifier(含 output_schema)详细
+3. B1 / B2 子设计 review 完再开第一个 commit
+
+或者跳过子设计直接动手 B1 phase 1(DB migration + domain),按一个 commit 一步推进。等明确 "开干 / 动手 / 执行 B1 第一步" 信号。
