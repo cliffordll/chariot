@@ -6,13 +6,14 @@ from typing import Any
 
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
-from chariot.sidecar.services import MemoryService
+from chariot.sidecar.runtime import SidecarRuntime
+from chariot.sidecar.services import MemoryApi
 
 
 class MemoryMethods(MethodBase):
-    def __init__(self, runtime) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, runtime: SidecarRuntime) -> None:
         super().__init__(runtime)
-        self._service = MemoryService(runtime)
+        self._service = MemoryApi(runtime)
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx

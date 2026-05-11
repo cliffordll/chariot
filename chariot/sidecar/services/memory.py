@@ -1,15 +1,16 @@
-"""Memory service for sidecar memory methods."""
+"""Memory API surface for sidecar admin methods."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.memory_repo import MemoryEntry, MemoryEventEntry, MemoryLinkEntry, MemoryRepo
+from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
+from chariot.repos.memory_repo import MemoryRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 
-class MemoryService:
+class MemoryApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 

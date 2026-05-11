@@ -8,7 +8,8 @@ from typing import Any
 
 from chariot.agent.chat_request import ChatRequest
 from chariot.memory.policy import MemoryPolicy
-from chariot.repos.memory_repo import MemoryEntry, MemoryRepo
+from chariot.models.memory import MemoryEntry
+from chariot.repos.memory_repo import MemoryRepo
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
 _PREFERENCE_HINTS = (
