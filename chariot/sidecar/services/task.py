@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from chariot.delegation.models import DelegatedTaskSpec, DelegationRequest
-from chariot.delegation.service import DelegationService
-from chariot.models.task import Task, TaskCreate, TaskKind, TaskRun, TaskRunCreate
+from chariot.models.task import (
+    DelegatedTaskSpec,
+    DelegationRequest,
+    Task,
+    TaskCreate,
+    TaskKind,
+    TaskRun,
+    TaskRunCreate,
+)
 from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.task import TaskService
@@ -160,7 +166,6 @@ class TaskApi:
     ) -> dict[str, Any]:
         repo = TaskRepo(session)
         task_service = TaskService(repo)
-        delegation = DelegationService(task_service)
         specs = [
             DelegatedTaskSpec(
                 goal=str(item["goal"]),
@@ -171,7 +176,7 @@ class TaskApi:
             for item in tasks
         ]
         try:
-            result = await delegation.delegate(
+            result = await task_service.delegate(
                 DelegationRequest(
                     parent_task_id=parent_task_id,
                     tasks=tuple(specs),

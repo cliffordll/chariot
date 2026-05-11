@@ -10,9 +10,13 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.delegation.models import DelegatedTaskSpec, DelegationRequest
-from chariot.delegation.service import DelegationService
-from chariot.models.task import TaskCreate, TaskKind, TaskRunCreate
+from chariot.models.task import (
+    DelegatedTaskSpec,
+    DelegationRequest,
+    TaskCreate,
+    TaskKind,
+    TaskRunCreate,
+)
 from chariot.repos.task_repo import TaskRepo
 from chariot.services.task import TaskService
 
@@ -456,7 +460,7 @@ async def _task_delegate(
         Renderer.die("at least one non-empty --goal is required")
         return
     async with installed_runtime() as agent, agent.session_maker() as session:
-        service = DelegationService(TaskService(TaskRepo(session)))
+        service = TaskService(TaskRepo(session))
         try:
             result = await service.delegate(
                 DelegationRequest(

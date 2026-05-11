@@ -131,3 +131,29 @@ class TaskRun:
             error=error,
             finished_at=_utcnow(),
         )
+
+
+# Delegation: 用 TaskService.delegate() 把"创建一组子 task 并保留父子关系"做成一次显式动作。
+# 不引入新执行能力 —— 实际创建子 task 仍走 TaskService.create_child_task。
+@dataclass(frozen=True)
+class DelegatedTaskSpec:
+    goal: str
+    agent_profile: str | None = None
+    owner: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DelegationRequest:
+    parent_task_id: str
+    tasks: tuple[DelegatedTaskSpec, ...]
+    reason: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DelegationResult:
+    parent_task_id: str
+    child_task_ids: tuple[str, ...]
+    requested: int
+    created: int

@@ -9,6 +9,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from chariot.models.task import (
+    DelegationRequest,
+    DelegationResult,
     Task,
     TaskCreate,
     TaskKind,
@@ -65,6 +67,29 @@ class TaskService:
                 owner=owner or parent.owner,
                 meta=dict(meta or {}),
             )
+        )
+
+    async def delegate(self, request: DelegationRequest) -> DelegationResult:
+        """Create a batch of child tasks under one parent and preserve lineage."""
+        child_ids: list[str] = []
+        for spec in request.tasks:
+            child = await self.create_child_task(
+                parent_task_id=request.parent_task_id,
+                goal=spec.goal,
+                agent_profile=spec.agent_profile,
+                owner=spec.owner,
+                meta={
+                    **request.meta,
+                    **spec.meta,
+                    "delegation_reason": request.reason,
+                },
+            )
+            child_ids.append(child.id)
+        return DelegationResult(
+            parent_task_id=request.parent_task_id,
+            child_task_ids=tuple(child_ids),
+            requested=len(request.tasks),
+            created=len(child_ids),
         )
 
     async def start_task_run(self, spec: TaskRunCreate) -> TaskRun:
