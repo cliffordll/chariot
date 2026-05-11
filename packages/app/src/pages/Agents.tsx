@@ -235,6 +235,7 @@ function AgentsListCard({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Prompt bundle</TableHead>
               <TableHead>Tool profile</TableHead>
               <TableHead>Provider profile</TableHead>
             </TableRow>
@@ -249,6 +250,7 @@ function AgentsListCard({
               >
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
+                <TableCell>{agent.prompt_bundle ?? "-"}</TableCell>
                 <TableCell>{agent.tool_profile ?? "-"}</TableCell>
                 <TableCell>{agent.provider_profile ?? "-"}</TableCell>
               </TableRow>

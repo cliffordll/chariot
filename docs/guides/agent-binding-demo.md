@@ -57,13 +57,13 @@ uv run chariot provider use claude                               # 设为默认
 ## 2. 配 prompt bundle
 
 ```powershell
-uv run chariot prompt bundle list
-uv run chariot prompt bundle add --name research --layers `
+uv run chariot prompt list
+uv run chariot prompt add research --layer `
   '[{"name":"base_system","source":"researcher prompt","content":"You are a careful researcher. Always cite sources."}]'
-uv run chariot prompt bundle show research
+uv run chariot prompt show research
 # 注意:add 命令会把新 bundle 设为 active;如不希望 research 是全局 active,
 # 跑完后再 activate 回 default:
-uv run chariot prompt bundle activate default
+uv run chariot prompt activate default
 ```
 
 ---
@@ -77,6 +77,7 @@ uv run chariot tool enable list_dir
 uv run chariot toolset add --name fs_safe --description "只读文件操作" `
   --members read_file,list_dir
 uv run chariot toolset show fs_safe
+uv run chariot toolset list
 ```
 
 ---
@@ -84,10 +85,7 @@ uv run chariot toolset show fs_safe
 ## 4. 配 agent_profile 绑三件套
 
 ```powershell
-uv run chariot agent add --name researcher --role research `
-  --provider-profile claude `
-  --prompt-bundle research `
-  --tool-profile fs_safe
+uv run chariot agent add --name researcher --role research --provider-profile ollama-qwen --prompt-bundle research --tool-profile fs_safe
 uv run chariot agent show researcher
 ```
 
@@ -112,12 +110,30 @@ uv run chariot chat --agent researcher --conversation new "先看根目录"
 uv run chariot chat --agent researcher --conversation <ULID> "现在挑 docs/ 看"
 ```
 
+**REPL 交互模式**(不传 message text 自动进入):
+
+```powershell
+uv run chariot chat --agent researcher
+# 进入 REPL,提示符 ›
+›  先看根目录有哪些文件
+›  挑 docs/ 看
+›  /conversation new     # 切到新会话(stateful)
+›  /conversation off     # 切回 stateless
+›  /provider             # 看本轮实际 provider(已被 agent.provider_profile 覆盖)
+›  /tool                 # 看本轮可用工具(已被 agent.tool_profile 过滤)
+›  /help                 # 列全部 slash 命令
+›  /exit                 # 退出
+```
+
+REPL 内 agent binding 一次性绑定到本次 session,中途切 `/provider` 只覆盖本次会话的
+provider,不动 agent_profile 解析;退出后下次重新进入会重新读 agent。
+
 ---
 
 ## 6. 通过 task 跑(B1 trace 自动记录)
 
 ```powershell
-uv run chariot task add --goal "总结仓库 docs/ 的结构" --agent researcher
+uv run chariot task create --goal "总结仓库 docs/ 的结构" --agent researcher1
 uv run chariot task list
 uv run chariot task start <task-id>
 ```
