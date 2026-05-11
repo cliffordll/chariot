@@ -14,6 +14,7 @@ from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.skill_repo import SkillEntry, SkillRepo
 from chariot.repos.task_repo import TaskRepo
 from chariot.repos.tool_repo import ToolRepo
+from chariot.repos.toolset_repo import ToolsetRepo
 
 __all__ = [
     "AuditEvent",
@@ -34,4 +35,5 @@ __all__ = [
     "SkillRepo",
     "TaskRepo",
     "ToolRepo",
+    "ToolsetRepo",
 ]

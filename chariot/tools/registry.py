@@ -29,7 +29,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import ClassVar
 
-from chariot.agent.config import ConfigError, ToolEntry
+from chariot.agent.exceptions import ConfigError
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
 
 # 每个 builder 是一个 callable:ToolEntry → Tool 实例

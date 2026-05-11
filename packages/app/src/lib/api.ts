@@ -341,6 +341,22 @@ export interface PromptBundleDetail extends PromptBundle {
   versions?: PromptVersion[];
 }
 
+export interface Toolset {
+  name: string;
+  description: string | null;
+  members: string[];
+  meta: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ToolsetPayload {
+  name: string;
+  description?: string | null;
+  members?: string[];
+  meta?: Record<string, unknown>;
+}
+
 export interface PromptBundlePayload {
   name: string;
   description?: string | null;
@@ -417,6 +433,34 @@ const apiCore = {
       return apiCore.disableTool(name);
     }
     return apiCore.configTool(name, {});
+  },
+
+  listToolsets(): Promise<{ toolsets: Toolset[] }> {
+    return rpc("list_toolsets");
+  },
+
+  getToolset(name: string): Promise<{ toolset: Toolset }> {
+    return rpc("get_toolset", { name });
+  },
+
+  createToolset(req: ToolsetPayload): Promise<{ toolset: Toolset }> {
+    return rpc("create_toolset", { ...req });
+  },
+
+  updateToolset(name: string, req: Omit<ToolsetPayload, "name">): Promise<{ toolset: Toolset }> {
+    return rpc("update_toolset", { name, ...req });
+  },
+
+  deleteToolset(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_toolset", { name });
+  },
+
+  addToolsetMember(name: string, tool_name: string): Promise<{ toolset: Toolset }> {
+    return rpc("add_toolset_member", { name, tool_name });
+  },
+
+  removeToolsetMember(name: string, tool_name: string): Promise<{ toolset: Toolset }> {
+    return rpc("remove_toolset_member", { name, tool_name });
   },
 
   listProviders(): Promise<{ providers: Provider[] }> {

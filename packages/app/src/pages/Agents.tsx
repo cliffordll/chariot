@@ -31,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type AgentProfile, type ApiError } from "@/lib/api";
+import { api, type AgentProfile, type ApiError, type PromptBundle, type Provider, type Toolset } from "@/lib/api";
 
 type AgentsState =
   | { kind: "loading" }
@@ -44,6 +44,12 @@ type DetailState =
   | { kind: "ok"; agent: AgentProfile }
   | { kind: "err"; name: string; message: string };
 
+type BindingOptions = {
+  bundles: PromptBundle[];
+  toolsets: Toolset[];
+  providers: Provider[];
+};
+
 export default function Agents() {
   const [state, setState] = useState<AgentsState>({ kind: "loading" });
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
@@ -52,6 +58,7 @@ export default function Agents() {
   const [removeAgent, setRemoveAgent] = useState<AgentProfile | null>(null);
   const [removing, setRemoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [bindingOptions, setBindingOptions] = useState<BindingOptions>({ bundles: [], toolsets: [], providers: [] });
 
   const detailRef = useRef(detail);
   useEffect(() => {
@@ -96,6 +103,21 @@ export default function Agents() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [{ bundles }, { toolsets }, { providers }] = await Promise.all([
+          api.listPromptBundles(),
+          api.listToolsets(),
+          api.listProviders(),
+        ]);
+        setBindingOptions({ bundles, toolsets, providers });
+      } catch {
+        // 静默:datalist 是辅助提示,失败不阻断 Agents 页主功能
+      }
+    })();
+  }, []);
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between">
@@ -128,6 +150,7 @@ export default function Agents() {
 
       {createOpen && (
         <CreateAgentDialog
+          options={bindingOptions}
           onClose={() => setCreateOpen(false)}
           onCreated={(name) => {
             setCreateOpen(false);
@@ -140,6 +163,7 @@ export default function Agents() {
       {editAgent && (
         <EditAgentDialog
           agent={editAgent}
+          options={bindingOptions}
           onClose={() => setEditAgent(null)}
           onSaved={(name) => {
             setEditAgent(null);
@@ -280,9 +304,11 @@ function AgentDetailCard({
 }
 
 function CreateAgentDialog({
+  options,
   onClose,
   onCreated,
 }: {
+  options: BindingOptions;
   onClose: () => void;
   onCreated: (name: string) => void;
 }) {
@@ -346,15 +372,31 @@ function CreateAgentDialog({
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Prompt bundle">
-              <Input value={promptBundle} onChange={(e) => setPromptBundle(e.target.value)} placeholder="default" />
+              <Input
+                list="agent-bundle-options"
+                value={promptBundle}
+                onChange={(e) => setPromptBundle(e.target.value)}
+                placeholder="default"
+              />
             </Field>
             <Field label="Tool profile">
-              <Input value={toolProfile} onChange={(e) => setToolProfile(e.target.value)} placeholder="default" />
+              <Input
+                list="agent-toolset-options"
+                value={toolProfile}
+                onChange={(e) => setToolProfile(e.target.value)}
+                placeholder="toolset name"
+              />
             </Field>
             <Field label="Provider profile">
-              <Input value={providerProfile} onChange={(e) => setProviderProfile(e.target.value)} placeholder="mock" />
+              <Input
+                list="agent-provider-options"
+                value={providerProfile}
+                onChange={(e) => setProviderProfile(e.target.value)}
+                placeholder="mock"
+              />
             </Field>
           </div>
+          <BindingDatalists options={options} />
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Budget JSON">
               <Textarea value={budget} onChange={(e) => setBudget(e.target.value)} className="min-h-28 font-mono text-xs" />
@@ -376,10 +418,12 @@ function CreateAgentDialog({
 
 function EditAgentDialog({
   agent,
+  options,
   onClose,
   onSaved,
 }: {
   agent: AgentProfile;
+  options: BindingOptions;
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
@@ -434,15 +478,31 @@ function EditAgentDialog({
           </Field>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Prompt bundle">
-              <Input value={promptBundle} onChange={(e) => setPromptBundle(e.target.value)} placeholder="default" />
+              <Input
+                list="agent-bundle-options"
+                value={promptBundle}
+                onChange={(e) => setPromptBundle(e.target.value)}
+                placeholder="default"
+              />
             </Field>
             <Field label="Tool profile">
-              <Input value={toolProfile} onChange={(e) => setToolProfile(e.target.value)} placeholder="default" />
+              <Input
+                list="agent-toolset-options"
+                value={toolProfile}
+                onChange={(e) => setToolProfile(e.target.value)}
+                placeholder="toolset name"
+              />
             </Field>
             <Field label="Provider profile">
-              <Input value={providerProfile} onChange={(e) => setProviderProfile(e.target.value)} placeholder="mock" />
+              <Input
+                list="agent-provider-options"
+                value={providerProfile}
+                onChange={(e) => setProviderProfile(e.target.value)}
+                placeholder="mock"
+              />
             </Field>
           </div>
+          <BindingDatalists options={options} />
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Budget JSON">
               <Textarea value={budget} onChange={(e) => setBudget(e.target.value)} className="min-h-28 font-mono text-xs" />
@@ -459,6 +519,28 @@ function EditAgentDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function BindingDatalists({ options }: { options: BindingOptions }) {
+  return (
+    <>
+      <datalist id="agent-bundle-options">
+        {options.bundles.map((b) => (
+          <option key={b.name} value={b.name} />
+        ))}
+      </datalist>
+      <datalist id="agent-toolset-options">
+        {options.toolsets.map((t) => (
+          <option key={t.name} value={t.name} />
+        ))}
+      </datalist>
+      <datalist id="agent-provider-options">
+        {options.providers.map((p) => (
+          <option key={p.name} value={p.name} />
+        ))}
+      </datalist>
+    </>
   );
 }
 

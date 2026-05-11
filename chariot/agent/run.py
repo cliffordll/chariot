@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -35,9 +36,26 @@ from chariot.memory.policy import MemoryPolicy
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.models.agent import AgentProfile
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
+
+
+@dataclass(frozen=True)
+class _AgentBinding:
+    """已解析的 agent_profile binding 状态(per request)。
+
+    - `profile`:AgentProfile dataclass;None 表示无绑定或 dangling(不存在的 name)
+    - `allowed_tools`:`None` = 不做 toolset filter,`frozenset[str]` = 只允许列表里
+      的 tool name(空集 = 关闭工具调用)
+    """
+
+    profile: AgentProfile | None = None
+    allowed_tools: frozenset[str] | None = None
+
+
+_NO_BINDING: _AgentBinding = _AgentBinding()
 
 
 class AIAgent:
@@ -171,11 +189,20 @@ class AIAgent:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
         路由:按 `req.provider_name`(entry name)找 Provider 实例;缺失 →
-        yield error event 退出。
+        yield error event 退出。`req.agent_profile` 非空时先解析 binding:
+        - `profile.provider_profile` 覆盖 `req.provider_name`
+        - `profile.prompt_bundle` 由 `_prepare_request` 拣对应 bundle
+        - `profile.tool_profile` 由 `_inject_default_tools` 做 toolset filter
+        dangling reference 走 fallback 不阻断。
+
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
         stateful(`req.conversation_id` 非空)→ 在 conversation lock 内开 session 跑;
         stateless → 直接跑 AgentLoop 不开 session。
         """
+        binding = await self._resolve_binding(req)
+        if binding.profile is not None and binding.profile.provider_profile is not None:
+            req = dataclasses.replace(req, provider_name=binding.profile.provider_profile)
+
         provider = self._providers.get(req.provider_name)
         if provider is None:
             yield ChatEvent.error_event(
@@ -187,19 +214,46 @@ class AIAgent:
             return
 
         if req.is_stateful():
-            async for event in self._run_stateful_chat(req, provider):
+            async for event in self._run_stateful_chat(req, provider, binding):
                 yield event
         else:
-            async for event in self._run_stateless_chat(req, provider):
+            async for event in self._run_stateless_chat(req, provider, binding):
                 yield event
 
-    async def _run_stateless_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
+    async def _resolve_binding(self, req: ChatRequest) -> _AgentBinding:
+        """req.agent_profile 非空 → 加载 AgentProfile + 解析 toolset 成员;
+        dangling reference 或 no sessionmaker 走 fallback(返 `_NO_BINDING`)。
+        """
+        if req.agent_profile is None or self._sessionmaker is None:
+            return _NO_BINDING
+        from chariot.repos.task_repo import TaskRepo
+        from chariot.repos.toolset_repo import ToolsetRepo
+        from chariot.services.agent import AgentService
+
+        async with self._sessionmaker() as session:
+            profile = await AgentService(TaskRepo(session)).get_agent(req.agent_profile)
+            if profile is None:
+                return _NO_BINDING
+            if profile.tool_profile is None:
+                return _AgentBinding(profile=profile, allowed_tools=None)
+            toolset = await ToolsetRepo(session).get_entry(profile.tool_profile)
+            if toolset is None:
+                # toolset 名引用不存在,fallback 到全量工具
+                return _AgentBinding(profile=profile, allowed_tools=None)
+            return _AgentBinding(profile=profile, allowed_tools=frozenset(toolset.members))
+
+    async def _run_stateless_chat(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        binding: _AgentBinding = _NO_BINDING,
+    ) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
                 memory_policy = MemoryPolicy()
                 memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
-                req = await self._prepare_request(req, provider, memory_entries, memory_policy)
+                req = await self._prepare_request(req, provider, memory_entries, memory_policy, binding)
                 prompt_trace = await self._record_prompt_trace(
                     session,
                     req,
@@ -208,7 +262,7 @@ class AIAgent:
                     memory_policy,
                 )
         else:
-            req = self._normalize_request(req, provider)
+            req = self._normalize_request(req, provider, binding)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
@@ -242,7 +296,12 @@ class AIAgent:
                     prompt_trace_id=prompt_trace.id,
                 )
 
-    async def _run_stateful_chat(self, req: ChatRequest, provider: BaseProvider) -> AsyncIterator[ChatEvent]:
+    async def _run_stateful_chat(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        binding: _AgentBinding = _NO_BINDING,
+    ) -> AsyncIterator[ChatEvent]:
         """有 conversation_id:开 session + 进 conversation lock + load history + AgentLoop。
 
         约定:`req.messages` 是**新增的消息**(通常 1 条 user message);
@@ -261,7 +320,7 @@ class AIAgent:
         async with self._sessionmaker() as session:
             try:
                 async with ConversationLockManager.acquire(conversation_id, db_session=session):
-                    async for event in self._run_stateful_turn(req, conversation_id, provider, session):
+                    async for event in self._run_stateful_turn(req, conversation_id, provider, session, binding):
                         yield event
             except ConversationLockTimeout as e:
                 yield ChatEvent.error_event(
@@ -275,6 +334,7 @@ class AIAgent:
         conversation_id: str,
         provider: BaseProvider,
         session: AsyncSession,
+        binding: _AgentBinding = _NO_BINDING,
     ) -> AsyncIterator[ChatEvent]:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
@@ -301,7 +361,7 @@ class AIAgent:
             )
         )
         full_req = dataclasses.replace(req, messages=history)
-        full_req = await self._prepare_request(full_req, provider, memory_entries, memory_policy)
+        full_req = await self._prepare_request(full_req, provider, memory_entries, memory_policy, binding)
         prompt_trace = await self._record_prompt_trace(
             session,
             full_req,
@@ -369,22 +429,34 @@ class AIAgent:
 
     # ---- default tools 注入 ----
 
-    def _normalize_request(self, req: ChatRequest, provider: BaseProvider) -> ChatRequest:
+    def _normalize_request(
+        self,
+        req: ChatRequest,
+        provider: BaseProvider,
+        binding: _AgentBinding = _NO_BINDING,
+    ) -> ChatRequest:
         """Apply agent-side defaults, then trim fields unsupported by the provider."""
 
-        req_with_tools = self._inject_default_tools(req)
+        req_with_tools = self._inject_default_tools(req, binding)
         return normalize_request(req_with_tools, provider.capabilities)
 
-    def _inject_default_tools(self, req: ChatRequest) -> ChatRequest:
+    def _inject_default_tools(self, req: ChatRequest, binding: _AgentBinding = _NO_BINDING) -> ChatRequest:
         """req.tools 是 None → 挂当前装载的所有 tool schema;
         req.tools 是 [] → 关闭工具调用(透传);
         req.tools 是 list → 用调用方指定的(透传)。
+        binding.allowed_tools 非 None 时,对挂载结果再做一次 toolset filter:
+        - None 集 = 不过滤(沿用旧行为)
+        - 空集 = 强制 `tools=[]`(关闭工具调用)
+        - 非空集 = 只保留命中 name 的工具
         """
         if req.tools is not None:
             return req
         if not self._tools:
             return req  # 没装载 tool,保持 None
-        schemas: list[ToolSchema] = [self._tool_schema(tool) for tool in self._tools.values()]
+        tools = self._tools
+        if binding.allowed_tools is not None:
+            tools = {name: tool for name, tool in tools.items() if name in binding.allowed_tools}
+        schemas: list[ToolSchema] = [self._tool_schema(tool) for tool in tools.values()]
         return dataclasses.replace(req, tools=schemas)
 
     @staticmethod
@@ -402,25 +474,35 @@ class AIAgent:
         provider: BaseProvider,
         memory_entries: list[dict[str, Any]] | None = None,
         memory_policy: MemoryPolicy | None = None,
+        binding: _AgentBinding = _NO_BINDING,
     ) -> ChatRequest:
-        """Compose the active prompt bundle into `system`, then normalize request fields."""
+        """Compose prompt bundle into `system`, then normalize request fields.
+
+        binding.profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
+        active bundle);profile 缺失 / 字段空 → 走 active bundle 兜底。
+        """
         composed = req
         if self._sessionmaker is not None:
             from chariot.prompt.composer import PromptComposer
             from chariot.repos.prompt_repo import PromptRepo
 
             async with self._sessionmaker() as session:
-                active_bundle = await PromptRepo(session).get_active_bundle()
-                if active_bundle is not None:
+                repo = PromptRepo(session)
+                bundle = None
+                if binding.profile is not None and binding.profile.prompt_bundle is not None:
+                    bundle = await repo.get_bundle(binding.profile.prompt_bundle)
+                if bundle is None:
+                    bundle = await repo.get_active_bundle()
+                if bundle is not None:
                     existing_system = req.system if isinstance(req.system, str) else None
                     system = PromptComposer.render_layers_text(
-                        active_bundle.layers,
+                        bundle.layers,
                         existing_system=existing_system,
                         memory_entries=memory_entries,
                         memory_policy=memory_policy.describe() if memory_policy is not None else None,
                     )
                     composed = dataclasses.replace(req, system=system)
-        return self._normalize_request(composed, provider)
+        return self._normalize_request(composed, provider, binding)
 
     async def _load_memory_entries(
         self,

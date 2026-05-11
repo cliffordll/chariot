@@ -46,6 +46,8 @@ class TestMigrationV10:
             "task_runs",
             "scheduled_jobs",
             "job_runs",
+            "toolsets",
+            "toolset_members",
         }
         rows = (
             (

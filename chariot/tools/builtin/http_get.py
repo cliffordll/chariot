@@ -9,7 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from chariot.agent.config import ConfigError, ToolEntry
+from chariot.agent.exceptions import ConfigError
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
 
 _DEFAULT_MAX_BYTES = 524288

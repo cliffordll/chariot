@@ -32,7 +32,7 @@ from __future__ import annotations
 import base64
 from typing import Any, ClassVar, Self
 
-from chariot.agent.config import ToolEntry
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
 
 _DEFAULT_MAX_BYTES = 1048576  # 1 MiB

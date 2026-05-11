@@ -30,7 +30,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Self
 
-from chariot.agent.config import ToolEntry
+from chariot.models.tool import ToolEntry
 
 
 class BaseTool(ABC):

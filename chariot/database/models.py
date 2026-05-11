@@ -23,6 +23,7 @@
 - v11(0.7.1-context):`context_snapshots / context_traces`
 - v14(0.7.2-task):`agent_profiles / tasks / task_runs / scheduled_jobs`
 - v15(0.7.2-task):`job_runs`
+- v16(0.7.2-tool):`toolsets / toolset_members`(命名 toolset + agent 绑定)
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -430,3 +431,21 @@ class JobRunRow(Base):
     error: Mapped[str | None] = mapped_column(default=None)
     started_at: Mapped[datetime] = mapped_column(default=_utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class ToolsetRow(Base):
+    __tablename__ = "toolsets"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    description: Mapped[str | None] = mapped_column(default=None)
+    meta: Mapped[str] = mapped_column(default="{}")
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class ToolsetMemberRow(Base):
+    __tablename__ = "toolset_members"
+    __table_args__ = (Index("idx_toolset_members_tool_name", "tool_name"),)
+
+    toolset_name: Mapped[str] = mapped_column(primary_key=True)
+    tool_name: Mapped[str] = mapped_column(primary_key=True)

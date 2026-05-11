@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
-from chariot.agent.config import ToolEntry
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
 
 

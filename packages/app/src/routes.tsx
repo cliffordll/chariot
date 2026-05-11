@@ -7,6 +7,7 @@ const Tasks = lazy(() => import("@/pages/Tasks"));
 const Jobs = lazy(() => import("@/pages/Jobs"));
 const Providers = lazy(() => import("@/pages/Providers"));
 const Tools = lazy(() => import("@/pages/Tools"));
+const Toolsets = lazy(() => import("@/pages/Toolsets"));
 const Memory = lazy(() => import("@/pages/Memory"));
 const Prompt = lazy(() => import("@/pages/Prompt"));
 const Context = lazy(() => import("@/pages/Context"));
@@ -20,6 +21,7 @@ export const NAV_ITEMS = [
   { path: "/jobs", label: "Jobs" },
   { path: "/providers", label: "Providers" },
   { path: "/tools", label: "Tools" },
+  { path: "/toolsets", label: "Toolsets" },
   { path: "/memory", label: "Memory" },
   { path: "/prompt", label: "Prompt" },
   { path: "/context", label: "Context" },
@@ -38,6 +40,7 @@ export function AppRoutes() {
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/providers" element={<Providers />} />
         <Route path="/tools" element={<Tools />} />
+        <Route path="/toolsets" element={<Toolsets />} />
         <Route path="/memory" element={<Memory />} />
         <Route path="/prompt" element={<Prompt />} />
         <Route path="/context" element={<Context />} />

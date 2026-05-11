@@ -128,6 +128,13 @@ class ChatRequest:
     # ─── chariot 扩展字段(顶层放,跟 Claude 字段不冲突) ───
     conversation_id: str | None = None  # None = stateless;ULID = stateful
     agent_id: str | None = None  # 0.9.0+ 多 AIAgent 实例;0.6.0 默认 None
+    agent_profile: str | None = None
+    """0.7.2-tool+ AgentProfile name 引用;非 None 时 AIAgent 解析后:
+    - profile.provider_profile 覆盖 req.provider_name
+    - profile.prompt_bundle 决定 prompt 注入(取代 get_active_bundle 兜底)
+    - profile.tool_profile 决定 toolset filter(取代全量挂载 tools)
+    dangling reference(profile name 不存在)走 fallback,不阻断 task。
+    """
 
     # ---- 查询便利方法(逻辑收进类,不散成模块级 helper) ----
 
