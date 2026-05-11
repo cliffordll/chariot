@@ -36,6 +36,14 @@ export interface Conversation {
   message_count: number;
 }
 
+export interface ConversationSearchHit {
+  message_id: string;
+  conversation_id: string;
+  role: string;
+  snippet: string;
+  rank: number;
+}
+
 export type AnthropicBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
@@ -558,6 +566,18 @@ const apiCore = {
 
   deleteConversation(conversation_id: string): Promise<{ deleted: string }> {
     return rpc("delete_conversation", { conversation_id });
+  },
+
+  searchConversation(params: {
+    query: string;
+    limit?: number;
+    conversation_id?: string;
+  }): Promise<{ hits: ConversationSearchHit[] }> {
+    return rpc("search_conversation", params);
+  },
+
+  rebuildConversationFts(): Promise<{ rebuilt: number }> {
+    return rpc("rebuild_conversation_fts");
   },
 
   createConversation(req: { id?: string; title?: string | null } = {}): Promise<Conversation> {

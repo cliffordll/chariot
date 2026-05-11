@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest
 from chariot.agent.exceptions import (
+    AuxiliaryClientNotFound,
     ConfigError,
     ConversationNotFound,
+    DuplicateAuxiliaryClientName,
     DuplicateConversationId,
     DuplicateProviderName,
     ProviderNotFound,
@@ -48,9 +50,18 @@ class MethodBase:
         async with self.runtime.session_maker() as session:
             try:
                 yield session
-            except (ConversationNotFound, ProviderNotFound, ToolNotFound) as e:
+            except (
+                ConversationNotFound,
+                ProviderNotFound,
+                ToolNotFound,
+                AuxiliaryClientNotFound,
+            ) as e:
                 raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
-            except (DuplicateConversationId, DuplicateProviderName) as e:
+            except (
+                DuplicateConversationId,
+                DuplicateProviderName,
+                DuplicateAuxiliaryClientName,
+            ) as e:
                 raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
             except ConfigError as e:
                 raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
@@ -129,6 +140,7 @@ def register_methods(
     runtime = SidecarRuntime(agent, db_path=db_path, session_key=session_key)
 
     from chariot.sidecar.methods.agent import AgentMethods
+    from chariot.sidecar.methods.auxiliary import AuxiliaryMethods
     from chariot.sidecar.methods.chat import ChatMethod
     from chariot.sidecar.methods.context import ContextMethods
     from chariot.sidecar.methods.conversation import ConversationMethods
@@ -172,6 +184,15 @@ def register_methods(
     server.method("get_convo")(conversations.get)
     server.method("rename_convo")(conversations.rename)
     server.method("delete_convo")(conversations.delete)
+    server.method("search_conversation")(conversations.search)
+    server.method("rebuild_conversation_fts")(conversations.rebuild_fts)
+
+    auxiliaries = AuxiliaryMethods(runtime)
+    server.method("list_auxiliary_clients")(auxiliaries.list_)
+    server.method("show_auxiliary_client")(auxiliaries.show)
+    server.method("add_auxiliary_client")(auxiliaries.add)
+    server.method("update_auxiliary_client")(auxiliaries.update)
+    server.method("delete_auxiliary_client")(auxiliaries.delete)
 
     tools = ToolMethods(runtime)
     server.method("list_tools")(tools.list_)

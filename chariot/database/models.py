@@ -518,6 +518,25 @@ class TraceToolCallRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
+class AuxiliaryClientRow(Base):
+    """`auxiliary_clients` 表(v19,B3 wave 2):副 model 路由表。
+
+    - `name`:业务面 ID(主键),如 'summarizer' / 'critic_aux'
+    - `provider_entry`:指向 `providers.name`(运行时校验,不加 FK)
+    - `model`:可空;空时回退到 provider_entry options.model
+    - `params`:JSON sampling 默认值;独立预算,避免摘要把主任务 token 预算吃光
+    """
+
+    __tablename__ = "auxiliary_clients"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    provider_entry: Mapped[str]
+    model: Mapped[str | None] = mapped_column(default=None)
+    params: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
 class TraceCheckpointRow(Base):
     __tablename__ = "trace_checkpoints"
     __table_args__ = (Index("idx_trace_checkpoints_turn", "turn_id"),)

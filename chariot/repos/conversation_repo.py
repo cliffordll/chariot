@@ -64,6 +64,21 @@ class Conversation:
     message_count: int = 0
 
 
+@dataclass(frozen=True)
+class MessageSearchHit:
+    """FTS5 搜索单条命中(v17 起)。
+
+    - `snippet`:`<mark>` 包住命中词的 ±N token 片段;直接渲染前端高亮
+    - `rank`:bm25 分数(越小越好,SQLite FTS5 惯例)
+    """
+
+    message_id: str
+    conversation_id: str
+    role: str
+    snippet: str
+    rank: float
+
+
 class ConversationRepo:
     """`conversations` + `messages` 表的数据访问层。"""
 
@@ -205,10 +220,15 @@ class ConversationRepo:
         return await self._with_message_count(row)
 
     async def delete(self, conversation_id: str) -> None:
-        """删 conversation + 手动 cascade 删 messages(不依赖 SQLite FK 开关)。"""
+        """删 conversation + 手动 cascade 删 messages + 清 FTS5 索引。"""
         row = await self._find_row(conversation_id)
         if row is None:
             raise ConversationNotFound(f"未知 conversation id: {conversation_id!r}")
+        # v17:同步清 FTS5(参数化绑定避 SQL injection)
+        await self.session.execute(
+            text("DELETE FROM messages_fts WHERE conversation_id = :cid"),
+            {"cid": conversation_id},
+        )
         await self.session.execute(
             sa_delete(MessageRow).where(MessageRow.conversation_id == conversation_id),
         )
@@ -251,6 +271,19 @@ class ConversationRepo:
             provider_name=provider_name if role == self.ROLE_ASSISTANT else None,
         )
         self.session.add(msg)
+        # 必须 flush 才能拿到 msg.id(default=_new_ulid 在 flush 时填),
+        # FTS 同步需要 id 作 message_id
+        await self.session.flush()
+        # v17:同步索引到 FTS5。content 字段存 text-only(从 anthropic blocks 抽),
+        # 而非原始 JSON,避免 'type' / 'text' 这种 schema 关键字成噪声词
+        fts_content = self._extract_indexable_text(content)
+        await self.session.execute(
+            text(
+                "INSERT INTO messages_fts (message_id, conversation_id, role, content) "
+                "VALUES (:mid, :cid, :role, :content)",
+            ),
+            {"mid": msg.id, "cid": conversation_id, "role": role, "content": fts_content},
+        )
 
         # 派生:assistant 行更新 conversations.last_model + 撞 updated_at
         # 任何写都更新 updated_at(让 GUI 列表按"最近活跃"排序)
@@ -283,6 +316,108 @@ class ConversationRepo:
         provider_name / created_at 等元数据)。"""
         stmt = select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
         return list((await self.session.execute(stmt)).scalars().all())
+
+    # ---- FTS5 全文搜索(v17 起) ----
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        conversation_id: str | None = None,
+    ) -> list[MessageSearchHit]:
+        """跨 conversation 模糊查 messages。
+
+        - `query` 是 FTS5 MATCH 表达式;最简形式直接传关键词,空格分隔多词等于 AND
+          (`'hello world'` ≈ `'hello AND world'`)。SQLite FTS5 支持 `OR` / `NOT` /
+          双引号短语 / `prefix*`,但 chariot 这层默认透传,不做语法糖
+        - 默认按 bm25 排名(FTS5 内置),返 top-N
+        - 给定 conversation_id 时,只查该会话内的 hit(给 stateful chat 内部找上下文用)
+        - 返 MessageSearchHit:含 message_id / conversation_id / role / snippet / rank
+        """
+        if not query.strip():
+            return []
+        sql = (
+            "SELECT message_id, conversation_id, role, "
+            "snippet(messages_fts, 3, '<mark>', '</mark>', '…', 12) AS snippet, "
+            "bm25(messages_fts) AS rank "
+            "FROM messages_fts WHERE messages_fts MATCH :q"
+        )
+        params: dict[str, Any] = {"q": query, "limit": limit}
+        if conversation_id is not None:
+            sql += " AND conversation_id = :cid"
+            params["cid"] = conversation_id
+        sql += " ORDER BY rank LIMIT :limit"
+        result = await self.session.execute(text(sql), params)
+        hits: list[MessageSearchHit] = []
+        for row in result.fetchall():
+            hits.append(
+                MessageSearchHit(
+                    message_id=str(row.message_id),
+                    conversation_id=str(row.conversation_id),
+                    role=str(row.role),
+                    snippet=str(row.snippet),
+                    rank=float(row.rank),
+                )
+            )
+        return hits
+
+    async def rebuild_fts(self) -> int:
+        """灾备命令:删空 messages_fts → 从 messages 表全量回填,返回回填行数。
+
+        什么时候用:FTS 表跟 messages 不同步(测试漏调 sync / 早期版本 bug);用户
+        手动跑 `chariot conversation rebuild-fts` 修复。
+        """
+        await self.session.execute(text("DELETE FROM messages_fts"))
+        rows = await self.session.execute(select(MessageRow))
+        count = 0
+        for r in rows.scalars():
+            fts_content = self._extract_indexable_text(self._deserialize_content(r.content))
+            await self.session.execute(
+                text(
+                    "INSERT INTO messages_fts (message_id, conversation_id, role, content) "
+                    "VALUES (:mid, :cid, :role, :content)",
+                ),
+                {"mid": r.id, "cid": r.conversation_id, "role": r.role, "content": fts_content},
+            )
+            count += 1
+        await self.session.commit()
+        return count
+
+    @staticmethod
+    def _extract_indexable_text(content: str | list[dict[str, Any]]) -> str:
+        """从 anthropic content 抽 FTS5 该索引的文本。
+
+        - 纯字符串 → 原样
+        - blocks 数组 → 拼接所有 type=text 的 .text 字段,以及 type=tool_use 的
+          .input(JSON 序列化)+ type=tool_result 的 content.text;其它类型跳过
+        - 目的:不把 'type' / 'tool_use' / 'tool_result' 这种 anthropic schema 关键字
+          灌进 FTS,降低 false positive
+        """
+        if isinstance(content, str):
+            return content
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                t = block.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif btype == "tool_use":
+                # tool_use input 是 dict;JSON dump 时 ensure_ascii=False 保中文
+                inp = block.get("input")
+                if isinstance(inp, dict):
+                    parts.append(json.dumps(inp, ensure_ascii=False))
+            elif btype == "tool_result":
+                # tool_result.content 可能是 string 或 blocks 数组
+                tr_content = block.get("content")
+                if isinstance(tr_content, str):
+                    parts.append(tr_content)
+                elif isinstance(tr_content, list):
+                    parts.append(ConversationRepo._extract_indexable_text(tr_content))
+        return "\n".join(parts)
 
     # ---- 内部 ----
 

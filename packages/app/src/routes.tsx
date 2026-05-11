@@ -15,6 +15,7 @@ const Logs = lazy(() => import("@/pages/Logs"));
 const Traces = lazy(() => import("@/pages/Traces"));
 const Evals = lazy(() => import("@/pages/Evals"));
 const Chat = lazy(() => import("@/pages/Chat"));
+const Conversations = lazy(() => import("@/pages/Conversations"));
 
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
@@ -30,6 +31,7 @@ export const NAV_ITEMS = [
   { path: "/logs", label: "Logs" },
   { path: "/traces", label: "Traces" },
   { path: "/evals", label: "Evals" },
+  { path: "/conversations", label: "Conversations" },
   { path: "/chat", label: "Chat" },
 ] as const;
 
@@ -51,6 +53,7 @@ export function AppRoutes() {
         <Route path="/logs" element={<Logs />} />
         <Route path="/traces" element={<Traces />} />
         <Route path="/evals" element={<Evals />} />
+        <Route path="/conversations" element={<Conversations />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

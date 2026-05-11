@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from chariot.cli.commands import agent as agent_mod
+from chariot.cli.commands import auxiliary as auxiliary_mod
 from chariot.cli.commands import chat as chat_mod
 from chariot.cli.commands import checkpoint as checkpoint_mod
 from chariot.cli.commands import context as context_mod
@@ -67,6 +68,7 @@ for mod in (
     checkpoint_mod,
     context_mod,
     trace_mod,
+    auxiliary_mod,
 ):
     mod.register(app)
 

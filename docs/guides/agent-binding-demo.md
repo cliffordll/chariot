@@ -199,6 +199,136 @@ uv run chariot eval --baseline <baseline-run-id>
 
 ---
 
+## 7.6 conversation 全文搜索(B3 wave 1)
+
+跨 conversation 模糊查历史消息。v18 起 `messages_fts`(SQLite FTS5)自动跟
+`messages` 表同步;`append_message` 抽 anthropic blocks 的 text-only 入索引,
+所以查 "type" / "tool_use" 等 schema 关键字不会有假阳性。
+
+```powershell
+# 全局搜索(默认 limit 20,bm25 排序)
+uv run chariot conversation search "类型注解"
+uv run chariot conversation search "Sandbox"
+
+# 只搜某个 conversation 内
+uv run chariot conversation search "research notes" --conversation 01KRBMJ4K07AJWPV4EKN513P0A
+uv run chariot conversation search "Sandbox" --conversation 01KRBMJ4K07AJWPV4EKN513P0A
+
+# 限制返回数量
+uv run chariot conversation search "fts5" --limit 5
+uv run chariot conversation search "shell" --limit 5
+
+# 灾备:FTS 索引跟 messages 表不同步时(测试漏调 sync / 早期版本 bug),全量重建
+uv run chariot conversation rebuild-fts
+```
+
+输出格式(终端):
+
+```
+- msg_id=01HXXX...  conv=01HCONV...  role=user
+    rank=-0.83  snippet=…我想加一个 <mark>类型注解</mark> 检查 …
+```
+
+`<mark>` 是 FTS5 `snippet()` 内置的命中标记,默认 ±12 token 上下文。CLI
+直接打印含 `<mark>...</mark>` 字面量,桌面端 wave 4 起把 mark 渲染成高亮。
+
+FTS5 表达式速查(透传给 SQLite,不做语法糖):
+- `hello world`  ≈ AND(同时含 hello + world)
+- `hello OR world`
+- `"hello world"`  短语(顺序敏感)
+- `hello*`  前缀(`hello` / `hellos` / `hello_world` 都命中)
+- `hello NOT world`
+
+---
+
+## 7.7 Context 自动压缩(B3 wave 2)
+
+长对话越跑 prompt 越大。chariot 在送给 provider 之前估 token,过 70%
+context_length 阈值就调 AuxiliaryClient 把最早 N turn 摘要成
+`[context-summary] ...`。失败 fallback 直接丢最早一对 user/assistant turn。
+
+`auxiliary_clients` 表(v19 起,seed 一条 `summarizer` 指向 `mock`,开箱即用):
+
+```powershell
+# 列已配置的 aux client(默认有一条 'summarizer' → mock)
+uv run chariot auxiliary list
+
+# 想用真实 claude 做摘要:删了默认 mock,再 add 一条同名 summarizer
+uv run chariot auxiliary rm summarizer
+uv run chariot auxiliary add --name summarizer --provider claude `
+    --model claude-haiku-4-5-20251001 --param max_tokens=256 --param temperature=0.3
+
+# 改 params(整体替换);改 model(`--model -` 表 clear)
+uv run chariot auxiliary update summarizer --param max_tokens=512
+uv run chariot auxiliary update summarizer --model -    # 回到继承 provider 的 model
+
+# 跑一段长对话(20+ turn,单 turn 大 prompt)后看 trace 里压缩落地
+uv run chariot trace list --limit 5
+# 找一条 meta.context_compressed=true 的 turn,view 看 [context-summary] 插入位置
+uv run chariot trace view <turn-id>
+```
+
+压缩透明(主调用方不感知);只有 `summarizer` 这一条 entry 名字会被 AIAgent
+bootstrap 时认得 —— 其它名字的 aux client 可以共存,但当前 wave 不用;预留给
+B4 critic / B5 guardrails 等副任务路由。
+
+---
+
+## 7.8 `@reference` 解析(B3 wave 3)
+
+user 消息里 `@file:` / `@diff:` / `@url:` / `@session:` 自动展开成
+`<reference type=... key=...>...</reference>` 块,agent 拿到包好内容的
+消息。
+
+```powershell
+# @file:展开当前 cwd 子树下的文件
+uv run chariot chat "@file:README.md 给我一句话总结"
+
+# @diff:HEAD~3 把最近 3 个 commit 的 diff 展开
+uv run chariot chat "@diff:HEAD~3 这几个 commit 改了什么?"
+
+# @url:走 http_get 工具同款 allowlist
+uv run chariot chat "@url:https://example.com 这个站点干啥用的?"
+
+# @session:加载历史 conversation
+uv run chariot chat "@session:01HABCDE 接着上次思路继续"
+```
+
+错误时 reference 还在,只是 content 空 + 带 error 属性:
+
+```xml
+<reference type="file" key="ghost.md" error="not found"></reference>
+```
+
+agent 收到这个还能讲"这文件不存在,要不要我新建?",不像 silent drop。
+
+**安全限制**:
+- `@file:` 限 cwd 子树(防 `../../etc/passwd`)
+- `@url:` 继承 `http_get` 工具的 allowlist
+- `@diff:` subprocess 限超时 + 输出截断
+- `@session:` 仅当前 user 可见会话(多租户上线后强制 owner 过滤)
+
+---
+
+## 7.9 桌面 Conversations 页(B3 wave 4)
+
+新增 `/conversations` 路由(`packages/app/src/pages/Conversations.tsx`):
+
+- **列表区**:所有 conversation,按 `updated_at` 降序,显示 id / title /
+  last_model / 消息数;点 "Open" 折叠展开详情(底部出 messages 全文)
+- **顶部搜索框**:
+  - 详情未展开 → 全局搜索(调 `search_conversation` RPC,无 `conversation_id`)
+  - 详情已展开 → 搜索 scope 自动 narrow 到该 conversation(`conversation_id` 传入)
+- **hit 卡片**:展示 snippet(包含 FTS5 `<mark>` 高亮)+ bm25 rank;点击 hit
+  自动 open 对应 conversation 详情
+- **Rebuild FTS 按钮**:调 `rebuild_conversation_fts`,index 跟 messages 不同步
+  时灾备用(`chariot conversation rebuild-fts` 的桌面端等价)
+
+注:hit snippet 用 `dangerouslySetInnerHTML` 渲染 `<mark>` 标签;FTS5 snippet
+不会引入用户可控 HTML(只标记关键词),不需要额外 sanitization。
+
+---
+
 ## 8. flag 冲突 / 优先级速查
 
 | flag 组合 | 行为 |

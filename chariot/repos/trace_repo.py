@@ -124,6 +124,19 @@ class TraceRepo:
         await self.session.refresh(row)
         return self._turn_row_to_entry(row)
 
+    async def merge_turn_meta(self, turn_id: str, patch: dict[str, Any]) -> None:
+        """把 patch dict shallow-merge 到 trace_turns.meta(给 B3 context 压缩等
+        runtime 事件用)。turn 不存在 → silent no-op(best-effort)。"""
+        if not patch:
+            return
+        row = await self.session.get(TraceTurnRow, turn_id)
+        if row is None:
+            return
+        current = self._deserialize_dict("meta", row.meta) if row.meta else {}
+        current.update(patch)
+        row.meta = self._serialize_json("meta", current)
+        await self.session.commit()
+
     async def reconcile_stale(self, *, older_than_seconds: int = 3600) -> int:
         """把 status=running 且 started_at 超过阈值的 turn 标 cancelled,
         返回处理条数。用于进程崩溃后清理。"""
