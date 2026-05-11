@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
+    from chariot.trace import TurnHandle
 
 
 _DEFAULT_MAX_ITER = 10
@@ -33,6 +34,7 @@ class AgentLoop:
         repo: ConversationRepo | None,
         conversation_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
+        turn: TurnHandle | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -40,6 +42,7 @@ class AgentLoop:
         self._repo = repo
         self._conversation_id = conversation_id
         self._max_iter = max_iter
+        self._turn = turn  # Phase B1:trace 写入 handle;None = 不记录
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -48,7 +51,19 @@ class AgentLoop:
             tool_use_inputs: dict[int, str] = {}
             stop_reason: str | None = None
             saw_error = False
+            error_type: str | None = None
+            last_usage: dict[str, Any] | None = None
             validator = ProviderEventValidator()
+
+            # Phase B1:provider call trace 配对(turn=None 时退化为 no-op)
+            pc_handle = (
+                self._turn.begin_provider_call(
+                    provider_name=self._provider.config.name,
+                    model=self._provider.config.model,
+                )
+                if self._turn is not None
+                else None
+            )
 
             try:
                 async for event in self._provider.generate(current_req):
@@ -57,19 +72,38 @@ class AgentLoop:
                     self._buffer_event(assistant_blocks, tool_use_inputs, event)
                     if event.kind == "message_delta":
                         stop_reason = self._extract_stop_reason(event.delta)
+                    if event.usage:
+                        last_usage = event.usage
                     if event.kind == "error":
                         saw_error = True
+                        error_type = event.error_type
+                        if pc_handle is not None:
+                            await pc_handle.finish(error_type=event.error_type)
                         return
                 validator.ensure_complete()
             except ProviderContractError as e:
+                if pc_handle is not None:
+                    await pc_handle.finish(error_type="invalid_provider_event")
                 yield ChatEvent.error_event(
                     error_type="invalid_provider_event",
                     error_message=str(e),
                 )
                 return
             except ProviderError as e:
+                if pc_handle is not None:
+                    await pc_handle.finish(error_type=e.code)
                 yield ChatEvent.error_event(error_type=e.code, error_message=e.message)
                 return
+
+            # 正常或 stop_reason 结束 → 写 provider call 完成摘要
+            if pc_handle is not None and not saw_error:
+                await pc_handle.finish(
+                    response_summary={
+                        "stop_reason": stop_reason,
+                        "usage": last_usage or {},
+                    },
+                    error_type=error_type,
+                )
 
             if saw_error:
                 return
@@ -189,11 +223,53 @@ class AgentLoop:
         return results
 
     async def _execute_tool_call(self, tool_use_block: dict[str, Any]) -> ChatEvent:
-        return await self._tool_execution.execute_tool_call(
-            tool_use_id=str(tool_use_block.get("id", "")),
-            tool_name=str(tool_use_block.get("name", "")),
-            tool_input=tool_use_block.get("input", {}),
+        tool_name = str(tool_use_block.get("name", ""))
+        tool_input = tool_use_block.get("input", {})
+        tc_handle = (
+            self._turn.begin_tool_call(tool_name=tool_name, arguments=tool_input if isinstance(tool_input, dict) else {})
+            if self._turn is not None
+            else None
         )
+        result = await self._tool_execution.execute_tool_call(
+            tool_use_id=str(tool_use_block.get("id", "")),
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+        if tc_handle is not None:
+            from chariot.models.trace import ToolCallStatus
+
+            status = ToolCallStatus.ERROR if result.is_error else ToolCallStatus.OK
+            # result_summary 取 content 前 N 字摘要,避免大 result 灌进 trace 表
+            summary = self._summarize_tool_result(result)
+            error_message = summary.get("error") if status == ToolCallStatus.ERROR else None
+            await tc_handle.finish(status=status, result_summary=summary, error_message=error_message)
+        return result
+
+    @staticmethod
+    def _summarize_tool_result(result: ChatEvent) -> dict[str, Any]:
+        """tool_result event → 摘要 dict(用于 trace_tool_calls.result_summary)。
+
+        只保留前 N 字符的 content + is_error;完整 content 仍在 conversation
+        messages 表里(stateful)/ event 流里(stateless)。
+        """
+        snippet_chars = 512
+        content = result.content
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(str(block.get("text", "")))
+            text = "".join(text_parts)
+        else:
+            text = str(content or "")
+        snippet = text[:snippet_chars]
+        truncated = len(text) > snippet_chars
+        out: dict[str, Any] = {"is_error": result.is_error, "snippet": snippet}
+        if truncated:
+            out["truncated"] = True
+        if result.is_error:
+            out["error"] = snippet
+        return out
 
     @staticmethod
     def _build_next_req(

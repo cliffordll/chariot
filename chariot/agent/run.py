@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from chariot.providers.base import BaseProvider
     from chariot.repos.conversation_repo import ConversationRepo
     from chariot.tools.base import BaseTool
+    from chariot.trace import TurnHandle
 
 
 @dataclass(frozen=True)
@@ -95,9 +96,14 @@ class AIAgent:
         tools: dict[str, BaseTool],
         sessionmaker: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
+        from chariot.trace import TraceWriter
+
         self._providers = dict(providers)
         self._tools = dict(tools)
         self._sessionmaker = sessionmaker
+        # Phase B1:trace 写入入口。best-effort,失败不阻断主链路;
+        # sessionmaker=None 时 writer 自动退化为 no-op。
+        self._trace = TraceWriter(sessionmaker)
 
     # ---- 装载 ----
 
@@ -198,7 +204,12 @@ class AIAgent:
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
         stateful(`req.conversation_id` 非空)→ 在 conversation lock 内开 session 跑;
         stateless → 直接跑 AgentLoop 不开 session。
+
+        Phase B1:整段包在 trace turn 内,begin_turn / finalize 由本方法收口;
+        AgentLoop 内部的 provider call / tool call 也通过 turn handle 写入。
         """
+        from chariot.models.trace import TurnStatus
+
         binding = await self._resolve_binding(req)
         if binding.profile is not None and binding.profile.provider_profile is not None:
             req = dataclasses.replace(req, provider_name=binding.profile.provider_profile)
@@ -213,12 +224,44 @@ class AIAgent:
             )
             return
 
-        if req.is_stateful():
-            async for event in self._run_stateful_chat(req, provider, binding):
+        # Phase B1:begin turn(provider 解析后,branch 之前);失败降级 no-op
+        turn = await self._trace.begin_turn(
+            provider_name=provider.config.name,
+            conversation_id=req.conversation_id,
+            agent_profile=binding.profile.name if binding.profile is not None else None,
+            model=provider.config.model,
+        )
+        last_usage: dict[str, Any] | None = None
+        last_stop_reason: str | None = None
+        last_error: ChatEvent | None = None
+
+        try:
+            if req.is_stateful():
+                inner = self._run_stateful_chat(req, provider, binding, turn)
+            else:
+                inner = self._run_stateless_chat(req, provider, binding, turn)
+            async for event in inner:
+                if event.kind == "message_delta" and event.delta:
+                    sr = event.delta.get("stop_reason")
+                    if isinstance(sr, str):
+                        last_stop_reason = sr
+                if event.usage:
+                    last_usage = event.usage
+                if event.kind == "error":
+                    last_error = event
                 yield event
-        else:
-            async for event in self._run_stateless_chat(req, provider, binding):
-                yield event
+        finally:
+            status = TurnStatus.FAILED if last_error is not None else TurnStatus.COMPLETED
+            await turn.finalize(
+                status=status,
+                stop_reason=last_stop_reason,
+                error_type=last_error.error_type if last_error is not None else None,
+                error_message=last_error.error_message if last_error is not None else None,
+                input_tokens=(last_usage or {}).get("input_tokens"),
+                output_tokens=(last_usage or {}).get("output_tokens"),
+                cache_read_tokens=(last_usage or {}).get("cache_read_input_tokens"),
+                cache_write_tokens=(last_usage or {}).get("cache_creation_input_tokens"),
+            )
 
     async def _resolve_binding(self, req: ChatRequest) -> _AgentBinding:
         """req.agent_profile 非空 → 加载 AgentProfile + 解析 toolset 成员;
@@ -247,6 +290,7 @@ class AIAgent:
         req: ChatRequest,
         provider: BaseProvider,
         binding: _AgentBinding = _NO_BINDING,
+        turn: TurnHandle | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
         if self._sessionmaker is not None:
@@ -268,6 +312,7 @@ class AIAgent:
             tools=self._tools,
             repo=None,
             conversation_id=None,
+            turn=turn,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -301,6 +346,7 @@ class AIAgent:
         req: ChatRequest,
         provider: BaseProvider,
         binding: _AgentBinding = _NO_BINDING,
+        turn: TurnHandle | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """有 conversation_id:开 session + 进 conversation lock + load history + AgentLoop。
 
@@ -320,7 +366,7 @@ class AIAgent:
         async with self._sessionmaker() as session:
             try:
                 async with ConversationLockManager.acquire(conversation_id, db_session=session):
-                    async for event in self._run_stateful_turn(req, conversation_id, provider, session, binding):
+                    async for event in self._run_stateful_turn(req, conversation_id, provider, session, binding, turn):
                         yield event
             except ConversationLockTimeout as e:
                 yield ChatEvent.error_event(
@@ -335,6 +381,7 @@ class AIAgent:
         provider: BaseProvider,
         session: AsyncSession,
         binding: _AgentBinding = _NO_BINDING,
+        turn: TurnHandle | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
@@ -379,6 +426,7 @@ class AIAgent:
             tools=self._tools,
             repo=repo,
             conversation_id=conversation_id,
+            turn=turn,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
