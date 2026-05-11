@@ -1,11 +1,15 @@
 """`chariot eval` —— B2 evaluation loop。
 
-Wave 1 范围:argparse skeleton。子命令:
-- `chariot eval`              跑全套 golden task(wave 3 填真执行;现在 ERROR)
+子命令:
+- `chariot eval`              跑全套 golden task(可加 --category / --task 过滤)
 - `chariot eval list-tasks`   列 tests/golden/ 下已有 task
 - `chariot eval list-runs`    列历史 run(`~/.chariot/eval/<timestamp>/`,wave 4 真填)
 
-更多 flag(`--category`、`--task`、`--baseline`、`--diff`、`--no-save`)wave 3 / 4 加。
+`chariot eval` 跑批走真 AIAgent(`installed_runtime`):每个 task 用 unique
+conversation_id;agent_profile 取自 `--agent`(若提供),否则走默认 provider
++ active prompt bundle + 全量 enabled tools。
+
+更多 flag(`--baseline`、`--diff`、`--no-save`)wave 4 加。
 """
 
 from __future__ import annotations
@@ -16,8 +20,12 @@ from typing import Annotated
 
 import typer
 
+from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.eval.loader import GoldenTaskLoader, GoldenTaskLoadError
+from chariot.eval.report import EvalReport
+from chariot.eval.runner import EvalRunner
+from chariot.models.eval import GoldenTask
 
 eval_app = typer.Typer(
     name="eval",
@@ -35,12 +43,22 @@ def eval_root(
     ctx: typer.Context,
     category: Annotated[str, typer.Option("--category", help="只跑该 category")] = "",
     task: Annotated[str, typer.Option("--task", help="只跑该 task_id")] = "",
+    agent_profile: Annotated[str, typer.Option("--agent", help="跑批用指定 agent_profile")] = "",
+    golden_dir: Annotated[Path, typer.Option("--dir", help="golden task 目录")] = _DEFAULT_GOLDEN_DIR,
     no_save: Annotated[bool, typer.Option("--no-save", help="不落盘到 ~/.chariot/eval/")] = False,
 ) -> None:
-    """无子命令时:跑全套(wave 3 真填)。"""
+    """无子命令时:跑全套。"""
     if ctx.invoked_subcommand is not None:
         return
-    asyncio.run(_run_all(category=category or None, task_id=task or None, no_save=no_save))
+    asyncio.run(
+        _run_all(
+            category=category or None,
+            task_id=task or None,
+            agent_profile=agent_profile or None,
+            golden_dir=golden_dir,
+            no_save=no_save,
+        )
+    )
 
 
 @eval_app.command("list-tasks", help="列 tests/golden/ 下已有 golden task")
@@ -57,13 +75,45 @@ def list_runs_cmd(
     asyncio.run(_list_runs(runs_dir))
 
 
-async def _run_all(*, category: str | None, task_id: str | None, no_save: bool) -> None:
+async def _run_all(
+    *,
+    category: str | None,
+    task_id: str | None,
+    agent_profile: str | None,
+    golden_dir: Path,
+    no_save: bool,
+) -> None:
     del no_save  # wave 4 用
-    Renderer.out("(B2 wave 1: runner skeleton 还没接 AIAgent,跑批先空过 —— wave 3 填)")
-    if category:
-        Renderer.out(f"filter: category={category}")
+    try:
+        tasks = GoldenTaskLoader.load_dir(golden_dir)
+    except GoldenTaskLoadError as exc:
+        Renderer.die(str(exc))
+        return
+    tasks = _filter_tasks(tasks, category=category, task_id=task_id)
+    if not tasks:
+        Renderer.out("(过滤后没有可跑的 task)")
+        return
+
+    async with installed_runtime() as agent:
+
+        def _factory(_task: GoldenTask):
+            # CLI 跑批所有 task 共享同一个 AIAgent 实例 —— 装载成本只付一次,符合 B2 串行语义
+            del _task
+            return agent
+
+        runner = EvalRunner(agent_factory=_factory, agent_profile=agent_profile)
+        records = await runner.run_all(tasks)
+
+    for line in EvalReport.render_lines(records):
+        Renderer.out(line)
+
+
+def _filter_tasks(tasks: list[GoldenTask], *, category: str | None, task_id: str | None) -> list[GoldenTask]:
     if task_id:
-        Renderer.out(f"filter: task={task_id}")
+        return [t for t in tasks if t.task_id == task_id]
+    if category:
+        return [t for t in tasks if t.category == category]
+    return tasks
 
 
 async def _list_tasks(golden_dir: Path) -> None:
