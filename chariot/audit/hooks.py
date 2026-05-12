@@ -48,6 +48,8 @@ class AuditHookManager:
     EVENT_MEMORY_STORE: ClassVar[str] = "memory_store"
     EVENT_CHECKPOINT_CREATE: ClassVar[str] = "checkpoint_create"
     EVENT_ROLLBACK: ClassVar[str] = "rollback"
+    EVENT_SKILL_STORE: ClassVar[str] = "skill_store"  # B6 wave 1:create/update/delete/enable/disable
+    EVENT_SKILL_ACTIVATE: ClassVar[str] = "skill_activate"  # B6 wave 4:每次 skill 注入 request
 
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession] | None) -> None:
         self._sessionmaker = sessionmaker
@@ -160,6 +162,62 @@ class AuditHookManager:
                 "action": action,
                 "kind": kind,
                 "pinned": pinned,
+            },
+        )
+
+    async def record_skill_store(
+        self,
+        *,
+        skill_id: str,
+        name: str,
+        action: str,  # 'create' / 'update' / 'enable' / 'disable' / 'delete'
+        source: str = "manual",  # 'manual'(CLI/sidecar)/ 'propose'(wave 3 agent)
+        proposer: str | None = None,  # wave 3 propose 时记 agent identifier
+        checkpoint_id: str | None = None,  # wave 3 auto-checkpoint 后传入
+    ) -> None:
+        """B6:skill 写入路径自动审计。
+
+        - wave 1:CLI / sidecar 手工 install/enable/disable/delete 时调
+        - wave 3:`propose_skill` tool 走完整链路时调,source='propose'
+        """
+        await self.record(
+            self.EVENT_SKILL_STORE,
+            status=action,
+            payload={
+                "skill_id": skill_id,
+                "name": name,
+                "action": action,
+                "source": source,
+                "proposer": proposer,
+                "checkpoint_id": checkpoint_id,
+            },
+        )
+
+    async def record_skill_activate(
+        self,
+        *,
+        skill_name: str,
+        source: str,  # 'builtin' / 'db'
+        conversation_id: str | None = None,
+        agent_profile: str | None = None,
+        is_error: bool = False,
+    ) -> None:
+        """B6 wave 4:每次 SkillActivator.activate 跑通后写一条。
+
+        给 SkillCurator 读出 "近期 N 次 activate 失败比例" / "近 30 天 activate 频次"
+        / "总 activate 次数" 等指标。`is_error` 字段后续若 tool_result 错误回退能写,
+        wave 4 当前不接 —— 默认 False(表示"activate 注入成功",不代表 trajectory
+        全跑通)。
+        """
+        await self.record(
+            self.EVENT_SKILL_ACTIVATE,
+            status="error" if is_error else "ok",
+            payload={
+                "skill_name": skill_name,
+                "source": source,
+                "conversation_id": conversation_id,
+                "agent_profile": agent_profile,
+                "is_error": is_error,
             },
         )
 

@@ -114,6 +114,17 @@ def chat_cmd(
         int,
         typer.Option("--reflect-retries", help="reflection 最多重试次数(--reflect 时生效)"),
     ] = 2,
+    skill: Annotated[
+        str | None,
+        typer.Option(
+            "--skill",
+            help=(
+                "B6 wave 2:激活 skill name(`chariot skill list` 看可用)。"
+                '覆盖 agent_profile.default_skill;空串 `--skill ""` 显式清空。'
+                "dangling reference / disabled skill 走 fallback 不阻断。"
+            ),
+        ),
+    ] = None,
 ) -> None:
     conversation_id = _resolve_conversation_id(conversation)
     asyncio.run(
@@ -128,6 +139,7 @@ def chat_cmd(
             agent_profile=agent,
             reflection_enabled=reflect,
             reflection_max_retries=reflect_retries,
+            skill=skill,
         )
     )
 
@@ -184,6 +196,7 @@ async def _run(
     agent_profile: str | None,
     reflection_enabled: bool = False,
     reflection_max_retries: int = 2,
+    skill: str | None = None,
 ) -> None:
     # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
     # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
@@ -209,6 +222,7 @@ async def _run(
                 agent_profile=agent_profile,
                 reflection_enabled=reflection_enabled,
                 reflection_max_retries=reflection_max_retries,
+                skill=skill,
             )
             if text is None or not text.strip():
                 from chariot.cli.repl import ChatRepl

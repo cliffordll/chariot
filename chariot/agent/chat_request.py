@@ -145,6 +145,18 @@ class ChatRequest:
     reflection_max_retries: int = 2
     """B4 wave 2:reflection 最多 retry 几次;默认 2(初次跑 + 至多 2 次 retry)。"""
 
+    skill: str | None = None
+    """B6 wave 2:skill name 引用;非 None 时 AIAgent `_prepare_request` 阶段
+    通过 `SkillActivator` 把 `<skill>` 块拼进 system + 按 manifest.allowed_tools /
+    forbidden_tools 过滤工具列表。
+
+    - None(常态):走 prompt bundle + 全量工具(或 agent_profile.tool_profile 过滤)
+    - agent_profile.default_skill 非空且本字段为 None → AIAgent 透传 profile 字段
+    - dangling reference(skill name 不存在 / disabled)走 fallback,不阻断
+
+    显式空串覆盖 agent_profile.default_skill(关闭 skill 预激活)。
+    """
+
     # ---- 查询便利方法(逻辑收进类,不散成模块级 helper) ----
 
     def is_stateful(self) -> bool:

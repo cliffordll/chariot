@@ -42,6 +42,12 @@ class SkillRepo:
         row = await self.session.get(SkillRow, entry_id)
         return self._row_to_entry(row) if row is not None else None
 
+    async def get_by_name(self, name: str) -> SkillEntry | None:
+        """按 name 查(B6 wave 1+;wave 3 propose 用来检测重名)。"""
+        stmt = select(SkillRow).where(SkillRow.name == name)
+        row = (await self.session.execute(stmt)).scalars().first()
+        return self._row_to_entry(row) if row is not None else None
+
     async def create(
         self,
         *,
@@ -68,6 +74,50 @@ class SkillRepo:
             raise ConfigError(f"skill name {name!r} 已存在") from e
         await self.session.refresh(row)
         return self._row_to_entry(row)
+
+    async def update(
+        self,
+        entry_id: str,
+        *,
+        description: str | None = None,
+        content: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> SkillEntry:
+        """B6 wave 1:编辑 skill manifest 字段(不允许改 name —— 同源 builtin
+        遮蔽语义靠 name)。name 改了等于换 skill,走 delete + create。"""
+        row = await self.session.get(SkillRow, entry_id)
+        if row is None:
+            raise ConfigError(f"skill {entry_id!r} not found")
+        if description is not None:
+            row.description = description
+        if content is not None:
+            row.content = content
+        if meta is not None:
+            row.meta = self._serialize_json("meta", meta)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
+
+    async def set_enabled(self, entry_id: str, enabled: bool) -> SkillEntry:
+        """B6 wave 1:开/关 skill;builtin 在 registry 层面永远 enabled,本方法
+        只动 DB skill。"""
+        row = await self.session.get(SkillRow, entry_id)
+        if row is None:
+            raise ConfigError(f"skill {entry_id!r} not found")
+        row.enabled = 1 if enabled else 0
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
+
+    async def delete(self, entry_id: str) -> bool:
+        """B6 wave 1:删 DB skill 行;builtin 不可删(它们不在 DB 表里)。
+        返 False 表示 row 不存在。"""
+        row = await self.session.get(SkillRow, entry_id)
+        if row is None:
+            return False
+        await self.session.delete(row)
+        await self.session.commit()
+        return True
 
     @staticmethod
     def _serialize_json(label: str, data: dict[str, Any]) -> str:

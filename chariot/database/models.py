@@ -388,6 +388,8 @@ class AgentProfileRow(Base):
     # B4 wave 3:reflection 开关 + retry 预算(默认关,跟 ChatRequest 默认对齐)
     reflection_enabled: Mapped[int] = mapped_column(default=0)
     reflection_max_retries: Mapped[int] = mapped_column(default=2)
+    # B6 wave 2:agent_profile 预绑 skill;NULL = 不绑(常态)
+    default_skill: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

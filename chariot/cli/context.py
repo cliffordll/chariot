@@ -97,6 +97,11 @@ class ChatContext:
     # agent_profile.reflection_enabled=True 时会自动透传,这里只对应"显式 --reflect"。
     reflection_enabled: bool = False
     reflection_max_retries: int = 2
+    # B6 wave 2:CLI `--skill` flag 承载;每轮 req 透传给 ChatRequest.skill。
+    # - None(常态):走 agent_profile.default_skill 或 不激活 skill
+    # - 非空 str:显式激活该 skill
+    # - "" 空串:显式清空(覆盖 profile.default_skill,关闭 skill 预激活)
+    skill: str | None = None
 
     # ---------- 状态操作 ----------
 
@@ -209,7 +214,12 @@ class ChatContext:
             agent_profile=self.agent_profile,
             reflection_enabled=self.reflection_enabled,
             reflection_max_retries=self.reflection_max_retries,
+            skill=self.skill,
         )
+
+    def set_skill(self, name: str | None) -> None:
+        """REPL `/skill <name>` / `/skill clear` 用。"""
+        self.skill = name
 
     def _messages_to_send(self) -> list[dict[str, Any]]:
         """决定 req.messages 装什么。

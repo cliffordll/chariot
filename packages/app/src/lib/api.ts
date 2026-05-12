@@ -323,6 +323,39 @@ export interface CapabilityEntry {
   updated_at: string;
 }
 
+// ---- B6 wave 4b: Skills ----
+
+export interface SkillSummary {
+  name: string;
+  source: "builtin" | "db";
+  version: string;
+  enabled: boolean;
+  description: string;
+  tags: string[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  prompt: string;
+  allowed_tools: string[] | null;
+  forbidden_tools: string[];
+}
+
+export interface SkillEntryRow {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SkillCurateBuckets {
+  stale: string[];
+  underused: string[];
+  failing: string[];
+  overlapping: { a: string; b: string; ratio: number }[];
+}
+
 export interface AgentProfile {
   name: string;
   role: string;
@@ -1173,6 +1206,38 @@ const apiCore = {
 
   setCapability(name: string, enabled: boolean): Promise<{ capability: CapabilityEntry }> {
     return rpc("set_capability", { name, enabled });
+  },
+
+  // ---- B6 wave 4b: Skills ----
+
+  listSkills(): Promise<{ skills: SkillSummary[] }> {
+    return rpc("list_skills", {});
+  },
+
+  getSkill(name: string): Promise<{ skill: SkillDetail }> {
+    return rpc("get_skill", { name });
+  },
+
+  installSkill(
+    params: { content: string; enabled?: boolean } | { from_builtin: string; enabled?: boolean },
+  ): Promise<{ skill: SkillEntryRow }> {
+    return rpc("install_skill", params as Record<string, unknown>);
+  },
+
+  enableSkill(name: string): Promise<{ skill: SkillEntryRow }> {
+    return rpc("enable_skill", { name });
+  },
+
+  disableSkill(name: string): Promise<{ skill: SkillEntryRow }> {
+    return rpc("disable_skill", { name });
+  },
+
+  deleteSkill(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_skill", { name });
+  },
+
+  curateSkills(): Promise<SkillCurateBuckets> {
+    return rpc("curate_skills", {});
   },
 } as const;
 

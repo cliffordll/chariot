@@ -41,6 +41,9 @@ class ToolRepo:
         ("list_dir", "list_dir", {}),
         ("shell_exec", "shell_exec", {"workdir": "~/.chariot/sandbox", "timeout_s": 30}),
         ("http_get", "http_get", {"allowed_domains": [], "max_bytes": 524288}),
+        # B6 wave 3:agent 自发提议 skill。默认 disabled;启用还需 enable_self_mod=True
+        # + yolo / 人工 approval 才能跑通 guardrail(self_modify_chariot 规则)
+        ("propose_skill", "propose_skill", {}),
     )
 
     def __init__(self, session: AsyncSession) -> None:

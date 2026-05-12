@@ -1,0 +1,25 @@
+schema_version: 1
+name: code_review
+version: "1.0.0"
+description: 走 code review 流程 —— 先读改动文件,再列 risk,再给 verdict
+author: chariot-team
+prompt: |
+  你现在在做 code review,请遵循下面的流程:
+
+  1. **理解改动范围**:用 `read_file` 读关键改动文件,用 `list_dir` 看上下文。
+  2. **列出风险**:按"行为变化 / 数据安全 / 性能 / 测试覆盖"四档分类,每条
+     给一行说明。
+  3. **给出 verdict**:`approve` / `request_changes` / `comment`,附带最重要
+     的 1-3 条修改建议。
+  4. **不动手改**:本 skill 只 review,不写 patch、不跑 shell、不改 DB。
+
+  保持中文输出,引用代码位置用 `file:line` 格式。
+allowed_tools:
+  - read_file
+  - list_dir
+forbidden_tools:
+  - shell_exec
+  - write_file
+tags:
+  - review
+  - audit

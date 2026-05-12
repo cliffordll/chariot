@@ -673,6 +673,107 @@ API client(`packages/app/src/lib/api.ts`)加 10 个方法:
 
 ---
 
+## 7.17 Skills 生命周期(B6 wave 1-4)
+
+### 概念
+
+- **Skill = 一段「角色式」prompt + 工具白名单**;运行时由 `SkillActivator` 注入
+  到 `request.system` 末尾(`<skill name="..."> ... </skill>` 块),并按 manifest
+  的 `allowed_tools` / `forbidden_tools` 过滤已挂载的 tools
+- **两种来源**:`builtin/` 内的 YAML(3 条 sample:`code_review` / `debug_helper` /
+  `git_committer`)+ DB `skills` 表行;同名 DB 覆盖 builtin(允许 patch 内置)
+- **propose**:`propose_skill` tool 让 agent **自发**提议新 skill(走 B5 全链路:
+  `self_modify_chariot` guardrail → `enable_self_mod` + yolo → 自动 checkpoint →
+  落 DB enabled=False)
+- **activator audit**:每次 `_maybe_activate_skill` 跑通后写一条
+  `audit_events.skill_activate`,给 Curator 喂数据
+- **curator**:read-only 静态分类(stale / underused / failing / overlapping),
+  只建议、不改 enabled
+
+### CLI
+
+```
+chariot skill list                  # union 视图(source / version / enabled / tags)
+chariot skill show <name>           # 完整 manifest(prompt / allowed_tools / ...)
+chariot skill install --from path.yaml      # 装外部 YAML
+chariot skill install --from code_review    # fork builtin 到 DB(覆盖语义)
+chariot skill enable <name>         # 开 DB skill
+chariot skill disable <name>        # 关 DB skill
+chariot skill remove <name>         # 删 DB skill(builtin 不可删)
+chariot skill proposals [--limit N] # 历史 propose 调用(audit filter source=propose)
+chariot skill curate                # 跑 4-bucket 静态分析
+chariot chat --skill code_review    # 单次 chat 指定 skill
+```
+
+REPL 内:`/skill list` / `/skill <name>` / `/skill clear`。
+
+### sidecar RPC
+
+`list_skills` / `get_skill` / `install_skill` / `enable_skill` / `disable_skill` /
+`delete_skill` / `curate_skills`(7 个;均在 `chariot/sidecar/methods/skill.py`)。
+
+### 桌面 `/skills` 页
+
+`packages/app/src/pages/Skills.tsx`,三 tab:
+
+- **Library**:全 skill 列表 + 详情面板(prompt / allowed_tools) + builtin
+  "Fork" 按钮(fork 到 DB)+ DB skill "Enable / Disable / Delete" + 底部
+  "Install from YAML" 表单
+- **Proposals**:`audit_events` 客户端 filter `event_type=skill_store` AND
+  `payload.source=propose`;表格列 created / status / name / proposer /
+  checkpoint(checkpoint 点击跳 `/security#checkpoints`)/ error
+- **Curator**:跑 `curate_skills` → 4-bucket(stale / underused / failing /
+  overlapping),Re-run 按钮可重跑
+
+### propose 完整链路
+
+```
+agent invokes propose_skill(name=..., description=..., prompt=...)
+  ↓ ToolExecutionService.execute_tool_call
+  ↓ guardrail.evaluate → self_modify_chariot 命中
+      ├─ enable_self_mod=False → DENY → tool_result(is_error=True)
+      └─ enable_self_mod=True → REQUIRE_APPROVAL
+         └─ ApprovalPolicy.auto_approve
+              ├─ yolo=False → DENY
+              └─ yolo=True → 放行
+  ↓ tool.execute → SkillProposeService.propose
+      ├─ manifest 自检(SkillLoader.parse_yaml)→ 失败 audit failed
+      ├─ 重名 check(SkillRepo.get_by_name)→ 命中 audit failed
+      ├─ CheckpointManager.create("before-skill-propose-{name}")→ 失败 audit failed
+      ├─ SkillRepo.create(content=YAML, enabled=False, meta={source, proposer, checkpoint_id})
+      └─ audit_hooks.record_skill_store(action="create", source="propose")
+```
+
+任一段失败:checkpoint 若已建则保留(用户可手工 rollback);skill row **不写**。
+
+### 数据接口
+
+- `chariot/skills/base.py`:`BaseSkill` ABC + `BuiltinSkill` / `DbSkill` + `SkillManifest`
+- `chariot/skills/loader.py`:`SkillLoader.parse_yaml` / `load_builtin`(jsonschema 严格)
+- `chariot/skills/registry.py`:`SkillRegistry.load` builtin + DB union
+- `chariot/skills/activator.py`:`SkillActivator.activate(req, skill)` 注入 system + 过滤 tools
+- `chariot/skills/propose_service.py`:`SkillProposeService.propose(ProposeInput)`
+- `chariot/skills/curator.py`:`SkillCurator.curate()` → `SkillCurateResult`
+- `chariot/tools/builtin/propose_skill.py`:`ProposeSkillTool`(`attach_service` 注入)
+- `chariot/audit/hooks.py`:`EVENT_SKILL_STORE` / `EVENT_SKILL_ACTIVATE` + 两个 record helper
+
+### v22 migration
+
+`022_agent_default_skill.sql`:`agent_profiles.default_skill TEXT`,
+`PRAGMA user_version = 22`。`AgentProfile.default_skill` + `ChatRequest.skill`
+做"per-call > profile > 不激活"三档优先级(`req.skill=""` 显式清空覆盖 profile)。
+
+### 验证
+
+后端:`uv run pytest tests/platform/test_skill_*.py tests/sidecar/test_skill_methods.py`
+(40+ 用例:loader / registry / repo / activator / profile / propose_service /
+propose_skill tool / curator / sidecar 7 个 RPC)。
+
+桌面:`bun --filter @chariot/app build` 出包后,dev server 打开 `/skills`,
+跑通三 tab 交互(install / enable / disable / curate)。
+
+---
+
 ## 8. flag 冲突 / 优先级速查
 
 | flag 组合 | 行为 |

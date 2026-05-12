@@ -17,6 +17,7 @@ const Evals = lazy(() => import("@/pages/Evals"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Conversations = lazy(() => import("@/pages/Conversations"));
 const Security = lazy(() => import("@/pages/Security"));
+const Skills = lazy(() => import("@/pages/Skills"));
 
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
@@ -33,6 +34,7 @@ export const NAV_ITEMS = [
   { path: "/traces", label: "Traces" },
   { path: "/evals", label: "Evals" },
   { path: "/security", label: "Security" },
+  { path: "/skills", label: "Skills" },
   { path: "/conversations", label: "Conversations" },
   { path: "/chat", label: "Chat" },
 ] as const;
@@ -56,6 +58,7 @@ export function AppRoutes() {
         <Route path="/traces" element={<Traces />} />
         <Route path="/evals" element={<Evals />} />
         <Route path="/security" element={<Security />} />
+        <Route path="/skills" element={<Skills />} />
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

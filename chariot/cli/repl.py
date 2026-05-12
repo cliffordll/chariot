@@ -92,6 +92,8 @@ class ChatRepl:
         "/convos",
         "/tool",
         "/tools",
+        "/skill",
+        "/skills",
     ]
     """Tab 补全候选。新增 slash 命令时同步加这里(`_HELP` 文案是另一个真源)。"""
 
@@ -113,6 +115,10 @@ class ChatRepl:
         "  /conversations, /convos 列最近会话\n"
         "  /tool                  显示当前已启用工具\n"
         "  /tools                 列全部内置工具(含未启用)\n"
+        "  /skill                 显示当前激活的 skill\n"
+        "  /skill <name>          本次会话激活该 skill\n"
+        "  /skill clear           清空当前 skill(显式空串覆盖 default_skill)\n"
+        "  /skills                列 registry 可用 skill(builtin + DB union)\n"
         "  /help                  本说明"
     )
 
@@ -221,9 +227,58 @@ class ChatRepl:
         if cmd == "/tools":
             await self._slash_tools_list(arg)
             return False
+        if cmd == "/skill":
+            self._slash_skill(arg)
+            return False
+        if cmd == "/skills":
+            self._slash_skills_list()
+            return False
 
         Renderer.error_bubble(f"未知命令 {cmd!r};/help 查看可用命令")
         return False
+
+    # ---------- /skill · /skills (B6 wave 2) ----------
+
+    def _slash_skill(self, arg: str) -> None:
+        """- `/skill` 显示当前 skill
+        - `/skill <name>` 本次会话激活 <name>
+        - `/skill clear` / `/skill ""` 显式清空(覆盖 agent_profile.default_skill)
+        """
+        if not arg:
+            cur = self.ctx.skill
+            if cur is None:
+                Renderer.out("skill: (none; agent_profile.default_skill 起作用)")
+            elif cur == "":
+                Renderer.out("skill: (explicitly cleared)")
+            else:
+                Renderer.out(f"skill: {cur}")
+            return
+        if arg in ("clear", '""', "''"):
+            self.ctx.set_skill("")
+            Renderer.out("skill cleared (本次会话覆盖 default_skill)")
+            return
+        # 检查 skill 是否存在(给提示,不阻止)
+        registry = self.ctx.agent.skill_registry
+        if registry is not None and registry.get(arg) is None:
+            Renderer.error_bubble(
+                f"warning: skill {arg!r} 在 registry 里找不到;chat 仍会尝试,dangling 走 fallback",
+            )
+        self.ctx.set_skill(arg)
+        Renderer.out(f"skill → {arg} (this session)")
+
+    def _slash_skills_list(self) -> None:
+        """`/skills` —— 列 registry 全部 skill。"""
+        registry = self.ctx.agent.skill_registry
+        if registry is None:
+            Renderer.out("(skill registry not loaded)")
+            return
+        skills = registry.list_all()
+        if not skills:
+            Renderer.out("(no skills)")
+            return
+        for s in skills:
+            badge = "ON" if s.enabled else "off"
+            Renderer.out(f"  {badge}  {s.name}  [{s.source}]  {s.manifest.description}")
 
     # ---------- /provider · /providers ----------
 
