@@ -3,6 +3,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { api, ApiError, type Tool } from "@/lib/api";
 
 interface ToolsListResponse {
@@ -10,13 +19,10 @@ interface ToolsListResponse {
 }
 
 /**
- * Tools 页 —— 内置工具配置(0.4.0)。
+ * Tools 页 —— 内置工具 + 自定义工具管理(0.8.7)。
  *
- * 4 条 fixture(name + type 不可改,数量固定):read_file / list_dir / shell_exec / http_get。
- * 可改:enabled(toggle)、options(KV 编辑器,整体替换)。改动后 server 立即 rebuild
- * Agent.tools,LLM 下一轮可见。
- *
- * UI 模式照抄 Models 页:行内 toggle + 展开行编辑 options + schema 预览。
+ * builtin: 只读,可 toggle / 改 options
+ * custom: 可增删改,可 toggle / 改 options
  */
 
 type ToolsState =
@@ -35,6 +41,7 @@ export default function Tools() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pendingEnable, setPendingEnable] = useState<Set<string>>(new Set());
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -101,6 +108,20 @@ export default function Tools() {
     }
   }, []);
 
+  const onDelete = useCallback(
+    async (name: string) => {
+      if (!window.confirm(`Delete custom tool '${name}'?`)) return;
+      try {
+        await api.deleteTool(name);
+        await load();
+      } catch (e) {
+        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+        alert(msg);
+      }
+    },
+    [load],
+  );
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -109,9 +130,14 @@ export default function Tools() {
     <section>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Tools</h1>
-        <Button variant="outline" size="sm" onClick={() => void load()}>
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            Refresh
+          </Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            + New custom tool
+          </Button>
+        </div>
       </div>
 
       <ToolsCard
@@ -122,8 +148,11 @@ export default function Tools() {
         onToggleExpand={toggleExpand}
         onToggleEnabled={onToggleEnabled}
         onProbe={onProbe}
+        onDelete={onDelete}
         onOptionsSaved={() => void load()}
       />
+
+      <CreateToolDialog open={showCreate} onClose={() => setShowCreate(false)} onCreated={() => void load()} />
     </section>
   );
 }
@@ -136,6 +165,7 @@ function ToolsCard({
   onToggleExpand,
   onToggleEnabled,
   onProbe,
+  onDelete,
   onOptionsSaved,
 }: {
   state: ToolsState;
@@ -145,6 +175,7 @@ function ToolsCard({
   onToggleExpand: (name: string) => void;
   onToggleEnabled: (name: string, enabled: boolean) => void | Promise<void>;
   onProbe: (name: string) => void | Promise<void>;
+  onDelete: (name: string) => void | Promise<void>;
   onOptionsSaved: () => void;
 }) {
   if (state.kind === "loading") {
@@ -166,7 +197,7 @@ function ToolsCard({
   return (
     <div className="max-w-4xl rounded-lg border border-border p-4">
       <div className="mb-2 text-xs text-muted-foreground">
-        4 条 fixture · name + type 不可改。toggle 即时生效(server rebuild Agent),
+        builtin 只读,custom 可增删改。toggle 即时生效(server rebuild Agent),
         展开行可编辑 options 与查看 anthropic tool schema。
       </div>
       <ul className="mb-4 divide-y divide-border rounded-md border border-border">
@@ -180,6 +211,7 @@ function ToolsCard({
             onToggleExpand={() => onToggleExpand(tool.name)}
             onToggleEnabled={(v) => void onToggleEnabled(tool.name, v)}
             onProbe={() => void onProbe(tool.name)}
+            onDelete={() => void onDelete(tool.name)}
             onOptionsSaved={onOptionsSaved}
           />
         ))}
@@ -206,6 +238,7 @@ function ToolRow({
   onToggleExpand,
   onToggleEnabled,
   onProbe,
+  onDelete,
   onOptionsSaved,
 }: {
   tool: Tool;
@@ -215,8 +248,10 @@ function ToolRow({
   onToggleExpand: () => void;
   onToggleEnabled: (v: boolean) => void;
   onProbe: () => void;
+  onDelete: () => void;
   onOptionsSaved: () => void;
 }) {
+  const isCustom = tool.source === "custom";
   return (
     <li>
       <div className="px-3 py-2 text-sm">
@@ -233,6 +268,12 @@ function ToolRow({
             <code className="font-mono">{tool.name}</code>
             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
               {tool.type}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={`h-5 px-1.5 text-[10px] ${isCustom ? "text-blue-600 border-blue-300/50" : "text-muted-foreground"}`}
+            >
+              {tool.source ?? "builtin"}
             </Badge>
             {tool.schema_ === null && (
               <Badge
@@ -259,6 +300,16 @@ function ToolRow({
                     ? "Probe failed"
                     : "Probe"}
             </Button>
+            {isCustom && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-3 text-xs text-destructive hover:bg-destructive/10"
+                onClick={onDelete}
+              >
+                Delete
+              </Button>
+            )}
             <Button
               variant={tool.enabled ? "default" : "outline"}
               size="sm"
@@ -271,6 +322,11 @@ function ToolRow({
             </Button>
           </div>
         </div>
+        {tool.description && (
+          <div className="mt-1 text-xs text-muted-foreground pl-5">
+            {tool.description}
+          </div>
+        )}
       </div>
       {isExpanded && (
         <>
@@ -491,5 +547,177 @@ function SchemaBlock({ tool }: { tool: Tool }) {
         </pre>
       )}
     </div>
+  );
+}
+
+// ---------- CreateToolDialog ----------
+
+function CreateToolDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [customType, setCustomType] = useState<"http_custom" | "shell_custom">("http_custom");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [optionsJson, setOptionsJson] = useState("{}");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const reset = () => {
+    setCustomType("http_custom");
+    setName("");
+    setDescription("");
+    setOptionsJson("{}");
+    setErr(null);
+  };
+
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
+
+  const handleCreate = async () => {
+    setErr(null);
+    if (!name.trim()) {
+      setErr("name is required");
+      return;
+    }
+    let options: Record<string, unknown>;
+    try {
+      options = JSON.parse(optionsJson);
+    } catch {
+      setErr("options must be valid JSON");
+      return;
+    }
+    if (typeof options !== "object" || options === null) {
+      setErr("options must be an object");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.createTool({
+        name: name.trim(),
+        custom_type: customType,
+        description: description.trim(),
+        options,
+      });
+      onCreated();
+      handleClose();
+    } catch (e) {
+      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setErr(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const httpExample = JSON.stringify(
+    {
+      method: "GET",
+      url_template: "https://api.example.com/items/${id}",
+      headers: { Authorization: "Bearer ${token}" },
+      timeout_s: 10,
+      max_bytes: 102400,
+    },
+    null,
+    2,
+  );
+
+  const shellExample = JSON.stringify(
+    {
+      command_template: "echo ${message}",
+      workdir: ".",
+      timeout_s: 30,
+    },
+    null,
+    2,
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New custom tool</DialogTitle>
+          <DialogDescription>Create a custom HTTP or shell tool.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Type</Label>
+            <div className="flex gap-2 mt-1">
+              <Button
+                variant={customType === "http_custom" ? "default" : "outline"}
+                size="sm"
+                className="text-xs"
+                onClick={() => setCustomType("http_custom")}
+              >
+                http_custom
+              </Button>
+              <Button
+                variant={customType === "shell_custom" ? "default" : "outline"}
+                size="sm"
+                className="text-xs"
+                onClick={() => setCustomType("shell_custom")}
+              >
+                shell_custom
+              </Button>
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs">Name</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my_api"
+              className="h-8 text-xs mt-1"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs">Description</Label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this tool does"
+              className="h-8 text-xs mt-1"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs">Options (JSON)</Label>
+            <textarea
+              value={optionsJson}
+              onChange={(e) => setOptionsJson(e.target.value)}
+              className="mt-1 w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+              placeholder={customType === "http_custom" ? httpExample : shellExample}
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Use ${var} for template variables. Example above.
+            </p>
+          </div>
+
+          {err && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+              {err}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={handleClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={() => void handleCreate()} disabled={submitting}>
+            {submitting ? "Creating…" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -83,12 +83,12 @@ class ToolMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         options = self._optional_dict(params, "options")
-        description = self._clearable_str(params, "description")
+        description = self._optional_str(params, "description")
         async with self._session() as session:
             tool = await self._service.update_custom_tool(
                 session,
                 name=name,
                 options=options,
-                description=description if description is not None else None,
+                description=description,
             )
         return {"tool": tool}
