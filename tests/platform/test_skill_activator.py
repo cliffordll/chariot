@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
+from chariot.agent.chat_request import ChatRequest, Message, SystemBlock, ToolSchema
 from chariot.skills.activator import SkillActivator
 from chariot.skills.base import BuiltinSkill, SkillManifest
 
@@ -65,14 +65,14 @@ def test_activate_appends_to_anthropic_system_list_form() -> None:
     req_with_list = req.__class__(
         provider_name="mock",
         messages=req.messages,
-        system=[{"type": "text", "text": "BLOCK_A"}],
+        system=[SystemBlock(type="text", text="BLOCK_A")],
     )
     skill = _make_skill(prompt="P")
     out = SkillActivator.activate(req_with_list, skill)
     assert isinstance(out.system, list)
     assert len(out.system) == 2
-    assert out.system[0]["text"] == "BLOCK_A"
-    assert "P" in str(out.system[1]["text"])
+    assert out.system[0].text == "BLOCK_A"
+    assert "P" in str(out.system[1].text)
 
 
 # ---- tool filter ----
