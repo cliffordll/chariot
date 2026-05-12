@@ -5,6 +5,9 @@ Current surfaces:
 - `show <name>`: show one tool's config and schema
 - `probe <name>`: validate the current config by rebuilding the tool
 - `enable / disable / config`: existing admin actions
+- `create`: create a custom tool (0.8.7)
+- `update <name>`: update a custom tool (0.8.7)
+- `delete <name>`: delete a custom tool (0.8.7)
 """
 
 from __future__ import annotations
@@ -12,9 +15,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+import yaml
 
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.cli._runtime import installed_runtime
@@ -24,7 +29,7 @@ from chariot.tools.registry import ToolRegistry
 
 tool_app = typer.Typer(
     name="tool",
-    help="Manage built-in tools",
+    help="Manage built-in and custom tools",
     no_args_is_help=True,
 )
 
@@ -42,12 +47,13 @@ async def _list() -> None:
         (
             e.name,
             e.type,
+            e.source,
             "ON" if e.enabled else "off",
-            json.dumps(e.options, ensure_ascii=False),
+            e.description[:30] + "..." if e.description and len(e.description) > 30 else e.description,
         )
         for e in entries
     ]
-    Renderer.table(["name", "type", "enabled", "options"], rows, title="tools")
+    Renderer.table(["name", "type", "source", "enabled", "description"], rows, title="tools")
 
 
 @tool_app.command("show", help="Show one tool's config and schema")
@@ -244,6 +250,238 @@ def _stringify(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False)
+
+
+# ---------- create ----------
+
+
+@tool_app.command("create", help="Create a custom tool (0.8.7)")
+def create_cmd(
+    name: Annotated[str, typer.Option("--name", "-n", help="tool name (unique)")],
+    type_: Annotated[
+        str,
+        typer.Option("--type", "-t", help="custom type: http_custom | shell_custom"),
+    ],
+    description: Annotated[
+        str | None,
+        typer.Option("--description", "-d", help="tool description"),
+    ] = None,
+    from_file: Annotated[
+        str | None,
+        typer.Option("--from-file", "-f", help="YAML config file"),
+    ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option("--interactive", "-i", help="interactive mode (input options YAML)"),
+    ] = False,
+) -> None:
+    asyncio.run(_create(name, type_, description, from_file, interactive))
+
+
+async def _create(
+    name: str,
+    type_: str,
+    description: str | None,
+    from_file: str | None,
+    interactive: bool,
+) -> None:
+    if type_ not in ("http_custom", "shell_custom"):
+        Renderer.die(f"type must be http_custom or shell_custom, got {type_!r}")
+        return
+
+    desc = description or ""
+    options: dict[str, Any] = {}
+
+    if from_file is not None:
+        path = Path(from_file)
+        if not path.exists():
+            Renderer.die(f"file not found: {from_file!r}")
+            return
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as e:
+            Renderer.die(f"YAML parse error: {e}")
+            return
+        if not isinstance(data, dict):
+            Renderer.die("YAML root must be an object")
+            return
+        desc = description or data.get("description", "")
+        options = data.get("options", {})
+        if not isinstance(options, dict):
+            Renderer.die("options must be an object")
+            return
+
+    elif interactive:
+        Renderer.out("Enter options as YAML (Ctrl+D / Ctrl+Z to finish):")
+        lines: list[str] = []
+        try:
+            while True:
+                line = input()
+                lines.append(line)
+        except EOFError:
+            pass
+        try:
+            data = yaml.safe_load("\n".join(lines))
+        except yaml.YAMLError as e:
+            Renderer.die(f"YAML parse error: {e}")
+            return
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            Renderer.die("YAML root must be an object")
+            return
+        options = data
+
+    else:
+        Renderer.die("One of --from-file or --interactive is required")
+        return
+
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                tool = await ToolRepo(session).create(
+                    name=name,
+                    type=type_,
+                    enabled=True,
+                    options=options,
+                    source="custom",
+                    description=desc,
+                    custom_type=type_,
+                )
+        except ConfigError as e:
+            Renderer.die(f"create failed: {e}")
+            return
+    Renderer.out(f"+ {tool.name} (type={tool.custom_type}, source=custom)")
+
+
+# ---------- update ----------
+
+
+@tool_app.command("update", help="Update a custom tool (0.8.7)")
+def update_cmd(
+    name: Annotated[str, typer.Argument(help="tool name")],
+    description: Annotated[
+        str | None,
+        typer.Option("--description", "-d", help="new description"),
+    ] = None,
+    from_file: Annotated[
+        str | None,
+        typer.Option("--from-file", "-f", help="YAML config file (replaces options)"),
+    ] = None,
+    options: Annotated[
+        list[str] | None,
+        typer.Option("-o", "--option", help="options key=value; repeatable"),
+    ] = None,
+) -> None:
+    asyncio.run(_update(name, description, from_file, options or []))
+
+
+async def _update(
+    name: str,
+    description: str | None,
+    from_file: str | None,
+    option_items: list[str],
+) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        entry = await ToolRepo(session).get_entry(name)
+    if entry is None:
+        Renderer.die(f"unknown tool: {name!r}")
+        return
+    if entry.source != "custom":
+        Renderer.die(f"builtin tool cannot be updated: {name!r}")
+        return
+
+    new_description = description
+    new_options: dict[str, Any] | None = None
+
+    if from_file is not None:
+        path = Path(from_file)
+        if not path.exists():
+            Renderer.die(f"file not found: {from_file!r}")
+            return
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as e:
+            Renderer.die(f"YAML parse error: {e}")
+            return
+        if not isinstance(data, dict):
+            Renderer.die("YAML root must be an object")
+            return
+        new_description = description or data.get("description")
+        new_options = data.get("options", {})
+        if not isinstance(new_options, dict):
+            Renderer.die("options must be an object")
+            return
+
+    elif option_items:
+        new_options = _parse_kv(option_items)
+
+    if new_description is None and new_options is None:
+        Renderer.die("at least one of --description, --from-file, or -o is required")
+        return
+
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                tool = await ToolRepo(session).update_full(
+                    name,
+                    options=new_options,
+                    description=new_description,
+                )
+        except ToolNotFound as e:
+            Renderer.die(f"update failed: {e}")
+            return
+        except ConfigError as e:
+            Renderer.die(f"update failed: {e}")
+            return
+    Renderer.out(f"~ {tool.name} (type={tool.custom_type})")
+
+
+# ---------- delete ----------
+
+
+@tool_app.command("delete", help="Delete a custom tool (0.8.7)")
+def delete_cmd(
+    name: Annotated[str, typer.Argument(help="tool name")],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="skip confirmation prompt"),
+    ] = False,
+) -> None:
+    asyncio.run(_delete(name, yes))
+
+
+async def _delete(name: str, yes: bool) -> None:
+    async with installed_runtime() as agent, agent.session_maker() as session:
+        entry = await ToolRepo(session).get_entry(name)
+    if entry is None:
+        Renderer.die(f"unknown tool: {name!r}")
+        return
+    if entry.source == "builtin":
+        Renderer.die(f"builtin tool cannot be deleted: {name!r}")
+        return
+
+    if not yes:
+        print(f"Delete custom tool '{name}'? [y/N] ", end="")
+        try:
+            confirm = input().strip().lower()
+        except EOFError:
+            confirm = "n"
+        if confirm != "y":
+            Renderer.out("cancelled")
+            return
+
+    async with installed_runtime() as agent:
+        try:
+            async with agent.session_maker() as session:
+                await ToolRepo(session).delete(name)
+        except ToolNotFound as e:
+            Renderer.die(f"delete failed: {e}")
+            return
+        except ConfigError as e:
+            Renderer.die(f"delete failed: {e}")
+            return
+    Renderer.out(f"- {name}")
 
 
 def register(app: typer.Typer) -> None:

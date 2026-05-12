@@ -68,6 +68,9 @@ export interface Tool {
   type: string;
   enabled: boolean;
   options: Record<string, unknown>;
+  source?: string;
+  description?: string;
+  custom_type?: string | null;
   schema_?: Record<string, unknown> | null;
 }
 
@@ -713,6 +716,29 @@ const apiCore = {
       return apiCore.disableTool(name);
     }
     return apiCore.configTool(name, {});
+  },
+
+  createTool(req: {
+    name: string;
+    custom_type: string;
+    options: Record<string, unknown>;
+    description?: string;
+  }): Promise<{ tool: Tool }> {
+    return rpc("create_custom_tool", req);
+  },
+
+  deleteTool(name: string): Promise<{ deleted: string }> {
+    return rpc("delete_custom_tool", { name });
+  },
+
+  updateCustomTool(
+    name: string,
+    req: {
+      options?: Record<string, unknown>;
+      description?: string | null;
+    },
+  ): Promise<{ tool: Tool }> {
+    return rpc("update_custom_tool", { name, ...req });
   },
 
   listToolsets(): Promise<{ toolsets: Toolset[] }> {
