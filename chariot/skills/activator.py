@@ -19,11 +19,8 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-<<<<<<< HEAD
-=======
 from chariot.agent.chat_request import SystemBlock
 
->>>>>>> main
 if TYPE_CHECKING:
     from chariot.agent.chat_request import ChatRequest, ToolSchema
     from chariot.skills.base import BaseSkill
@@ -56,26 +53,16 @@ class SkillActivator:
 
     @staticmethod
     def _inject_system(
-<<<<<<< HEAD
-        existing: str | list[dict[str, object]] | None,
-        skill: BaseSkill,
-    ) -> str | list[dict[str, object]]:
-=======
         existing: str | list[SystemBlock] | None,
         skill: BaseSkill,
     ) -> str | list[SystemBlock]:
->>>>>>> main
         block = skill.prompt_block()
         if existing is None or (isinstance(existing, str) and not existing):
             return block
         if isinstance(existing, str):
             return existing.rstrip() + "\n\n" + block
         # Anthropic system 块 list 形态:追加一条 text block
-<<<<<<< HEAD
-        return [*existing, {"type": "text", "text": block}]
-=======
         return [*existing, SystemBlock(type="text", text=block)]
->>>>>>> main
 
     @staticmethod
     def _filter_tools(
