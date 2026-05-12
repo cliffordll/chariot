@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import shutil
-import sqlite3
-import tarfile
+# import shutil
+# import sqlite3
+# import tarfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from chariot.audit.hooks import AuditHookManager
-from chariot.checkpoints import CheckpointManager
-from chariot.database.session import CURRENT_SCHEMA_VERSION, dispose_db, init_db
-from chariot.repos.audit_repo import AuditRepo
+# from chariot.audit.hooks import AuditHookManager
+# from chariot.checkpoints import CheckpointManager
+# from chariot.database.session import CURRENT_SCHEMA_VERSION, dispose_db, init_db
+# from chariot.repos.audit_repo import AuditRepo
+from chariot.database.session import dispose_db, init_db
 
 
 @pytest_asyncio.fixture
