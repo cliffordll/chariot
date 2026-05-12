@@ -183,9 +183,9 @@ class TrajectoryExporter:
             elif ev.event_type == AuditHookManager.EVENT_SKILL_ACTIVATE:
                 skill_activations.append(
                     {
-                        "skill_name": ev.payload.get("skill_name"), 
-                        "status": ev.status, 
-                        "is_error": ev.payload.get("is_error")
+                        "skill_name": ev.payload.get("skill_name"),
+                        "status": ev.status,
+                        "is_error": ev.payload.get("is_error"),
                     }
                 )
             elif ev.event_type == AuditHookManager.EVENT_MEMORY_STORE:

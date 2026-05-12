@@ -58,16 +58,12 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
         async with a.session_maker() as session:
             repo = ConversationRepo(session)
             await repo.ensure_exists("cv-rl")
-            await repo.append_message(
-                "cv-rl", role="user", content=[{"type": "text", "text": "hello"}]
-            )
+            await repo.append_message("cv-rl", role="user", content=[{"type": "text", "text": "hello"}])
             turn = await TraceRepo(session).create_turn(
                 conversation_id="cv-rl",
                 provider_name="mock",
             )
-            await repo.append_message(
-                "cv-rl", role="assistant", content=[{"type": "text", "text": "hi"}]
-            )
+            await repo.append_message("cv-rl", role="assistant", content=[{"type": "text", "text": "hi"}])
             await TraceRepo(session).finalize_turn(
                 turn.id,
                 status=TurnStatus.COMPLETED,
