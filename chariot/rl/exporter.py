@@ -182,7 +182,11 @@ class TrajectoryExporter:
                 guardrail_hits.append({"rule_id": ev.payload.get("rule_id"), "verdict": ev.payload.get("verdict")})
             elif ev.event_type == AuditHookManager.EVENT_SKILL_ACTIVATE:
                 skill_activations.append(
-                    {"skill_name": ev.payload.get("skill_name"), "status": ev.status, "is_error": ev.payload.get("is_error")}
+                    {
+                        "skill_name": ev.payload.get("skill_name"), 
+                        "status": ev.status, 
+                        "is_error": ev.payload.get("is_error")
+                    }
                 )
             elif ev.event_type == AuditHookManager.EVENT_MEMORY_STORE:
                 memory_stores.append({"action": ev.payload.get("action"), "kind": ev.payload.get("kind")})

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from chariot.rl.scrubber import NullScrubber, SecretScrubber
 
-
 # ---- 字符串扫除 ----
 
 
