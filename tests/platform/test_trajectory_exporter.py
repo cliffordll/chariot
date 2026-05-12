@@ -67,14 +67,6 @@ async def _seed_conversation(
             )
         # assistant 消息(window 内)
         await repo.append_message(conv_id, role="assistant", content=[{"type": "text", "text": "hi back"}])
-        # turn finalize
-        await turn_repo.finalize_turn(
-            turn.id,
-            status=TurnStatus.COMPLETED,
-            stop_reason="end_turn",
-            input_tokens=10,
-            output_tokens=5,
-        )
         # audit (optional)
         if with_guardrail:
             hooks = AuditHookManager(sm)
@@ -86,15 +78,21 @@ async def _seed_conversation(
                 quota_remaining=None,
                 quota_exhausted=False,
             )
+        # turn finalize
+        await turn_repo.finalize_turn(
+            turn.id,
+            status=TurnStatus.COMPLETED,
+            stop_reason="end_turn",
+            input_tokens=10,
+            output_tokens=5,
+        )
         return turn.id
 
 
 # ---- export ----
 
 
-async def test_export_empty_conversation_returns_empty(
-    sm: async_sessionmaker[AsyncSession], tmp_path: Path
-) -> None:
+async def test_export_empty_conversation_returns_empty(sm: async_sessionmaker[AsyncSession], tmp_path: Path) -> None:
     exporter = TrajectoryExporter(sessionmaker=sm)
     out = await exporter.export("does-not-exist")
     assert out == []
@@ -162,9 +160,7 @@ async def test_export_to_jsonl_writes_file(sm: async_sessionmaker[AsyncSession],
     assert parsed["sequence"] == 0
 
 
-async def test_export_to_jsonl_writes_audit_event(
-    sm: async_sessionmaker[AsyncSession], tmp_path: Path
-) -> None:
+async def test_export_to_jsonl_writes_audit_event(sm: async_sessionmaker[AsyncSession], tmp_path: Path) -> None:
     await _seed_conversation(sm)
     out = tmp_path / "out.jsonl"
     hooks = AuditHookManager(sm)
@@ -180,9 +176,7 @@ async def test_export_to_jsonl_writes_audit_event(
     assert payload["scrub_mode"] == "default"
 
 
-async def test_export_with_secrets_default_scrubs(
-    sm: async_sessionmaker[AsyncSession], tmp_path: Path
-) -> None:
+async def test_export_with_secrets_default_scrubs(sm: async_sessionmaker[AsyncSession], tmp_path: Path) -> None:
     """messages 含 secret → 默认 SecretScrubber 替换。"""
     async with sm() as session:
         repo = ConversationRepo(session)
@@ -204,9 +198,7 @@ async def test_export_with_secrets_default_scrubs(
     assert "REDACTED" in content
 
 
-async def test_export_with_raw_scrubber_preserves_secrets(
-    sm: async_sessionmaker[AsyncSession], tmp_path: Path
-) -> None:
+async def test_export_with_raw_scrubber_preserves_secrets(sm: async_sessionmaker[AsyncSession], tmp_path: Path) -> None:
     """--raw / NullScrubber 模式:secret 透传。"""
     async with sm() as session:
         repo = ConversationRepo(session)

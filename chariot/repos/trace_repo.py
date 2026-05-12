@@ -160,6 +160,46 @@ class TraceRepo:
 
     # ---- 子事件 ----
 
+    async def finalize_provider_call(
+        self,
+        provider_call_id: str,
+        *,
+        response_summary: dict[str, Any] | None = None,
+        finished_at: datetime | None = None,
+        latency_ms: int | None = None,
+        error_type: str | None = None,
+    ) -> TraceProviderCall:
+        row = await self._require_provider_call(provider_call_id)
+        if response_summary is not None:
+            row.response_summary = self._serialize_json("response_summary", response_summary)
+        row.finished_at = finished_at or _utcnow()
+        row.latency_ms = latency_ms
+        row.error_type = error_type
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._provider_call_row_to_entry(row)
+
+    async def finalize_tool_call(
+        self,
+        tool_call_id: str,
+        *,
+        status: ToolCallStatus,
+        result_summary: dict[str, Any] | None = None,
+        finished_at: datetime | None = None,
+        duration_ms: int | None = None,
+        error_message: str | None = None,
+    ) -> TraceToolCall:
+        row = await self._require_tool_call(tool_call_id)
+        row.status = status.value
+        if result_summary is not None:
+            row.result_summary = self._serialize_json("result_summary", result_summary)
+        row.finished_at = finished_at or _utcnow()
+        row.duration_ms = duration_ms
+        row.error_message = error_message
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._tool_call_row_to_entry(row)
+
     async def record_provider_call(
         self,
         turn_id: str,
@@ -317,6 +357,18 @@ class TraceRepo:
         row = await self.session.get(TraceTurnRow, turn_id)
         if row is None:
             raise ConfigError(f"trace turn {turn_id!r} not found")
+        return row
+
+    async def _require_provider_call(self, provider_call_id: str) -> TraceProviderCallRow:
+        row = await self.session.get(TraceProviderCallRow, provider_call_id)
+        if row is None:
+            raise ConfigError(f"trace provider call {provider_call_id!r} not found")
+        return row
+
+    async def _require_tool_call(self, tool_call_id: str) -> TraceToolCallRow:
+        row = await self.session.get(TraceToolCallRow, tool_call_id)
+        if row is None:
+            raise ConfigError(f"trace tool call {tool_call_id!r} not found")
         return row
 
     @staticmethod
