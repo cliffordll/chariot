@@ -26,6 +26,7 @@ from chariot.audit.hooks import AuditHookManager
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from chariot.skills.base import BaseSkill
     from chariot.skills.registry import SkillRegistry
 
 
@@ -139,7 +140,7 @@ class SkillCurator:
 
     def _compute_stale(
         self,
-        skills: list[object],
+        skills: list[BaseSkill],
         activations: dict[str, list[tuple[datetime, bool]]],
     ) -> list[str]:
         """N 天没被 activate 过(或一次都没)→ stale。"""
@@ -161,7 +162,7 @@ class SkillCurator:
 
     def _compute_underused(
         self,
-        skills: list[object],
+        skills: list[BaseSkill],
         activations: dict[str, list[tuple[datetime, bool]]],
     ) -> list[str]:
         """总 activate 次数 < threshold → underused。"""
@@ -177,7 +178,7 @@ class SkillCurator:
 
     def _compute_failing(
         self,
-        skills: list[object],
+        skills: list[BaseSkill],
         activations: dict[str, list[tuple[datetime, bool]]],
     ) -> list[str]:
         """最近 window 次 activate 里 is_error 比例 > ratio → failing。
@@ -199,7 +200,7 @@ class SkillCurator:
                 result.append(name)
         return sorted(result)
 
-    def _compute_overlapping(self, skills: list[object]) -> list[tuple[str, str, float]]:
+    def _compute_overlapping(self, skills: list[BaseSkill]) -> list[tuple[str, str, float]]:
         """两两 prompt 相似度 > ratio。
 
         O(N²) 跟 skill 数线性 —— builtin 3 条 + 用户提议十几条,N 很小;真大了再
