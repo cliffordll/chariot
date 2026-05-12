@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
 class ToolEntry:
-    """单条 tool 配置(0.4.0)。
+    """单条 tool 配置(0.8.7)。
 
     `name` == ToolRegistry type key(0.4.0 一种 type 一个 entry,预留同类多实例
     时再分;详见 `docs/DESIGN.md` §8)。`options` 形态依 type 而定:
@@ -25,9 +25,16 @@ class ToolEntry:
     - `list_dir`:`{}`
     - `shell_exec`:`{"workdir": str, "timeout_s": int}`
     - `http_get`:`{"allowed_domains": list[str], "max_bytes": int}`
+    - `http_custom`:`{"method": str, "url": str, "headers": dict, ...}`
+    - `shell_custom`:`{"command": str, "workdir": str, "timeout_s": int}`
+
+    0.8.7 新增 `source` / `description` / `custom_type` 字段,支持自定义工具。
     """
 
     name: str
     type: str
     enabled: bool
     options: dict[str, Any]
+    source: Literal["builtin", "custom"] = "builtin"
+    description: str = ""
+    custom_type: str | None = None

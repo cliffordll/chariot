@@ -88,6 +88,69 @@ class ToolRepo:
         await self.session.refresh(row)
         return self._row_to_entry(row)
 
+    # ---- 自定义工具 CRUD(0.8.7) ----
+
+    async def create(
+        self,
+        *,
+        name: str,
+        type: str,
+        enabled: bool = True,
+        options: dict[str, Any],
+        source: str = "custom",
+        description: str = "",
+        custom_type: str | None = None,
+    ) -> ToolEntry:
+        """创建新工具 entry(custom 专用)。"""
+        existing = await self._find_row(name)
+        if existing is not None:
+            raise ConfigError(f"tool name 已存在: {name!r}")
+        row = ToolRow(
+            name=name,
+            type=type,
+            enabled=1 if enabled else 0,
+            options=self._serialize_json("options", options),
+            source=source,
+            description=description,
+            custom_type=custom_type,
+        )
+        self.session.add(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
+
+    async def delete(self, name: str) -> None:
+        """删除工具 entry。builtin 不可删。"""
+        row = await self._find_row(name)
+        if row is None:
+            raise ToolNotFound(f"未知 tool name: {name!r}")
+        if row.source == "builtin":
+            raise ConfigError(f"builtin 工具不可删除: {name!r}")
+        await self.session.delete(row)
+        await self.session.commit()
+
+    async def update_full(
+        self,
+        name: str,
+        *,
+        enabled: bool | None = None,
+        options: dict[str, Any] | None = None,
+        description: str | None = None,
+    ) -> ToolEntry:
+        """完整更新(custom 工具专用,可改 description / options)。"""
+        row = await self._find_row(name)
+        if row is None:
+            raise ToolNotFound(f"未知 tool name: {name!r}")
+        if enabled is not None:
+            row.enabled = 1 if enabled else 0
+        if options is not None:
+            row.options = self._serialize_json("options", options)
+        if description is not None:
+            row.description = description
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
+
     # ---- 启动期 seed ----
 
     async def seed_if_empty(self) -> None:
@@ -135,6 +198,9 @@ class ToolRepo:
             type=row.type,
             enabled=bool(row.enabled),
             options=cls._deserialize_json("options", row.options),
+            source=row.source,  # type: ignore[arg-type]
+            description=row.description,
+            custom_type=row.custom_type,
         )
 
     async def _find_row(self, name: str) -> ToolRow | None:
