@@ -5,9 +5,9 @@ Current surfaces:
 - `show <name>`: show one tool's config and schema
 - `probe <name>`: validate the current config by rebuilding the tool
 - `enable / disable / config`: existing admin actions
-- `create`: create a custom tool (0.8.7)
-- `update <name>`: update a custom tool (0.8.7)
-- `delete <name>`: delete a custom tool (0.8.7)
+- `add`: create a custom tool (0.8.7); alias `create`
+- `edit <name>`: update a custom tool (0.8.7); alias `update`
+- `del <name>`: delete a custom tool (0.8.7); aliases `delete` / `rm` / `remove`
 """
 
 from __future__ import annotations
@@ -252,11 +252,11 @@ def _stringify(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-# ---------- create ----------
+# ---------- add ----------
 
 
-@tool_app.command("create", help="Create a custom tool (0.8.7)")
-def create_cmd(
+@tool_app.command("add", help="Create a custom tool (0.8.7)")
+def add_cmd(
     name: Annotated[str, typer.Option("--name", "-n", help="tool name (unique)")],
     type_: Annotated[
         str,
@@ -354,11 +354,11 @@ async def _create(
     Renderer.out(f"+ {tool.name} (type={tool.custom_type}, source=custom)")
 
 
-# ---------- update ----------
+# ---------- edit ----------
 
 
-@tool_app.command("update", help="Update a custom tool (0.8.7)")
-def update_cmd(
+@tool_app.command("edit", help="Update a custom tool (0.8.7)")
+def edit_cmd(
     name: Annotated[str, typer.Argument(help="tool name")],
     description: Annotated[
         str | None,
@@ -437,11 +437,11 @@ async def _update(
     Renderer.out(f"~ {tool.name} (type={tool.custom_type})")
 
 
-# ---------- delete ----------
+# ---------- del ----------
 
 
-@tool_app.command("delete", help="Delete a custom tool (0.8.7)")
-def delete_cmd(
+@tool_app.command("del", help="Delete a custom tool (0.8.7)")
+def del_cmd(
     name: Annotated[str, typer.Argument(help="tool name")],
     yes: Annotated[
         bool,

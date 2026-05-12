@@ -698,7 +698,7 @@ function CreateToolDialog({
               placeholder={customType === "http_custom" ? httpExample : shellExample}
             />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Use ${var} for template variables. Example above.
+              Use {'${var}'} for template variables. Example above.
             </p>
           </div>
 

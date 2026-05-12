@@ -63,7 +63,7 @@ class TestToolRepoCrud:
         await repo.seed_if_empty()
         entries = await repo.list_entries()
         builtin = next(e for e in entries if e.source == "builtin")
-        with pytest.raises(ConfigError, match="builtin.*不可删除"):
+        with pytest.raises(ConfigError, match=r"builtin.*不可删除"):
             await repo.delete(builtin.name)
 
     async def test_update_custom_updates_options(self, session: AsyncSession) -> None:

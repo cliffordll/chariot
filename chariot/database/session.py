@@ -83,7 +83,15 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         statements = _split_sql_statements(path.read_text(encoding="utf-8"))
         async with engine.begin() as conn:
             for stmt in statements:
-                await conn.execute(text(stmt))
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as exc:
+                    # SQLite 迁移幂等容错:ALTER TABLE ADD COLUMN 重复时自动跳过,
+                    # 避免"部分执行后 user_version 未更新"导致的死循环
+                    msg = str(exc)
+                    if "duplicate column name" in msg.lower():
+                        continue
+                    raise
 
 
 class DBState:
