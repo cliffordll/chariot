@@ -21,11 +21,18 @@ Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,放进
 
 from __future__ import annotations
 
+from chariot.tools.builtin.edit_file import EditFileTool
+from chariot.tools.builtin.git_status import GitStatusTool
 from chariot.tools.builtin.http_get import HttpGetTool
 from chariot.tools.builtin.list_dir import ListDirTool
 from chariot.tools.builtin.propose_skill import ProposeSkillTool
 from chariot.tools.builtin.read_file import ReadFileTool
+from chariot.tools.builtin.search_files import SearchFilesTool
 from chariot.tools.builtin.shell_exec import ShellExecTool
+from chariot.tools.builtin.todo import TodoTool
+from chariot.tools.builtin.web_extract import WebExtractTool
+from chariot.tools.builtin.web_search import WebSearchTool
+from chariot.tools.builtin.write_file import WriteFileTool
 from chariot.tools.registry import ToolRegistry
 
 ToolRegistry.register("read_file", ReadFileTool)
@@ -33,3 +40,10 @@ ToolRegistry.register("list_dir", ListDirTool)
 ToolRegistry.register("shell_exec", ShellExecTool)
 ToolRegistry.register("http_get", HttpGetTool)
 ToolRegistry.register("propose_skill", ProposeSkillTool)
+ToolRegistry.register("write_file", WriteFileTool)
+ToolRegistry.register("edit_file", EditFileTool)
+ToolRegistry.register("search_files", SearchFilesTool)
+ToolRegistry.register("web_search", WebSearchTool)
+ToolRegistry.register("web_extract", WebExtractTool)
+ToolRegistry.register("todo", TodoTool)
+ToolRegistry.register("git_status", GitStatusTool)
