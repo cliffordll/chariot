@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,7 @@ class _AgentBinding:
 
 
 _NO_BINDING: _AgentBinding = _AgentBinding()
+_LOG = logging.getLogger("chariot.agent")
 
 
 class AIAgent:
@@ -155,6 +157,7 @@ class AIAgent:
         # bootstrap 默认装并 attach 到 propose_skill tool;测试路径不传 → propose_skill
         # 执行时返 is_error。
         self._skill_propose_service = skill_propose_service
+        self._todo_stores: dict[str | None, Any] = {}
         self._attach_propose_service_if_present()
 
     # ---- 装载 ----
@@ -219,7 +222,14 @@ class AIAgent:
             )
             for entry in cfg.providers
         }
-        tools: dict[str, BaseTool] = {entry.name: ToolRegistry.build(entry) for entry in tool_cfg.tools}
+        tools: dict[str, BaseTool] = {}
+        for entry in tool_cfg.tools:
+            try:
+                tools[entry.name] = ToolRegistry.build(entry)
+            except Exception:
+                if entry.source != "custom":
+                    raise
+                _LOG.warning("skip invalid custom tool during bootstrap: %s", entry.name, exc_info=True)
 
         # B3 wave 2:装 ContextCompressor —— auxiliary_clients 表里有 'summarizer'
         # 且其 provider_entry 已装时构造,否则保持 None(运行时跳过压缩)。
@@ -342,6 +352,15 @@ class AIAgent:
     def tools(self) -> dict[str, BaseTool]:
         """已装载的 tool 字典(只读视图;surface 仅用于 status / 列表展示)。"""
         return dict(self._tools)
+
+    def _todo_store_for(self, conversation_id: str | None) -> Any:
+        from chariot.tools.builtin.todo import _TodoStore
+
+        store = self._todo_stores.get(conversation_id)
+        if store is None:
+            store = _TodoStore()
+            self._todo_stores[conversation_id] = store
+        return store
 
     @property
     def critic_agent(self) -> CriticAgent | None:
@@ -606,6 +625,7 @@ class AIAgent:
             guardrail_engine=self._guardrail_engine,
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
+            todo_store=self._todo_store_for(None),
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -725,6 +745,7 @@ class AIAgent:
             guardrail_engine=self._guardrail_engine,
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
+            todo_store=self._todo_store_for(conversation_id),
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None

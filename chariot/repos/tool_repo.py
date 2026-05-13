@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.database.models import ToolRow
 from chariot.models.tool import ToolEntry
+from chariot.tools.registry import ToolRegistry
 
 
 class ToolRepo:
@@ -105,6 +106,16 @@ class ToolRepo:
         existing = await self._find_row(name)
         if existing is not None:
             raise ConfigError(f"tool name 已存在: {name!r}")
+        entry = ToolEntry(
+            name=name,
+            type=type,
+            enabled=enabled,
+            options=options,
+            source=source,  # type: ignore[arg-type]
+            description=description,
+            custom_type=custom_type,
+        )
+        self._probe_entry(entry)
         row = ToolRow(
             name=name,
             type=type,
@@ -141,10 +152,25 @@ class ToolRepo:
         row = await self._find_row(name)
         if row is None:
             raise ToolNotFound(f"未知 tool name: {name!r}")
+        next_enabled = bool(row.enabled) if enabled is None else enabled
+        current_options = self._deserialize_json("options", row.options)
+        next_options = current_options if options is None else {**current_options, **options}
+        next_description = row.description if description is None else description
+        self._probe_entry(
+            ToolEntry(
+                name=row.name,
+                type=row.type,
+                enabled=next_enabled,
+                options=next_options,
+                source=row.source,  # type: ignore[arg-type]
+                description=next_description,
+                custom_type=row.custom_type,
+            )
+        )
         if enabled is not None:
             row.enabled = 1 if enabled else 0
         if options is not None:
-            row.options = self._serialize_json("options", options)
+            row.options = self._serialize_json("options", next_options)
         if description is not None:
             row.description = description
         await self.session.commit()
@@ -190,6 +216,11 @@ class ToolRepo:
         if not isinstance(data, dict):
             raise ConfigError(f"{label} JSON 顶层必须是 object")
         return cast(dict[str, Any], data)
+
+    @staticmethod
+    def _probe_entry(entry: ToolEntry) -> None:
+        tool = ToolRegistry.build(entry)
+        tool.schema()
 
     @classmethod
     def _row_to_entry(cls, row: ToolRow) -> ToolEntry:

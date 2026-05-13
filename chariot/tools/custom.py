@@ -269,13 +269,19 @@ class ShellCustomTool(CustomTool):
             variables.add(match.group(1))
         return variables
 
+    def render_command(self, input: dict[str, Any]) -> str:
+        try:
+            return Template(self.command_template).substitute(input)
+        except KeyError as e:
+            raise ConfigError(f"模板变量缺失: {e};需要变量: {self._extract_variables()}") from e
+        except ValueError as e:
+            raise ConfigError(f"模板填充失败: {e}") from e
+
     async def execute(self, input: dict[str, Any]) -> dict[str, Any]:
         try:
-            command = Template(self.command_template).substitute(input)
-        except KeyError as e:
-            return self._error(f"模板变量缺失: {e};需要变量: {self._extract_variables()}")
-        except ValueError as e:
-            return self._error(f"模板填充失败: {e}")
+            command = self.render_command(input)
+        except ConfigError as e:
+            return self._error(str(e))
 
         try:
             proc = await asyncio.create_subprocess_shell(

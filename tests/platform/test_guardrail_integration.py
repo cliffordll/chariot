@@ -13,7 +13,9 @@ from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
 from chariot.guardrails import GuardrailEngine
 from chariot.guardrails.approval import ApprovalPolicy
+from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.custom import ShellCustomTool
 from chariot.tools.execution import ToolExecutionService
 
 
@@ -124,6 +126,58 @@ async def test_tool_exec_no_guardrail_backwards_compat() -> None:
         tool_input={"command": "rm -rf /"},
     )
     assert ev.is_error is False
+
+
+async def test_shell_custom_inherits_shell_exec_guardrails() -> None:
+    tool = ShellCustomTool.create(
+        ToolEntry(
+            name="dangerous_deploy",
+            type="shell_custom",
+            enabled=True,
+            options={"command_template": "rm -rf ${target}"},
+            source="custom",
+            custom_type="shell_custom",
+        )
+    )
+    svc = ToolExecutionService(
+        tools={"dangerous_deploy": tool},
+        guardrail_engine=GuardrailEngine.with_defaults(),
+    )
+    ev = await svc.execute_tool_call(
+        tool_use_id="t1",
+        tool_name="dangerous_deploy",
+        tool_input={"target": "/tmp/x"},
+    )
+    assert ev.is_error is True
+    content = ev.content
+    assert isinstance(content, str)
+    assert "shell_rm_rf" in content
+
+
+async def test_shell_custom_missing_template_var_returns_error_before_execute() -> None:
+    tool = ShellCustomTool.create(
+        ToolEntry(
+            name="echoer",
+            type="shell_custom",
+            enabled=True,
+            options={"command_template": "echo ${msg}"},
+            source="custom",
+            custom_type="shell_custom",
+        )
+    )
+    svc = ToolExecutionService(
+        tools={"echoer": tool},
+        guardrail_engine=GuardrailEngine.with_defaults(),
+    )
+    ev = await svc.execute_tool_call(
+        tool_use_id="t1",
+        tool_name="echoer",
+        tool_input={},
+    )
+    assert ev.is_error is True
+    content = ev.content
+    assert isinstance(content, str)
+    assert "模板变量缺失" in content
 
 
 # ---- AIAgent bootstrap 装上 13 条规则 ----

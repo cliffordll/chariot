@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from chariot.tools.builtin.todo import _TodoStore
 from chariot.tools.base import BaseTool
 from chariot.tools.execution import ToolExecutionService
 
@@ -98,3 +99,20 @@ class TestToolExecutionService:
         assert event.kind == "tool_result"
         assert event.is_error is True
         assert "boom" in str(event.content)
+
+    @pytest.mark.asyncio
+    async def test_injects_shared_todo_store(self) -> None:
+        store = _TodoStore()
+        tool = _StubTool("todo")
+        service = ToolExecutionService({"todo": tool}, todo_store=store)
+
+        event = await service.execute_tool_call(
+            tool_use_id="toolu_1",
+            tool_name="todo",
+            tool_input={"action": "list"},
+        )
+
+        assert event.kind == "tool_result"
+        assert event.is_error is False
+        assert tool.last_input is not None
+        assert tool.last_input["_todo_store"] is store

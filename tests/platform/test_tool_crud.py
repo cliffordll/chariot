@@ -10,8 +10,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError, ToolNotFound
+from chariot.database.models import ToolRow
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.tool_repo import ToolRepo
+from chariot.agent.run import AIAgent
 
 
 @pytest_asyncio.fixture
@@ -72,7 +74,7 @@ class TestToolRepoCrud:
             name="updatable",
             type="http_custom",
             enabled=True,
-            options={"timeout_s": 10},
+            options={"url_template": "https://api.example.com/${id}", "timeout_s": 10},
             source="custom",
             custom_type="http_custom",
         )
@@ -91,7 +93,7 @@ class TestToolRepoCrud:
             name="dup",
             type="http_custom",
             enabled=True,
-            options={},
+            options={"url_template": "https://api.example.com/${id}"},
             source="custom",
             custom_type="http_custom",
         )
@@ -100,7 +102,7 @@ class TestToolRepoCrud:
                 name="dup",
                 type="http_custom",
                 enabled=True,
-                options={},
+                options={"url_template": "https://api.example.com/${id}"},
                 source="custom",
                 custom_type="http_custom",
             )
@@ -114,3 +116,58 @@ class TestToolRepoCrud:
         repo = ToolRepo(session)
         with pytest.raises(ToolNotFound):
             await repo.delete("nope")
+
+    async def test_create_invalid_custom_rejected_before_persist(self, session: AsyncSession) -> None:
+        repo = ToolRepo(session)
+        with pytest.raises(ConfigError, match="command_template"):
+            await repo.create(
+                name="bad_shell",
+                type="shell_custom",
+                enabled=True,
+                options={"workdir": "."},
+                source="custom",
+                custom_type="shell_custom",
+            )
+        assert await repo.get_entry("bad_shell") is None
+
+    async def test_update_invalid_custom_rejected_before_persist(self, session: AsyncSession) -> None:
+        repo = ToolRepo(session)
+        await repo.create(
+            name="editable_shell",
+            type="shell_custom",
+            enabled=True,
+            options={"command_template": "echo hi"},
+            source="custom",
+            custom_type="shell_custom",
+        )
+        with pytest.raises(ConfigError, match="workdir"):
+            await repo.update_full(
+                "editable_shell",
+                options={"workdir": 123},
+            )
+        loaded = await repo.get_entry("editable_shell")
+        assert loaded is not None
+        assert loaded.options["command_template"] == "echo hi"
+
+    async def test_bootstrap_skips_invalid_custom_tool(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "bootstrap.db"
+        sm = await init_db(db_path)
+        try:
+            async with sm() as session:
+                repo = ToolRepo(session)
+                await repo.seed_if_empty()
+                session.add(
+                    ToolRow(
+                        name="broken_shell",
+                        type="shell_custom",
+                        enabled=1,
+                        options='{"timeout_s": 10}',
+                        source="custom",
+                        custom_type="shell_custom",
+                    )
+                )
+                await session.commit()
+            agent = await AIAgent.bootstrap(db_path)
+            assert "broken_shell" not in agent.tools
+        finally:
+            await dispose_db()

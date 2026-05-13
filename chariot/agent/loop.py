@@ -41,6 +41,7 @@ class AgentLoop:
         guardrail_engine: GuardrailEngine | None = None,
         approval_policy: ApprovalPolicy | None = None,
         audit_hooks: AuditHookManager | None = None,
+        todo_store: Any | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -49,6 +50,7 @@ class AgentLoop:
             guardrail_engine=guardrail_engine,
             approval_policy=approval_policy,
             audit_hooks=audit_hooks,
+            todo_store=todo_store,
         )
         self._repo = repo
         self._conversation_id = conversation_id
