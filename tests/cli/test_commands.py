@@ -95,7 +95,7 @@ def test_provider_help_contains_crud_and_probe() -> None:
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "use", "probe", "add", "update", "delete", "rm", "copy", "status"):
+    for sub in ("list", "show", "use", "probe", "add", "update", "delete", "copy", "status"):
         assert sub in out
 
 

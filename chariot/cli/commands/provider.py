@@ -418,11 +418,10 @@ async def _update(
     Renderer.out(f"~ {entry.name} (type={entry.type})")
 
 
-# ---------- delete / rm ----------
+# ---------- delete ----------
 
 
 @provider_app.command("delete", help="删除 entry")
-@provider_app.command("rm", help="删除 entry; `delete` 的兼容别名")
 def rm_cmd(
     name: Annotated[str, typer.Argument(help="要删的 entry 名")],
 ) -> None:

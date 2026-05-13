@@ -46,9 +46,12 @@ profile.tool_profile      过滤  self._tools(toolset 成员)
 
 ```powershell
 uv run chariot provider list                                     # 看现有
-uv run chariot provider add --name claude --type anthropic `
-  --options '{"api_key_env":"ANTHROPIC_API_KEY","model":"claude-sonnet-4-6"}'
+# json 暂不支持（命令行中--option参数会去掉"" 变成{api_key_env:ANTHROPIC_API_KEY,model:claude-sonnet-4-7}）
+uv run chariot provider add --name claude --type anthropic --option '{"api_key_env":"ANTHROPIC_API_KEY","model":"claude-sonnet-4-7"}'
+uv run chariot provider add --name openai-test --type openai
+uv run chariot provider update claude -o api_key=ANTHROPIC_API_KEY -o model=claude-sonnet-4-6
 uv run chariot provider probe claude                             # 探活
+uv run chariot provider copy claude
 uv run chariot provider use claude                               # 设为默认
 ```
 
