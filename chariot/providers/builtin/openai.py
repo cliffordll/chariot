@@ -168,9 +168,9 @@ class OpenAIProvider(BaseProvider):
                 for event in events:
                     if event.kind == "message_start":
                         saw_message_start = True
-                    elif event.kind == "content_block_start":
+                    elif event.kind == "content_block_start" and event.index is not None:
                         open_blocks.add(event.index)
-                    elif event.kind == "content_block_stop":
+                    elif event.kind == "content_block_stop" and event.index is not None:
                         open_blocks.discard(event.index)
                     yield event
             # OpenAI 流没有 content_block_stop / message_stop;
