@@ -10,7 +10,7 @@
 #   状态,Tauri app 没 console 所以 child 也无 console attach,但 stdio
 #   handles 是 pipe 不是 console handle,write 仍然到 pipe 正常)。
 
-from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
 
@@ -26,6 +26,8 @@ _HIDDEN = [
     "anyio._backends._asyncio",
     "sniffio._impl",
 ]
+# builtin tools 在运行时通过 pkgutil/importlib 动态发现；PyInstaller 静态分析收不全。
+_HIDDEN += collect_submodules("chariot.tools.builtin")
 
 # 静态资源:schema migrations 必须跟着可执行走
 _DATAS = [
