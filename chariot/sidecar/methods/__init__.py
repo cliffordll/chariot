@@ -268,6 +268,9 @@ def register_methods(
     server.method("disable_tool")(tools.disable)
     server.method("config_tool")(tools.config)
     server.method("probe_tool")(tools.probe)
+    server.method("create_custom_tool")(tools.create_custom_tool)
+    server.method("delete_custom_tool")(tools.delete_custom_tool)
+    server.method("update_custom_tool")(tools.update_custom_tool)
 
     toolsets = ToolsetMethods(runtime)
     server.method("list_toolsets")(toolsets.list_)

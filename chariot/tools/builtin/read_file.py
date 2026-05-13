@@ -34,10 +34,12 @@ from typing import Any, ClassVar, Self
 
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 _DEFAULT_MAX_BYTES = 1048576  # 1 MiB
 
 
+@builtin_tool(defaults={"max_bytes": _DEFAULT_MAX_BYTES})
 class ReadFileTool(BaseTool):
     """读文件工具,内容超大截断 + UTF-8 fallback base64。"""
 

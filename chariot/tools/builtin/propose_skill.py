@@ -29,11 +29,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 if TYPE_CHECKING:
     from chariot.skills.propose_service import SkillProposeService
 
 
+@builtin_tool(defaults={})
 class ProposeSkillTool(BaseTool):
     """agent 自发提议新 skill 的 tool。
 

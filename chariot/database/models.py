@@ -149,10 +149,10 @@ class MessageRow(Base):
 
 
 class ToolRow(Base):
-    """`tools` 表:0.4.0 内置工具配置(4 条 seeded fixture)。
+    """`tools` 表:0.4.0 内置工具配置 + 0.8.7 自定义工具。
 
-    0.4.0 不开放 CRUD —— 只允许改 `enabled` / `options`。`name` 即用户面 ID,
-    也是 ToolRegistry 的 type key(0.4.0 name == type,预留同类多实例时再分)。
+    0.8.7 开放 CRUD —— builtin 只读,custom 可增删改。
+    `name` 即用户面 ID,也是 ToolRegistry 的 type key。
     全部 seeded 默认 `enabled=0`,用户必须显式打开。
     """
 
@@ -163,6 +163,9 @@ class ToolRow(Base):
     type: Mapped[str]
     enabled: Mapped[int]  # 0/1;SQLite 无 BOOL 类型,统一用 int
     options: Mapped[str]  # JSON-serialized dict;migration v4 列默认 '{}'
+    source: Mapped[str] = mapped_column(default="builtin")  # 'builtin' | 'custom'
+    description: Mapped[str] = mapped_column(default="")
+    custom_type: Mapped[str | None] = mapped_column(default=None)  # 'http_custom' | 'shell_custom'
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

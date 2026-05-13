@@ -55,6 +55,48 @@ class ToolApi:
         await self._runtime.reload()
         return self.serialize(entry)
 
+    async def create_custom_tool(
+        self,
+        session: Any,
+        *,
+        name: str,
+        custom_type: str,
+        options: dict[str, Any],
+        description: str = "",
+    ) -> dict[str, Any]:
+        entry = await ToolRepo(session).create(
+            name=name,
+            type=custom_type,
+            enabled=True,
+            options=options,
+            source="custom",
+            description=description,
+            custom_type=custom_type,
+        )
+        await self._runtime.reload()
+        return self.serialize(entry)
+
+    async def delete_custom_tool(self, session: Any, *, name: str) -> dict[str, Any]:
+        await ToolRepo(session).delete(name)
+        await self._runtime.reload()
+        return {"deleted": name}
+
+    async def update_custom_tool(
+        self,
+        session: Any,
+        *,
+        name: str,
+        options: dict[str, Any] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        entry = await ToolRepo(session).update_full(
+            name,
+            options=options,
+            description=description,
+        )
+        await self._runtime.reload()
+        return self.serialize(entry)
+
     @staticmethod
     def serialize(entry: ToolEntry) -> dict[str, Any]:
         schema: dict[str, Any] | None
@@ -67,5 +109,8 @@ class ToolApi:
             "type": entry.type,
             "enabled": entry.enabled,
             "options": entry.options,
+            "source": entry.source,
+            "description": entry.description,
+            "custom_type": entry.custom_type,
             "schema_": schema,
         }

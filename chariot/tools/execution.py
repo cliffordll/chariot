@@ -15,8 +15,10 @@ import time
 from typing import TYPE_CHECKING, Any, cast
 
 from chariot.agent.chat_event import ChatEvent
+from chariot.agent.exceptions import ConfigError
 from chariot.guardrails import GuardrailEngine, GuardrailVerdict, Verdict
 from chariot.guardrails.approval import ApprovalPolicy
+from chariot.tools.custom import ShellCustomTool
 
 if TYPE_CHECKING:
     from chariot.audit import AuditHookManager
@@ -39,6 +41,7 @@ class ToolExecutionService:
         guardrail_engine: GuardrailEngine | None = None,
         approval_policy: ApprovalPolicy | None = None,
         audit_hooks: AuditHookManager | None = None,
+        todo_store: Any | None = None,
     ) -> None:
         from chariot.audit import AuditHookManager as _AuditHookManager
 
@@ -47,6 +50,7 @@ class ToolExecutionService:
         self._approval = approval_policy or ApprovalPolicy()
         # 默认装一个 disabled hook manager,让调用点不必 None-check
         self._audit_hooks = audit_hooks or _AuditHookManager(None)
+        self._todo_store = todo_store
 
     async def execute_tool_call(
         self,
@@ -71,17 +75,28 @@ class ToolExecutionService:
             )
 
         safe_input: dict[str, Any] = cast(dict[str, Any], tool_input) if isinstance(tool_input, dict) else {}
+        exec_input = dict(safe_input)
+        if tool_name == "todo" and self._todo_store is not None and "_todo_store" not in exec_input:
+            exec_input["_todo_store"] = self._todo_store
 
         # B5 wave 2:pre hook
         await self._audit_hooks.record_tool_call_pre(
             tool_name=tool_name,
-            args=safe_input,
+            args=exec_input,
             tool_use_id=tool_use_id,
         )
 
         # B5 wave 1:guardrail pre-check
         if self._guardrails is not None:
-            verdict = self._guardrails.evaluate(tool_name=tool_name, args=safe_input)
+            try:
+                guardrail_tool_name, guardrail_args = self._build_guardrail_args(tool_name, tool, exec_input)
+            except ConfigError as e:
+                return ChatEvent.tool_result_event(
+                    tool_use_id=tool_use_id,
+                    content=str(e),
+                    is_error=True,
+                )
+            verdict = self._guardrails.evaluate(tool_name=guardrail_tool_name, args=guardrail_args)
             blocked = await self._maybe_block(
                 verdict,
                 tool_use_id=tool_use_id,
@@ -98,7 +113,7 @@ class ToolExecutionService:
 
         start = time.monotonic()
         try:
-            result_block = await tool.execute(safe_input)
+            result_block = await tool.execute(exec_input)
         except Exception as e:
             duration_ms = int((time.monotonic() - start) * 1000)
             await self._audit_hooks.record_tool_call_post(
@@ -126,6 +141,16 @@ class ToolExecutionService:
             content=result_block.get("content", []),
             is_error=is_error,
         )
+
+    @staticmethod
+    def _build_guardrail_args(
+        tool_name: str,
+        tool: BaseTool,
+        tool_input: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        if isinstance(tool, ShellCustomTool):
+            return "shell_exec", {"command": tool.render_command(tool_input)}
+        return tool_name, tool_input
 
     async def _maybe_block(
         self,

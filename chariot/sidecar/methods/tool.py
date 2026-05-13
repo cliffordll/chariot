@@ -55,3 +55,40 @@ class ToolMethods(MethodBase):
         name = self._require_str(params, "name")
         async with self._session() as session:
             return await self._service.probe_entry(session, name=name)
+
+    async def create_custom_tool(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        custom_type = self._require_str(params, "custom_type")
+        options = self._require_dict(params, "options")
+        description = self._optional_str(params, "description") or ""
+        async with self._session() as session:
+            tool = await self._service.create_custom_tool(
+                session,
+                name=name,
+                custom_type=custom_type,
+                options=options,
+                description=description,
+            )
+        return {"tool": tool}
+
+    async def delete_custom_tool(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._session() as session:
+            result = await self._service.delete_custom_tool(session, name=name)
+        return result
+
+    async def update_custom_tool(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        options = self._optional_dict(params, "options")
+        description = self._optional_str(params, "description")
+        async with self._session() as session:
+            tool = await self._service.update_custom_tool(
+                session,
+                name=name,
+                options=options,
+                description=description,
+            )
+        return {"tool": tool}

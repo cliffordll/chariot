@@ -4,8 +4,9 @@
 ----
 - list / get(基本读)
 - update(改 enabled / options;**不允许改 name / type**)
-- list_enabled:Agent 装载时只取 enabled=1 的 entries
-- seed_if_empty:lifespan startup 调,首次写入 4 条默认 disabled fixture
+ - list_enabled:Agent 装载时只取 enabled=1 的 entries
+ - sync_builtin_tools:lifespan startup 调,把代码中的 builtin 工具同步到 DB
+   (有则跳过,无则插入,enabled=0)
 
 不暴露的事
 ----------
@@ -22,29 +23,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.database.models import ToolRow
 from chariot.models.tool import ToolEntry
+from chariot.tools.builtin._meta import BuiltinToolMeta
+from chariot.tools.registry import ToolRegistry
 
 
 class ToolRepo:
     """`tools` 表的数据访问层。"""
-
-    # 4 条 seeded fixture(0.4.0 全部默认 disabled,见 docs/DESIGN.md §8.1)
-    _SEED_FIXTURES: ClassVar[tuple[tuple[str, str, dict[str, Any]], ...]] = (
-        ("read_file", "read_file", {"max_bytes": 1048576}),
-        ("list_dir", "list_dir", {}),
-        ("shell_exec", "shell_exec", {"workdir": "~/.chariot/sandbox", "timeout_s": 30}),
-        ("http_get", "http_get", {"allowed_domains": [], "max_bytes": 524288}),
-        # B6 wave 3:agent 自发提议 skill。默认 disabled;启用还需 enable_self_mod=True
-        # + yolo / 人工 approval 才能跑通 guardrail(self_modify_chariot 规则)
-        ("propose_skill", "propose_skill", {}),
-    )
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -88,17 +80,110 @@ class ToolRepo:
         await self.session.refresh(row)
         return self._row_to_entry(row)
 
-    # ---- 启动期 seed ----
+    # ---- 自定义工具 CRUD(0.8.7) ----
 
-    async def seed_if_empty(self) -> None:
-        """tools 表空时插入 4 条默认 disabled fixture。
+    async def create(
+        self,
+        *,
+        name: str,
+        type: str,
+        enabled: bool = True,
+        options: dict[str, Any],
+        source: str = "custom",
+        description: str = "",
+        custom_type: str | None = None,
+    ) -> ToolEntry:
+        """创建新工具 entry(custom 专用)。"""
+        existing = await self._find_row(name)
+        if existing is not None:
+            raise ConfigError(f"tool name 已存在: {name!r}")
+        entry = ToolEntry(
+            name=name,
+            type=type,
+            enabled=enabled,
+            options=options,
+            source=source,  # type: ignore[arg-type]
+            description=description,
+            custom_type=custom_type,
+        )
+        self._probe_entry(entry)
+        row = ToolRow(
+            name=name,
+            type=type,
+            enabled=1 if enabled else 0,
+            options=self._serialize_json("options", options),
+            source=source,
+            description=description,
+            custom_type=custom_type,
+        )
+        self.session.add(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
 
-        全部 enabled=0,用户必须显式打开 —— "安全优先",见 docs/DESIGN.md §8.1。
+    async def delete(self, name: str) -> None:
+        """删除工具 entry。builtin 不可删。"""
+        row = await self._find_row(name)
+        if row is None:
+            raise ToolNotFound(f"未知 tool name: {name!r}")
+        if row.source == "builtin":
+            raise ConfigError(f"builtin 工具不可删除: {name!r}")
+        await self.session.delete(row)
+        await self.session.commit()
+
+    async def update_full(
+        self,
+        name: str,
+        *,
+        enabled: bool | None = None,
+        options: dict[str, Any] | None = None,
+        description: str | None = None,
+    ) -> ToolEntry:
+        """完整更新(custom 工具专用,可改 description / options)。"""
+        row = await self._find_row(name)
+        if row is None:
+            raise ToolNotFound(f"未知 tool name: {name!r}")
+        next_enabled = bool(row.enabled) if enabled is None else enabled
+        current_options = self._deserialize_json("options", row.options)
+        next_options = current_options if options is None else {**current_options, **options}
+        next_description = row.description if description is None else description
+        self._probe_entry(
+            ToolEntry(
+                name=row.name,
+                type=row.type,
+                enabled=next_enabled,
+                options=next_options,
+                source=row.source,  # type: ignore[arg-type]
+                description=next_description,
+                custom_type=row.custom_type,
+            )
+        )
+        if enabled is not None:
+            row.enabled = 1 if enabled else 0
+        if options is not None:
+            row.options = self._serialize_json("options", next_options)
+        if description is not None:
+            row.description = description
+        await self.session.commit()
+        await self.session.refresh(row)
+        return self._row_to_entry(row)
+
+    # ---- 启动期 sync ----
+
+    async def sync_builtin_tools(self) -> None:
+        """同步 builtin 工具到 DB:有则跳过,无则插入(enabled=0)。
+
+        每次启动都调,保证代码里新增的 builtin 工具自动出现在 DB 中,
+        同时不覆盖用户已有的 enabled/options 设置。
         """
-        count = await self.session.scalar(select(func.count(ToolRow.id)))
-        if count and count > 0:
-            return
-        for name, type_, opts in self._SEED_FIXTURES:
+        existing_names: set[str] = set()
+        stmt = select(ToolRow.name).where(ToolRow.source == "builtin")
+        rows = (await self.session.execute(stmt)).scalars().all()
+        existing_names = set(rows)
+
+        for name, type_, opts in BuiltinToolMeta.seed_entries():
+            if name in existing_names:
+                continue
             self.session.add(
                 ToolRow(
                     name=name,
@@ -128,6 +213,11 @@ class ToolRepo:
             raise ConfigError(f"{label} JSON 顶层必须是 object")
         return cast(dict[str, Any], data)
 
+    @staticmethod
+    def _probe_entry(entry: ToolEntry) -> None:
+        tool = ToolRegistry.build(entry)
+        tool.schema()
+
     @classmethod
     def _row_to_entry(cls, row: ToolRow) -> ToolEntry:
         return ToolEntry(
@@ -135,6 +225,9 @@ class ToolRepo:
             type=row.type,
             enabled=bool(row.enabled),
             options=cls._deserialize_json("options", row.options),
+            source=row.source,  # type: ignore[arg-type]
+            description=row.description,
+            custom_type=row.custom_type,
         )
 
     async def _find_row(self, name: str) -> ToolRow | None:

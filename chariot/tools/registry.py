@@ -32,6 +32,7 @@ from typing import ClassVar
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.custom import CustomTool
 
 # 每个 builder 是一个 callable:ToolEntry → Tool 实例
 ToolBuilder = Callable[[ToolEntry], BaseTool]
@@ -68,10 +69,13 @@ class ToolRegistry:
 
     @classmethod
     def build(cls, entry: ToolEntry) -> BaseTool:
-        """按 `entry.type` 派发到对应 `create(entry)`。
+        """按 `entry.type` 或 `entry.custom_type` 派发到对应 `create(entry)`。
 
+        custom 工具走 CustomTool.create;builtin 走注册表。
         type 未注册 → `ConfigError`(startup 期 raise)。
         """
+        if entry.source == "custom":
+            return CustomTool.create(entry)
         try:
             builder = cls._builders[entry.type]
         except KeyError as e:
