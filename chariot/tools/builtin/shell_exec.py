@@ -42,11 +42,13 @@ from typing import Any, ClassVar, Self, cast
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 _DEFAULT_TIMEOUT_S = 30
 _DEFAULT_WORKDIR = "~/.chariot/sandbox"
 
 
+@builtin_tool(defaults={"workdir": _DEFAULT_WORKDIR, "timeout_s": _DEFAULT_TIMEOUT_S})
 class ShellExecTool(BaseTool):
     """在沙盒目录跑可执行命令,带 timeout。不走 shell。"""
 

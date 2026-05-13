@@ -28,8 +28,10 @@ from typing import Any, ClassVar, Self
 
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 
+@builtin_tool(defaults={})
 class ListDirTool(BaseTool):
     """列目录工具。返回 JSON 数组,可选递归。"""
 

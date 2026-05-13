@@ -16,8 +16,10 @@ from typing import Any, ClassVar, Self
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 
+@builtin_tool(defaults={"default_mode": "overwrite", "allow_outside_cwd": False})
 class WriteFileTool(BaseTool):
     """写文件工具。支持覆盖/追加,目录不存在自动创建。"""
 

@@ -19,8 +19,10 @@ from typing import Any, ClassVar, Self
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 
+@builtin_tool(defaults={"max_results": 50, "max_file_size_mb": 10.0, "context_lines": 2})
 class SearchFilesTool(BaseTool):
     """文件内容搜索工具。grep + find 的合体。"""
 

@@ -19,10 +19,12 @@ from typing import Any, ClassVar, Self
 
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 _VALID_STATUSES = {"pending", "in_progress", "completed", "cancelled"}
 
 
+@builtin_tool(defaults={})
 class TodoTool(BaseTool):
     """Session 内任务列表管理。"""
 

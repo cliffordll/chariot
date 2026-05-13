@@ -17,8 +17,10 @@ from typing import Any, ClassVar, Self
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 
+@builtin_tool(defaults={"backend": "duckduckgo", "max_results": 5, "include_answer": True})
 class WebSearchTool(BaseTool):
     """网页搜索工具。支持 DuckDuckGo 和 Tavily。"""
 

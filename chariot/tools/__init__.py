@@ -1,4 +1,4 @@
-"""chariot 工具实现层(0.4.0)。
+"""chariot 工具实现层。
 
 `BaseTool` 是协议接口(`base.py`),任何具体工具都要实现 `create(entry)` /
 `schema()` / `execute(input)`。
@@ -7,43 +7,23 @@ Agent 在 lifespan 通过 `ToolRegistry.build(entry)` 构造实例,放进
 `Agent._tools: dict[str, BaseTool]`;调 Model 前把所有 enabled tools 的 schema
 塞进 `body.tools`(若 client 已传则不覆盖,见 docs/DESIGN.md §M.3)。
 
-注册集中在本文件(显式调用,非 import 副作用):
+注册方式:
+- 每个 builtin 工具类用 `@builtin_tool(defaults={...})` 装饰器(在
+  `chariot/tools/builtin/_meta.py` 中定义)
+- `chariot/tools/__init__.py` 在模块加载时调用 `BuiltinToolMeta.ensure_discovered()`
+  扫描 `builtin/` 下所有模块,触发装饰器副作用 → 自动注册到 `ToolRegistry` +
+  收集 seed fixture
 
-    ToolRegistry.register("read_file", ReadFileTool)
-    ToolRegistry.register("list_dir", ListDirTool)
-    ToolRegistry.register("shell_exec", ShellExecTool)
-    ToolRegistry.register("http_get", HttpGetTool)
-    ToolRegistry.register("propose_skill", ProposeSkillTool)  # B6 wave 3
-
-加新工具:写一个新文件 `chariot/tools/builtin/<name>.py` + 在本文件加一行
-`ToolRegistry.register("type_name", NewTool)`。
+加新工具:
+1. 写一个新文件 `chariot/tools/builtin/<name>.py`
+2. 类上加 `@builtin_tool(defaults={...})`
+3. 什么都不用改,启动时自动出现在 DB 和 Registry 中
 """
 
 from __future__ import annotations
 
-from chariot.tools.builtin.edit_file import EditFileTool
-from chariot.tools.builtin.git_status import GitStatusTool
-from chariot.tools.builtin.http_get import HttpGetTool
-from chariot.tools.builtin.list_dir import ListDirTool
-from chariot.tools.builtin.propose_skill import ProposeSkillTool
-from chariot.tools.builtin.read_file import ReadFileTool
-from chariot.tools.builtin.search_files import SearchFilesTool
-from chariot.tools.builtin.shell_exec import ShellExecTool
-from chariot.tools.builtin.todo import TodoTool
-from chariot.tools.builtin.web_extract import WebExtractTool
-from chariot.tools.builtin.web_search import WebSearchTool
-from chariot.tools.builtin.write_file import WriteFileTool
-from chariot.tools.registry import ToolRegistry
+from chariot.tools.builtin._meta import BuiltinToolMeta, builtin_tool  # noqa: F401
+from chariot.tools.registry import ToolRegistry  # noqa: F401
 
-ToolRegistry.register("read_file", ReadFileTool)
-ToolRegistry.register("list_dir", ListDirTool)
-ToolRegistry.register("shell_exec", ShellExecTool)
-ToolRegistry.register("http_get", HttpGetTool)
-ToolRegistry.register("propose_skill", ProposeSkillTool)
-ToolRegistry.register("write_file", WriteFileTool)
-ToolRegistry.register("edit_file", EditFileTool)
-ToolRegistry.register("search_files", SearchFilesTool)
-ToolRegistry.register("web_search", WebSearchTool)
-ToolRegistry.register("web_extract", WebExtractTool)
-ToolRegistry.register("todo", TodoTool)
-ToolRegistry.register("git_status", GitStatusTool)
+# 模块加载时触发一次扫描(幂等)
+BuiltinToolMeta.ensure_discovered()

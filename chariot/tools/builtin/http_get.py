@@ -12,11 +12,13 @@ import httpx
 from chariot.agent.exceptions import ConfigError
 from chariot.models.tool import ToolEntry
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin._meta import builtin_tool
 
 _DEFAULT_MAX_BYTES = 524288
 _REQUEST_TIMEOUT_S = 30.0
 
 
+@builtin_tool(defaults={"allowed_domains": [], "max_bytes": _DEFAULT_MAX_BYTES})
 class HttpGetTool(BaseTool):
     _DESCRIPTION: ClassVar[str] = (
         "Make an HTTP GET request to a URL on the configured allow-list. "

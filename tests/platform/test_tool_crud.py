@@ -62,7 +62,7 @@ class TestToolRepoCrud:
 
     async def test_delete_builtin_rejected(self, session: AsyncSession) -> None:
         repo = ToolRepo(session)
-        await repo.seed_if_empty()
+        await repo.sync_builtin_tools()
         entries = await repo.list_entries()
         builtin = next(e for e in entries if e.source == "builtin")
         with pytest.raises(ConfigError, match=r"builtin.*不可删除"):
@@ -155,7 +155,7 @@ class TestToolRepoCrud:
         try:
             async with sm() as session:
                 repo = ToolRepo(session)
-                await repo.seed_if_empty()
+                await repo.sync_builtin_tools()
                 session.add(
                     ToolRow(
                         name="broken_shell",

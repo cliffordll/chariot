@@ -205,7 +205,7 @@ class AIAgent:
         sm = await init_db(db_path)
         async with sm() as session:
             await ProviderRepo(session).seed_if_empty()
-            await ToolRepo(session).seed_if_empty()
+            await ToolRepo(session).sync_builtin_tools()
             await PromptRepo(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)

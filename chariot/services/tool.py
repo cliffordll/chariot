@@ -36,5 +36,5 @@ class ToolService:
     ) -> ToolEntry:
         return await self._repo.update(name, enabled=enabled, options=options)
 
-    async def seed_if_empty(self) -> None:
-        await self._repo.seed_if_empty()
+    async def sync_builtin_tools(self) -> None:
+        await self._repo.sync_builtin_tools()

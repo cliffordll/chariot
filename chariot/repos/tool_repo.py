@@ -4,8 +4,9 @@
 ----
 - list / get(基本读)
 - update(改 enabled / options;**不允许改 name / type**)
-- list_enabled:Agent 装载时只取 enabled=1 的 entries
-- seed_if_empty:lifespan startup 调,首次写入 4 条默认 disabled fixture
+ - list_enabled:Agent 装载时只取 enabled=1 的 entries
+ - sync_builtin_tools:lifespan startup 调,把代码中的 builtin 工具同步到 DB
+   (有则跳过,无则插入,enabled=0)
 
 不暴露的事
 ----------
@@ -22,30 +23,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.database.models import ToolRow
 from chariot.models.tool import ToolEntry
+from chariot.tools.builtin._meta import BuiltinToolMeta
 from chariot.tools.registry import ToolRegistry
 
 
 class ToolRepo:
     """`tools` 表的数据访问层。"""
-
-    # 4 条 seeded fixture(0.4.0 全部默认 disabled,见 docs/DESIGN.md §8.1)
-    _SEED_FIXTURES: ClassVar[tuple[tuple[str, str, dict[str, Any]], ...]] = (
-        ("read_file", "read_file", {"max_bytes": 1048576}),
-        ("list_dir", "list_dir", {}),
-        ("shell_exec", "shell_exec", {"workdir": "~/.chariot/sandbox", "timeout_s": 30}),
-        ("http_get", "http_get", {"allowed_domains": [], "max_bytes": 524288}),
-        # B6 wave 3:agent 自发提议 skill。默认 disabled;启用还需 enable_self_mod=True
-        # + yolo / 人工 approval 才能跑通 guardrail(self_modify_chariot 规则)
-        ("propose_skill", "propose_skill", {}),
-    )
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -177,17 +168,22 @@ class ToolRepo:
         await self.session.refresh(row)
         return self._row_to_entry(row)
 
-    # ---- 启动期 seed ----
+    # ---- 启动期 sync ----
 
-    async def seed_if_empty(self) -> None:
-        """tools 表空时插入 4 条默认 disabled fixture。
+    async def sync_builtin_tools(self) -> None:
+        """同步 builtin 工具到 DB:有则跳过,无则插入(enabled=0)。
 
-        全部 enabled=0,用户必须显式打开 —— "安全优先",见 docs/DESIGN.md §8.1。
+        每次启动都调,保证代码里新增的 builtin 工具自动出现在 DB 中,
+        同时不覆盖用户已有的 enabled/options 设置。
         """
-        count = await self.session.scalar(select(func.count(ToolRow.id)))
-        if count and count > 0:
-            return
-        for name, type_, opts in self._SEED_FIXTURES:
+        existing_names: set[str] = set()
+        stmt = select(ToolRow.name).where(ToolRow.source == "builtin")
+        rows = (await self.session.execute(stmt)).scalars().all()
+        existing_names = set(rows)
+
+        for name, type_, opts in BuiltinToolMeta.seed_entries():
+            if name in existing_names:
+                continue
             self.session.add(
                 ToolRow(
                     name=name,
