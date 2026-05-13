@@ -10,10 +10,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError, ToolNotFound
+from chariot.agent.run import AIAgent
 from chariot.database.models import ToolRow
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.tool_repo import ToolRepo
-from chariot.agent.run import AIAgent
 
 
 @pytest_asyncio.fixture

@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-from chariot.tools.builtin.todo import _TodoStore
 from chariot.tools.base import BaseTool
+from chariot.tools.builtin.todo import _TodoStore
 from chariot.tools.execution import ToolExecutionService
 
 
