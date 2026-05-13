@@ -724,21 +724,21 @@ const apiCore = {
     options: Record<string, unknown>;
     description?: string;
   }): Promise<{ tool: Tool }> {
-    return rpc("create_custom_tool", req);
+    return rpc("add_tool", req);
   },
 
   deleteTool(name: string): Promise<{ deleted: string }> {
-    return rpc("delete_custom_tool", { name });
+    return rpc("delete_tool", { name });
   },
 
-  updateCustomTool(
+  updateTool(
     name: string,
     req: {
       options?: Record<string, unknown>;
       description?: string | null;
     },
   ): Promise<{ tool: Tool }> {
-    return rpc("update_custom_tool", { name, ...req });
+    return rpc("update_tool", { name, ...req });
   },
 
   listToolsets(): Promise<{ toolsets: Toolset[] }> {
@@ -750,7 +750,7 @@ const apiCore = {
   },
 
   createToolset(req: ToolsetPayload): Promise<{ toolset: Toolset }> {
-    return rpc("create_toolset", { ...req });
+    return rpc("add_toolset", { ...req });
   },
 
   updateToolset(name: string, req: Omit<ToolsetPayload, "name">): Promise<{ toolset: Toolset }> {

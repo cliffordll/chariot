@@ -29,7 +29,7 @@ def test_toolset_help_lists_subcommands() -> None:
     result = runner.invoke(app, ["toolset", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "add", "update", "remove", "members"):
+    for sub in ("list", "show", "add", "update", "delete", "members"):
         assert sub in out
 
 
@@ -37,7 +37,7 @@ def test_toolset_members_help() -> None:
     result = runner.invoke(app, ["toolset", "members", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("add", "remove"):
+    for sub in ("add", "delete"):
         assert sub in out
 
 

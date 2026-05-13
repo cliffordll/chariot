@@ -97,11 +97,11 @@ def toolset_update_cmd(
     )
 
 
-@toolset_app.command("remove", help="删除 toolset(成员级联清理)")
-def toolset_remove_cmd(
+@toolset_app.command("delete", help="删除 toolset(成员级联清理)")
+def toolset_delete_cmd(
     name: Annotated[str, typer.Argument(help="toolset name")],
 ) -> None:
-    asyncio.run(_toolset_remove(name))
+    asyncio.run(_toolset_delete(name))
 
 
 @members_app.command("add", help="给 toolset 加成员")
@@ -112,12 +112,12 @@ def members_add_cmd(
     asyncio.run(_members_add(name, tool_name))
 
 
-@members_app.command("remove", help="从 toolset 删成员")
-def members_remove_cmd(
+@members_app.command("delete", help="从 toolset 删成员")
+def members_delete_cmd(
     name: Annotated[str, typer.Argument(help="toolset name")],
     tool_name: Annotated[str, typer.Argument(help="tool name")],
 ) -> None:
-    asyncio.run(_members_remove(name, tool_name))
+    asyncio.run(_members_delete(name, tool_name))
 
 
 async def _toolset_list() -> None:
@@ -204,7 +204,7 @@ async def _toolset_update(
     Renderer.out(f"~ {entry.name} (members={len(entry.members)})")
 
 
-async def _toolset_remove(name: str) -> None:
+async def _toolset_delete(name: str) -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
         try:
             await ToolsetService(ToolsetRepo(session)).delete(name)
@@ -224,7 +224,7 @@ async def _members_add(name: str, tool_name: str) -> None:
     Renderer.out(f"+ {name}.{tool_name} (members={len(entry.members)})")
 
 
-async def _members_remove(name: str, tool_name: str) -> None:
+async def _members_delete(name: str, tool_name: str) -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
         try:
             entry = await ToolsetService(ToolsetRepo(session)).remove_member(name, tool_name)

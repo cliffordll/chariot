@@ -83,7 +83,7 @@ class TestToolsetMethods:
     async def test_create_and_show(self, server: JsonRpcServer) -> None:
         created = await _call(
             server,
-            "create_toolset",
+            "add_toolset",
             {"name": "fs_safe", "description": "只读", "members": ["read_file", "list_dir"]},
         )
         assert created["result"]["toolset"]["name"] == "fs_safe"
@@ -97,18 +97,18 @@ class TestToolsetMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_create_duplicate(self, server: JsonRpcServer) -> None:
-        await _call(server, "create_toolset", {"name": "dup"})
-        line = await _call(server, "create_toolset", {"name": "dup"})
+        await _call(server, "add_toolset", {"name": "dup"})
+        line = await _call(server, "add_toolset", {"name": "dup"})
         # ConfigError -> INVALID_PARAMS per MethodBase._session
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
     async def test_update_members(self, server: JsonRpcServer) -> None:
-        await _call(server, "create_toolset", {"name": "ts", "members": ["read_file"]})
+        await _call(server, "add_toolset", {"name": "ts", "members": ["read_file"]})
         updated = await _call(server, "update_toolset", {"name": "ts", "members": ["list_dir", "http_get"]})
         assert updated["result"]["toolset"]["members"] == ["http_get", "list_dir"]
 
     async def test_add_remove_member(self, server: JsonRpcServer) -> None:
-        await _call(server, "create_toolset", {"name": "ts"})
+        await _call(server, "add_toolset", {"name": "ts"})
         await _call(server, "add_toolset_member", {"name": "ts", "tool_name": "read_file"})
         with_member = await _call(server, "get_toolset", {"name": "ts"})
         assert with_member["result"]["toolset"]["members"] == ["read_file"]
@@ -118,7 +118,7 @@ class TestToolsetMethods:
         assert cleared["result"]["toolset"]["members"] == []
 
     async def test_delete(self, server: JsonRpcServer) -> None:
-        await _call(server, "create_toolset", {"name": "ts"})
+        await _call(server, "add_toolset", {"name": "ts"})
         line = await _call(server, "delete_toolset", {"name": "ts"})
         assert line["result"] == {"deleted": "ts"}
 
@@ -126,5 +126,5 @@ class TestToolsetMethods:
         assert gone["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_members_invalid_type(self, server: JsonRpcServer) -> None:
-        line = await _call(server, "create_toolset", {"name": "ts", "members": "not-a-list"})
+        line = await _call(server, "add_toolset", {"name": "ts", "members": "not-a-list"})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS

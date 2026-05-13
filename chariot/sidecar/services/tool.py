@@ -55,7 +55,7 @@ class ToolApi:
         await self._runtime.reload()
         return self.serialize(entry)
 
-    async def create_custom_tool(
+    async def add(
         self,
         session: Any,
         *,
@@ -76,12 +76,12 @@ class ToolApi:
         await self._runtime.reload()
         return self.serialize(entry)
 
-    async def delete_custom_tool(self, session: Any, *, name: str) -> dict[str, Any]:
+    async def delete(self, session: Any, *, name: str) -> dict[str, Any]:
         await ToolRepo(session).delete(name)
         await self._runtime.reload()
         return {"deleted": name}
 
-    async def update_custom_tool(
+    async def update(
         self,
         session: Any,
         *,
