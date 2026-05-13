@@ -324,7 +324,8 @@ class AIAgent:
 
         for tool in tools.values():
             if isinstance(tool, HttpGetTool):
-                return frozenset(d.lower() for d in tool.allowed_domains)
+                http_tool: HttpGetTool = tool
+                return frozenset(d.lower() for d in http_tool.allowed_domains)
         return frozenset()
 
     # ---- 资源访问(供 surface 直调 repo) ----
@@ -416,7 +417,8 @@ class AIAgent:
 
         for tool in self._tools.values():
             if isinstance(tool, ProposeSkillTool):
-                tool.attach_service(self._skill_propose_service)
+                propose_tool: ProposeSkillTool = tool
+                propose_tool.attach_service(self._skill_propose_service)
 
     # ---- 主入口 ----
 
