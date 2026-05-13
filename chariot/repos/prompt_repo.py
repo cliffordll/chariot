@@ -245,12 +245,27 @@ class PromptRepo:
             bundle.layers = self._serialize_json("layers", cast(list[dict[str, Any]], layers))
         await self.session.flush()
         current_layers = cast(list[dict[str, Any]], json.loads(bundle.layers))
+        target_layers = cast(list[dict[str, Any]], layers if layers not in (_MISSING, None) else current_layers)
+
+        # 与上一版本比较内容;相同(忽略字段顺序)则不创建新版本
+        last_ver = await self._get_latest_version(bundle.id)
+        if last_ver is not None:
+            last_spec = cast(dict[str, Any], json.loads(last_ver.spec))
+            last_layers = cast(list[dict[str, Any]], last_spec.get("layers", []))
+            if self._layers_equal(last_layers, target_layers):
+                entry = self._version_to_entry(last_ver, bundle_name=bundle.name)
+                if activate:
+                    await self._set_bundle_active(bundle.id)
+                    await self._set_version_active(bundle.id, entry.version)
+                    await self.session.commit()
+                return entry
+
         next_version = await self._next_version_name(bundle.id)
         created = await self._create_version(
             bundle.id,
             bundle.name,
             next_version,
-            layers=cast(list[dict[str, Any]], layers if layers not in (_MISSING, None) else current_layers),
+            layers=target_layers,
             activate=activate,
         )
         if activate:
@@ -334,6 +349,33 @@ class PromptRepo:
         await self.session.commit()
         await self.session.refresh(row)
         return await self._trace_to_entry(row)
+
+    async def _get_latest_version(self, bundle_id: str) -> PromptVersionRow | None:
+        """获取 bundle 的最新版本(按 created_at desc,version desc)。"""
+        stmt = (
+            select(PromptVersionRow)
+            .where(PromptVersionRow.bundle_id == bundle_id)
+            .order_by(PromptVersionRow.created_at.desc(), PromptVersionRow.version.desc())
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    @staticmethod
+    def _layers_equal(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
+        """深度比较两个 layers 列表,忽略 dict 键顺序和列表项顺序。"""
+        if len(a) != len(b):
+            return False
+
+        def _normalize(val: Any) -> Any:
+            if isinstance(val, dict):
+                return {k: _normalize(v) for k, v in sorted(val.items()) if v is not None}
+            if isinstance(val, list):
+                return [_normalize(v) for v in val]
+            return val
+
+        a_norm = sorted([_normalize(layer) for layer in a], key=lambda x: json.dumps(x, sort_keys=True))
+        b_norm = sorted([_normalize(layer) for layer in b], key=lambda x: json.dumps(x, sort_keys=True))
+        return a_norm == b_norm
 
     async def _create_version(
         self,
@@ -439,8 +481,7 @@ class PromptRepo:
             updated_at=row.updated_at,
         )
 
-    @staticmethod
-    def _version_to_entry(row: PromptVersionRow, *, bundle_name: str) -> PromptVersionEntry:
+    def _version_to_entry(self, row: PromptVersionRow, *, bundle_name: str) -> PromptVersionEntry:
         return PromptVersionEntry(
             id=row.id,
             bundle_id=row.bundle_id,

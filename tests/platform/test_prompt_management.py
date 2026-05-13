@@ -50,3 +50,47 @@ async def test_prompt_bundle_create_update_activate(session: AsyncSession) -> No
     )
     assert trace.bundle_name == "demo"
     assert trace.version == "v2"
+
+
+async def test_update_bundle_same_content_no_new_version(session: AsyncSession) -> None:
+    """update_bundle 内容相同(忽略字段顺序)时不创建新版本。"""
+    repo = PromptRepo(session)
+    await repo.seed_if_empty()
+
+    # 创建初始 bundle
+    created = await repo.create_bundle(
+        "nodup",
+        description="test",
+        layers=[
+            {"name": "layer_a", "source": "user", "content": "hello"},
+            {"name": "layer_b", "source": "system", "content": "world"},
+        ],
+    )
+    assert created.version == "v1"
+
+    # 用相同内容更新(字段顺序不同)
+    updated = await repo.update_bundle(
+        "nodup",
+        layers=[
+            {"content": "hello", "name": "layer_a", "source": "user"},
+            {"source": "system", "content": "world", "name": "layer_b"},
+        ],
+    )
+    # 内容相同 → 不创建 v2,返回 v1
+    assert updated.version == "v1"
+
+    # 用不同内容更新
+    updated2 = await repo.update_bundle(
+        "nodup",
+        layers=[
+            {"name": "layer_a", "source": "user", "content": "changed"},
+            {"name": "layer_b", "source": "system", "content": "world"},
+        ],
+    )
+    # 内容不同 → 创建 v2
+    assert updated2.version == "v2"
+
+    # 验证版本数
+    bundle = await repo.get_bundle("nodup")
+    assert bundle is not None
+    assert bundle.version_count == 2

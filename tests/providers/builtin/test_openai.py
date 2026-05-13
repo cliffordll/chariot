@@ -11,7 +11,6 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.exceptions import ConfigError, ProviderError
 from chariot.providers.builtin.openai import OpenAIProvider
