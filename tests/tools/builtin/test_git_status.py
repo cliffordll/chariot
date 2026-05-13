@@ -24,17 +24,24 @@ async def test_git_status_no_git_repo(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_git_status_clean_repo(tmp_path: Path) -> None:
+    import os
     import subprocess
 
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     # 创建一个初始 commit,否则 HEAD 不存在
     (tmp_path / "init.txt").write_text("init")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "test"
+    env["GIT_AUTHOR_EMAIL"] = "test@example.com"
+    env["GIT_COMMITTER_NAME"] = "test"
+    env["GIT_COMMITTER_EMAIL"] = "test@example.com"
     subprocess.run(
         ["git", "commit", "-m", "init", "--no-gpg-sign"],
         cwd=tmp_path,
         check=True,
         capture_output=True,
+        env=env,
     )
     tool = _make_tool()
     result = await tool.execute({"path": str(tmp_path)})
