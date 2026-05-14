@@ -665,21 +665,6 @@ function EntryRow({
   return (
     <div className="mb-3 rounded-md border border-border bg-muted/10 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
-          provider
-        </span>
-        <Select value={selectedEntry ?? undefined} onValueChange={onSelect}>
-          <SelectTrigger className="h-8 w-56">
-            <SelectValue placeholder="选 provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {data.available.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <span className="text-xs uppercase tracking-wide text-muted-foreground">
           agent
         </span>
@@ -695,6 +680,21 @@ function EntryRow({
             {agents.map((a) => (
               <SelectItem key={a.name} value={a.name}>
                 {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
+          provider
+        </span>
+        <Select value={selectedEntry ?? undefined} onValueChange={onSelect}>
+          <SelectTrigger className="h-8 w-56">
+            <SelectValue placeholder="选 provider" />
+          </SelectTrigger>
+          <SelectContent>
+            {data.available.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
               </SelectItem>
             ))}
           </SelectContent>
