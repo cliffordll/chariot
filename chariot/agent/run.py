@@ -752,6 +752,7 @@ class AIAgent:
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
             todo_store=self._todo_store_for(conversation_id),
+            agent_profile=binding.profile.name if binding.profile is not None else None,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None

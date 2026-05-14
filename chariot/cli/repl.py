@@ -17,7 +17,7 @@ slash 命令(v6 起 model→provider rename;v7 起加默认 provider)
 - `/conversation new`                 生成新 ULID 并切到 stateful 模式
 - `/conversation <ULID>`              接续指定会话
 - `/conversation off`                 切回 stateless
-- `/conversations`                    列最近会话(id / title / last_model / msg 数)
+- `/conversations`                    列最近会话(id / title / last_provider / msg 数)
 - `/tool`                      显示当前已启用工具(filter enabled=True)
 - `/tools`                     列全部内置工具(含未启用,带 ON / off 标记)
 
@@ -122,6 +122,29 @@ class ChatRepl:
         "  /help                  本说明"
     )
 
+    async def _refresh_conversation_config(self) -> None:
+        """每轮输入前重新查 DB,恢复 conversation 最新 provider/agent 配置。
+        若用户中途在 UI 改了,CLI REPL 能同步到最新值。
+        """
+        from chariot.database.session import DEFAULT_DB_PATH, init_db
+        from chariot.repos.conversation_repo import ConversationRepo
+        from chariot.services.conversation import ConversationService
+
+        conv_id = self.ctx.conversation_id
+        if conv_id is None:
+            return
+        assert isinstance(conv_id, str)
+        sm = await init_db(DEFAULT_DB_PATH)
+        async with sm() as session:
+            conv = await ConversationService(ConversationRepo(session)).get(conv_id)
+        if conv is None:
+            return
+        # 只恢复 DB 里非空的值;不覆盖 CLI 启动时显式传的 flag
+        if conv.last_provider and not self.ctx.provider_name:
+            self.ctx.set_provider(conv.last_provider)
+        if conv.agent_profile and not self.ctx.agent_profile:
+            self.ctx.agent_profile = conv.agent_profile
+
     async def run(self) -> None:
         """主循环:读输入 → 分派 slash / 发请求 → 打印 meta 行。
 
@@ -144,6 +167,10 @@ class ChatRepl:
             line = line.strip()
             if not line:
                 continue
+
+            # C1: REPL 每轮输入前重新查 conversation 最新配置(防止 UI 中途改了)
+            if self.ctx.conversation_id is not None:
+                await self._refresh_conversation_config()
 
             if line.startswith("/"):
                 if await self._handle_slash(line):
@@ -407,14 +434,14 @@ class ChatRepl:
             (
                 c.id,
                 _truncate(c.title or "(无标题)", 30),
-                c.last_model or "-",
+                c.last_provider or "-",
                 str(c.message_count),
                 "← current" if c.id == self.ctx.conversation_id else "",
             )
             for c in conversations
         ]
         Renderer.table(
-            ["id", "title", "last_model", "msgs", ""],
+            ["id", "title", "last_provider", "msgs", ""],
             rows,
             title="conversations",
         )

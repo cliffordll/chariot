@@ -6,7 +6,7 @@
 
 只读:
 - `chariot conversation list [--limit N] [--offset M]`:列 conversations
-  按 updated_at desc 排序,展示 id / title / last_model / message_count
+  按 updated_at desc 排序,展示 id / title / last_provider / message_count
 
 写:
 - `chariot conversation show <id>`:详情 + 最近 N 条 messages 摘要
@@ -27,6 +27,7 @@ from chariot.agent.exceptions import ConversationNotFound
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.repos.conversation_repo import ConversationRepo
+from chariot.services.conversation import ConversationService
 
 conversation_app = typer.Typer(
     name="conversation",
@@ -54,7 +55,9 @@ def list_cmd(
 
 async def _list(limit: int, offset: int) -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
-        conversations = await ConversationRepo(session).list_entries(limit=limit, offset=offset)
+        conversations = await ConversationService(ConversationRepo(session)).list_conversations(
+            limit=limit, offset=offset
+        )
 
     if not conversations:
         Renderer.out("(没有会话 — 用 `chariot chat --conversation new` 开始一个)")
@@ -64,12 +67,12 @@ async def _list(limit: int, offset: int) -> None:
         (
             c.id,
             _truncate(c.title or "(无标题)", 30),
-            c.last_model or "-",
+            c.last_provider or "-",
             str(c.message_count),
         )
         for c in conversations
     ]
-    Renderer.table(["id", "title", "last_model", "msgs"], rows, title="conversations")
+    Renderer.table(["id", "title", "last_provider", "msgs"], rows, title="conversations")
 
 
 # ---------- show ----------
@@ -85,16 +88,16 @@ def show_cmd(
 
 async def _show(conversation_id: str, tail: int) -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        conversation = await repo.get(conversation_id)
+        service = ConversationService(ConversationRepo(session))
+        conversation = await service.get(conversation_id)
         if conversation is None:
             Renderer.die(f"未知 conversation id: {conversation_id!r}")
             return
-        msgs = await repo.list_messages(conversation_id)
+        msgs = await service.list_message_rows(conversation_id)
 
     Renderer.out(f"id:           {conversation.id}")
     Renderer.out(f"title:        {conversation.title or '(无)'}")
-    Renderer.out(f"last_model:   {conversation.last_model or '-'}")
+    Renderer.out(f"last_provider:   {conversation.last_provider or '-'}")
     Renderer.out(f"message_count: {conversation.message_count}")
     Renderer.out(f"created_at:   {conversation.created_at.isoformat()}")
     Renderer.out(f"updated_at:   {conversation.updated_at.isoformat()}")
@@ -134,7 +137,7 @@ async def _rm(conversation_id: str) -> None:
     async with installed_runtime() as agent:
         try:
             async with agent.session_maker() as session:
-                await ConversationRepo(session).delete(conversation_id)
+                await ConversationService(ConversationRepo(session)).delete(conversation_id)
         except ConversationNotFound as e:
             Renderer.die(f"删除失败: {e}")
             return
@@ -157,7 +160,7 @@ async def _rename(conversation_id: str, title: str) -> None:
     async with installed_runtime() as agent:
         try:
             async with agent.session_maker() as session:
-                conversation = await ConversationRepo(session).update_title(conversation_id, new_title)
+                conversation = await ConversationService(ConversationRepo(session)).rename(conversation_id, new_title)
         except ConversationNotFound as e:
             Renderer.die(f"重命名失败: {e}")
             return
@@ -178,7 +181,9 @@ def search_cmd(
 
 async def _search(query: str, limit: int, conversation_id: str | None) -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
-        hits = await ConversationRepo(session).search(query, limit=limit, conversation_id=conversation_id)
+        hits = await ConversationService(ConversationRepo(session)).search(
+            query, limit=limit, conversation_id=conversation_id
+        )
     if not hits:
         Renderer.out("(无命中)")
         return
@@ -197,7 +202,7 @@ def rebuild_fts_cmd() -> None:
 
 async def _rebuild_fts() -> None:
     async with installed_runtime() as agent, agent.session_maker() as session:
-        n = await ConversationRepo(session).rebuild_fts()
+        n = await ConversationService(ConversationRepo(session)).rebuild_fts()
     Renderer.out(f"rebuilt FTS index for {n} message(s)")
 
 

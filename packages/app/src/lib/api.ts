@@ -30,7 +30,8 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
 export interface Conversation {
   id: string;
   title: string | null;
-  last_model: string | null;
+  last_provider: string | null;
+  agent_profile: string | null;
   created_at: string;
   updated_at: string;
   message_count: number;

@@ -104,21 +104,22 @@ class ProviderRow(Base):
 
 
 class ConversationRow(Base):
-    """`conversations` 表(v5 起;v4 时叫 `conversations`):多轮对话单元。
+    """`conversations` 表(v24 起):多轮对话单元。
 
     - `id`:26 字符 ULID(client 或 server 生成,正则校验在 controller 层做);
       ULID 单调时间戳前缀让 `ORDER BY id` 即时间序
     - `title`:可选;空则 GUI 从首条 user msg 截取展示
-    - `last_model`:派生字段,每写一轮 assistant msg 同步;记 provider entry name,
-      仅供 GUI 侧栏展示"最近用的哪个 entry"。字段名沿用 `last_model`(用户视角是
-      "我用了哪个 model"),不跟 v6 rename
+    - `last_provider`:v24 rename from `last_model`;派生字段,每写一轮 assistant msg
+      同步;记 provider entry name,仅供 GUI 侧栏展示"最近用的哪个 entry"
+    - `agent_profile`:v24 新增;记录该对话上次使用的 agent profile name
     """
 
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
-    last_model: Mapped[str | None] = mapped_column(default=None)
+    last_provider: Mapped[str | None] = mapped_column(default=None)
+    agent_profile: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

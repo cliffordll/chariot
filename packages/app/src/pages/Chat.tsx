@@ -271,6 +271,29 @@ export default function Chat() {
     el.scrollTop = el.scrollHeight;
   }, [pane, pending]);
 
+  // C1: 切换/恢复对话时自动恢复 provider + agent
+  useEffect(() => {
+    if (pane.kind !== "loaded") return;
+    const convo = pane.convo;
+
+    // 恢复 provider:优先从消息反推,其次从 conversation.last_provider
+    const lastMsg = [...pane.messages].reverse().find(
+      (m) => m.role === "assistant" && m.provider_name,
+    );
+    if (lastMsg?.provider_name) {
+      setSelectedEntry(lastMsg.provider_name);
+    } else if (convo.last_provider) {
+      setSelectedEntry(convo.last_provider);
+    }
+
+    // 恢复 agent
+    if (convo.agent_profile) {
+      setSelectedAgent(convo.agent_profile);
+    } else {
+      setSelectedAgent(null);
+    }
+  }, [pane, setSelectedEntry, setSelectedAgent]);
+
   const startNewChat = useCallback(() => {
     abortRef.current?.abort();
     setPending(null);

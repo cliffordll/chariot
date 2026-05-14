@@ -42,6 +42,7 @@ class AgentLoop:
         approval_policy: ApprovalPolicy | None = None,
         audit_hooks: AuditHookManager | None = None,
         todo_store: Any | None = None,
+        agent_profile: str | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -55,7 +56,8 @@ class AgentLoop:
         self._repo = repo
         self._conversation_id = conversation_id
         self._max_iter = max_iter
-        self._turn = turn  # Phase B1:trace 写入 handle;None = 不记录
+        self._turn = turn
+        self._agent_profile = agent_profile  # Phase B1:trace 写入 handle;None = 不记录
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -201,6 +203,7 @@ class AgentLoop:
             role="assistant",
             content=content,
             provider_name=self._provider.config.name,
+            agent_profile=self._agent_profile,
         )
 
     async def _persist_tool_results(self, tool_results: list[ChatEvent]) -> None:

@@ -39,6 +39,7 @@ from chariot.cli._runtime import installed_runtime
 from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
 from chariot.database.session import DEFAULT_DB_PATH
+from chariot.repos.conversation_repo import ConversationRepo
 from chariot.repos.provider_repo import ProviderRepo
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
@@ -198,10 +199,14 @@ async def _run(
     reflection_max_retries: int = 2,
     skill: str | None = None,
 ) -> None:
+    # Phase 0:若 --conversation <id>,先查 DB 恢复 provider/agent 配置
+    restored_provider, restored_agent = await _restore_conversation_config(conversation_id)
+
     # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
     # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
     # installed_runtime 内部再 init_db 会复用已装载的 engine
-    provider_name = await _resolve_provider_name(provider)
+    provider_name = provider or restored_provider or await _resolve_provider_name(None)
+    resolved_agent = agent_profile or restored_agent
 
     # Phase 2:把 --base-url / --api-key 收集成 provider_overrides(连接维度,
     # 进 entry.options 重建 Provider + 命中 / 新建 ClientSpec)。`--model` 不在
@@ -219,7 +224,7 @@ async def _run(
                 max_tokens=max_tokens,
                 conversation_id=conversation_id,
                 model_override=model,
-                agent_profile=agent_profile,
+                agent_profile=resolved_agent,
                 reflection_enabled=reflection_enabled,
                 reflection_max_retries=reflection_max_retries,
                 skill=skill,
@@ -235,6 +240,23 @@ async def _run(
             await ChatOnce(ctx=ctx).run(text)
     except ConfigError as e:
         Renderer.die(f"AIAgent 装载失败: {e}")
+
+
+async def _restore_conversation_config(conversation_id: str | None) -> tuple[str | None, str | None]:
+    """若给了 conversation_id,查 DB 恢复该对话的 provider + agent 配置。
+    返回 (restored_provider, restored_agent);无 conversation_id 或找不到 → (None, None)。
+    """
+    if conversation_id is None:
+        return None, None
+    from chariot.database.session import init_db
+    from chariot.services.conversation import ConversationService
+
+    sm = await init_db(DEFAULT_DB_PATH)
+    async with sm() as session:
+        conv = await ConversationService(ConversationRepo(session)).get(conversation_id)
+    if conv is None:
+        return None, None
+    return conv.last_provider, conv.agent_profile
 
 
 async def _resolve_provider_name(override: str | None) -> str:
