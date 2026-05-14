@@ -575,6 +575,10 @@ class AIAgent:
     async def _resolve_binding(self, req: ChatRequest) -> _AgentBinding:
         """req.agent_profile 非空 → 加载 AgentProfile + 解析 toolset 成员;
         dangling reference 或 no sessionmaker 走 fallback(返 `_NO_BINDING`)。
+
+        0.8.8+ 行为变更:没有配置 toolset 或 dangling toolset → allowed_tools=None,
+        在 _inject_default_tools 阶段会关闭工具调用(不挂载任何工具)。
+        工具调用必须通过 agent_profile.tool_profile 显式配置。
         """
         if req.agent_profile is None or self._sessionmaker is None:
             return _NO_BINDING
@@ -590,7 +594,7 @@ class AIAgent:
                 return _AgentBinding(profile=profile, allowed_tools=None)
             toolset = await ToolsetRepo(session).get_entry(profile.tool_profile)
             if toolset is None:
-                # toolset 名引用不存在,fallback 到全量工具
+                # toolset 名引用不存在 → fallback 到空工具(不挂载)
                 return _AgentBinding(profile=profile, allowed_tools=None)
             return _AgentBinding(profile=profile, allowed_tools=frozenset(toolset.members))
 
@@ -875,21 +879,24 @@ class AIAgent:
         return normalize_request(req_with_tools, provider.capabilities)
 
     def _inject_default_tools(self, req: ChatRequest, binding: _AgentBinding = _NO_BINDING) -> ChatRequest:
-        """req.tools 是 None → 挂当前装载的所有 tool schema;
+        """req.tools 是 None → 按 binding 挂载 tool schema;
         req.tools 是 [] → 关闭工具调用(透传);
         req.tools 是 list → 用调用方指定的(透传)。
-        binding.allowed_tools 非 None 时,对挂载结果再做一次 toolset filter:
-        - None 集 = 不过滤(沿用旧行为)
-        - 空集 = 强制 `tools=[]`(关闭工具调用)
-        - 非空集 = 只保留命中 name 的工具
+
+        0.8.8+ 行为变更:没有配置 toolset(allowed_tools is None) → 不挂载任何工具,
+        工具调用必须显式通过 agent_profile.tool_profile 配置。
         """
         if req.tools is not None:
-            return req
+            return req  # 调用方已指定(含 [] 关闭工具)
         if not self._tools:
-            return req  # 没装载 tool,保持 None
-        tools = self._tools
-        if binding.allowed_tools is not None:
-            tools = {name: tool for name, tool in tools.items() if name in binding.allowed_tools}
+            return req  # 没装载 tool
+
+        # 新行为:没有配置 toolset → 不挂载任何工具
+        if binding.allowed_tools is None:
+            return dataclasses.replace(req, tools=[])
+
+        # 配置了 toolset → 按 toolset 过滤
+        tools = {name: tool for name, tool in self._tools.items() if name in binding.allowed_tools}
         schemas: list[ToolSchema] = [self._tool_schema(tool) for tool in tools.values()]
         return dataclasses.replace(req, tools=schemas)
 

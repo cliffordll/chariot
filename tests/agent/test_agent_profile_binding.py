@@ -218,7 +218,16 @@ class TestAgentProfileBinding:
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="bad"))]
         assert any(e.kind == "stream_done" for e in events)
-        # dangling toolset → 回退到全量工具
+        # dangling toolset → 0.8.8+ 回退到空工具(不挂载任何工具)
         assert provider.last_req is not None
-        tool_names = {t.name for t in (provider.last_req.tools or [])}
-        assert tool_names == {"read_file", "list_dir"}
+        assert provider.last_req.tools == []
+
+    async def test_no_agent_profile_no_tools(self, sessionmaker) -> None:
+        """没有 agent_profile → 不挂载任何工具(0.8.8+ 行为变更)。"""
+        provider = _CapturingProvider("mock")
+        tools = {"read_file": _make_tool("read_file"), "list_dir": _make_tool("list_dir")}
+        agent = _make_agent(sessionmaker, providers={"mock": provider}, tools=tools)
+        events = [e async for e in agent.run_chat(_stateless("mock"))]
+        assert any(e.kind == "stream_done" for e in events)
+        assert provider.last_req is not None
+        assert provider.last_req.tools == []
