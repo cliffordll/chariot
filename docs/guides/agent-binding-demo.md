@@ -46,9 +46,12 @@ profile.tool_profile      过滤  self._tools(toolset 成员)
 
 ```powershell
 uv run chariot provider list                                     # 看现有
-uv run chariot provider add --name claude --type anthropic `
-  --options '{"api_key_env":"ANTHROPIC_API_KEY","model":"claude-sonnet-4-6"}'
+# json 暂不支持（命令行中--option参数会去掉"" 变成{api_key_env:ANTHROPIC_API_KEY,model:claude-sonnet-4-7}）
+uv run chariot provider add --name claude --type anthropic --option '{"api_key_env":"ANTHROPIC_API_KEY","model":"claude-sonnet-4-7"}'
+uv run chariot provider add --name openai-test --type openai
+uv run chariot provider update claude -o api_key=ANTHROPIC_API_KEY -o model=claude-sonnet-4-6
 uv run chariot provider probe claude                             # 探活
+uv run chariot provider copy claude
 uv run chariot provider use claude                               # 设为默认
 ```
 
@@ -64,8 +67,7 @@ uv run pytest tests/providers/ tests/sidecar/test_provider_methods_extra.py test
 
 ```powershell
 uv run chariot prompt list
-uv run chariot prompt add research --layer `
-  '[{"name":"base_system","source":"researcher prompt","content":"You are a careful researcher. Always cite sources."}]'
+uv run chariot prompt add research --layer '[{"name":"base_system","source":"researcher prompt","content":"You are a careful researcher. Always cite sources."}]'
 uv run chariot prompt show research
 # 注意:add 命令会把新 bundle 设为 active;如不希望 research 是全局 active,
 # 跑完后再 activate 回 default:
@@ -86,8 +88,7 @@ uv run pytest tests/platform/test_prompt_management.py tests/agent/test_prompt_s
 uv run chariot tool list                                         # 4 seeded fixtures
 uv run chariot tool enable read_file
 uv run chariot tool enable list_dir
-uv run chariot toolset add --name fs_safe --description "只读文件操作" `
-  --members read_file,list_dir
+uv run chariot toolset add --name fs_safe --description "只读文件操作" --members read_file,list_dir
 uv run chariot toolset show fs_safe
 uv run chariot toolset list
 ```

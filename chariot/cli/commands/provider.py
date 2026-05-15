@@ -43,7 +43,7 @@ from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.providers.prober import ProviderProber
 from chariot.providers.registry import ProviderRegistry
-from chariot.repos.provider_repo import ProviderRepo
+from chariot.services.provider import ProviderService
 
 provider_app = typer.Typer(
     name="provider",
@@ -61,10 +61,8 @@ def list_cmd() -> None:
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = ProviderRepo(session)
-        entries = await repo.list_entries()
-        default = await repo.get_default()
+    async with installed_runtime() as agent:
+        entries, default = await ProviderService(agent).list_with_default()
     default_name = default.name if default is not None else None
 
     if not entries:
@@ -95,10 +93,10 @@ def show_cmd(
 
 
 async def _show(name: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = ProviderRepo(session)
+    async with installed_runtime() as agent:
+        service = ProviderService(agent)
         if name is None:
-            entry = await repo.get_default()
+            entry = await service.get_default()
             if entry is None:
                 Renderer.die(
                     "没有默认 provider — `chariot provider use <name>` 设一个,"
@@ -107,12 +105,11 @@ async def _show(name: str | None) -> None:
                 return
             is_default = True
         else:
-            entry = await repo.get_entry(name)
-            if entry is None:
+            result = await service.show_with_default(name)
+            if result is None:
                 Renderer.die(f"未知 entry: {name!r}(`chariot provider list` 看现有 id)")
                 return
-            default = await repo.get_default()
-            is_default = default is not None and default.name == entry.name
+            entry, is_default = result
 
     rows: list[tuple[str, str]] = [
         ("name", entry.name),
@@ -134,10 +131,10 @@ def status_cmd() -> None:
 
 
 async def _status() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = ProviderRepo(session)
-        entries = await repo.list_entries()
-        default = await repo.get_default()
+    async with installed_runtime() as agent:
+        result = await ProviderService(agent).status()
+    entries = result["entries"]
+    default = result["default"]
 
     rows = [
         ("provider count", str(len(entries))),
@@ -199,9 +196,9 @@ def use_cmd(
 
 
 async def _use(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            await ProviderRepo(session).set_default(name)
+            await ProviderService(agent).set_default(name)
         except ProviderNotFound as e:
             Renderer.die(f"切换失败: {e}")
             return
@@ -248,8 +245,7 @@ async def _probe(
         overrides["api_key"] = api_key
 
     async with installed_runtime() as agent:
-        async with agent.session_maker() as session:
-            entry = await ProviderRepo(session).get_entry(name)
+        entry = await ProviderService(agent).get_entry(name)
         if entry is None:
             Renderer.die(f"未知 entry: {name!r}(`chariot provider list` 看现有 id)")
             return
@@ -343,13 +339,12 @@ async def _add(name: str, type_: str, options: list[str], params: list[str]) -> 
     prms = _parse_kv(params, label="-p")
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await ProviderRepo(session).create(
-                    name=name,
-                    type=type_,
-                    options=opts,
-                    params=prms,
-                )
+            entry = await ProviderService(agent).create(
+                name=name,
+                type=type_,
+                options=opts,
+                params=prms,
+            )
         except DuplicateProviderName as e:
             Renderer.die(f"添加失败: {e}")
             return
@@ -402,13 +397,12 @@ async def _update(
     prms = _parse_kv(params, label="-p") if params is not None else None
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await ProviderRepo(session).update(
-                    name,
-                    type=type_,
-                    options=opts,
-                    params=prms,
-                )
+            entry = await ProviderService(agent).update(
+                name,
+                type=type_,
+                options=opts,
+                params=prms,
+            )
         except ProviderNotFound as e:
             Renderer.die(f"编辑失败: {e}")
             return
@@ -418,11 +412,10 @@ async def _update(
     Renderer.out(f"~ {entry.name} (type={entry.type})")
 
 
-# ---------- delete / rm ----------
+# ---------- delete ----------
 
 
 @provider_app.command("delete", help="删除 entry")
-@provider_app.command("rm", help="删除 entry; `delete` 的兼容别名")
 def rm_cmd(
     name: Annotated[str, typer.Argument(help="要删的 entry 名")],
 ) -> None:
@@ -432,8 +425,7 @@ def rm_cmd(
 async def _rm(name: str) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await ProviderRepo(session).delete(name)
+            await ProviderService(agent).delete(name)
         except ProviderNotFound as e:
             Renderer.die(f"删除失败: {e}")
             return
@@ -457,8 +449,7 @@ def copy_cmd(
 async def _copy(name: str, as_name: str | None) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await ProviderRepo(session).copy(name, as_name=as_name)
+            entry = await ProviderService(agent).copy(name, as_name=as_name)
         except ProviderNotFound as e:
             Renderer.die(f"复制失败: {e}")
             return

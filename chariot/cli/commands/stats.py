@@ -14,7 +14,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.log_repo import LogRepo
+from chariot.services.log import LogService
 
 Period = Literal["today", "week", "month"]
 _ALLOWED = get_args(Period)
@@ -31,8 +31,8 @@ def stats_cmd(
 
 async def _run(period: Period) -> None:
     since = _window_start(period)
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        total, ok_count, avg_latency = await LogRepo(session).aggregate_stats(since=since)
+    async with installed_runtime() as agent:
+        total, ok_count, avg_latency = await LogService(agent).aggregate_stats(since=since)
     success_rate = (ok_count / total) if total > 0 else 0.0
     Renderer.kv(
         {

@@ -18,7 +18,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.checkpoint_repo import CheckpointRepo
+from chariot.services.checkpoint import CheckpointService
 
 checkpoint_app = typer.Typer(
     name="checkpoint",
@@ -61,8 +61,8 @@ def delete_cmd(
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await CheckpointRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await CheckpointService(agent).list_entries()
     if not entries:
         Renderer.out("(没有 checkpoints)")
         return
@@ -81,8 +81,8 @@ async def _list() -> None:
 
 
 async def _show(checkpoint_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await CheckpointRepo(session).get_entry(checkpoint_id)
+    async with installed_runtime() as agent:
+        entry = await CheckpointService(agent).get_entry(checkpoint_id)
     if entry is None:
         Renderer.die(f"checkpoint not found: {checkpoint_id!r}")
         return

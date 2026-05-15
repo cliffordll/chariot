@@ -250,7 +250,7 @@ export default function Conversations() {
                         <div className="font-medium">{c.title ?? "(untitled)"}</div>
                         <div className="text-xs text-muted-foreground font-mono">{c.id}</div>
                       </TableCell>
-                      <TableCell>{c.last_model ?? "-"}</TableCell>
+                      <TableCell>{c.agent_profile ?? "-"}</TableCell>
                       <TableCell className="text-right">{c.message_count}</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => void inspect(c.id)}>

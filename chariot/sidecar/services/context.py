@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.models.context import ContextSnapshotEntry, ContextTraceEntry
-from chariot.repos.context_repo import ContextRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+from chariot.services.context import ContextService
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -16,42 +16,40 @@ class ContextApi:
 
     async def list_snapshots(
         self,
-        session: Any,
         *,
         conversation_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        entries = await ContextRepo(session).list_snapshots(
+        entries = await ContextService(self._runtime).list_snapshots(
             conversation_id=conversation_id,
             limit=limit,
             offset=offset,
         )
         return [self._snapshot_to_dict(entry) for entry in entries]
 
-    async def get_snapshot(self, session: Any, *, snapshot_id: str) -> dict[str, Any]:
-        entry = await ContextRepo(session).get_snapshot(snapshot_id)
+    async def get_snapshot(self, *, snapshot_id: str) -> dict[str, Any]:
+        entry = await ContextService(self._runtime).get_snapshot(snapshot_id)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"context snapshot {snapshot_id!r} not found")
         return self._snapshot_to_dict(entry)
 
     async def list_traces(
         self,
-        session: Any,
         *,
         conversation_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        entries = await ContextRepo(session).list_traces(
+        entries = await ContextService(self._runtime).list_traces(
             conversation_id=conversation_id,
             limit=limit,
             offset=offset,
         )
         return [self._trace_to_dict(entry) for entry in entries]
 
-    async def inspect_context(self, session: Any, *, context_id: str) -> dict[str, Any]:
-        entry = await ContextRepo(session).inspect_context(context_id)
+    async def inspect_context(self, *, context_id: str) -> dict[str, Any]:
+        entry = await ContextService(self._runtime).inspect_context(context_id)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"context {context_id!r} not found")
         return entry

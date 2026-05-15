@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
@@ -59,19 +60,6 @@ const ENTRY_STORAGE_KEY = "chariot.chat.selected_entry";
 const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
 const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
 
-// 0.6.6+ per-call override:三字段 chat RPC 都接,sidecar 走 AgentRegistry
-// per-call agent 缓存,**不**写库。
-//
-// 跟 CLI `--model` / `--base-url` / `--api-key` 三个 flag 行为对齐 —— 都是
-// per-call 临时覆盖,**不持久化**(in-memory only,关窗口 / 重启就丢)。要
-// 永久存走 Providers 页编辑 entry.options(那有 password 字段 + 列表脱敏 +
-// api_key_env 等正经的 entry 持久化路径,凭证 / 端点统一管)
-interface OverrideValues {
-  model: string;
-  baseUrl: string;
-  apiKey: string;
-}
-
 function lsGet(key: string): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -131,12 +119,6 @@ export default function Chat() {
   const [selectedAgent, setSelectedAgentState] = useState<string | null>(() =>
     lsGet(AGENT_STORAGE_KEY),
   );
-  // 三字段对齐 CLI per-call 语义,启动全空白(不读盘)
-  const [overrides, setOverridesState] = useState<OverrideValues>(() => ({
-    model: "",
-    baseUrl: "",
-    apiKey: "",
-  }));
 
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
@@ -162,9 +144,6 @@ export default function Chat() {
     setSelectedAgentState(name);
     lsSet(AGENT_STORAGE_KEY, name);
   }, []);
-
-  // 三字段都仅 in-memory(关窗口就丢),要永久存走 Providers 页编辑 entry.options
-  const setOverrides = setOverridesState;
 
   const setActivePane = useCallback((next: ConvPaneState) => {
     setPane(next);
@@ -249,18 +228,6 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // entry 兜底:无效 → 落到第一条
-  useEffect(() => {
-    if (providersState.kind !== "ok") return;
-    const { data } = providersState;
-    if (data.available.length === 0) {
-      if (selectedEntry !== null) setSelectedEntry(null);
-      return;
-    }
-    const valid = selectedEntry !== null && data.available.includes(selectedEntry);
-    if (!valid) setSelectedEntry(data.available[0]);
-  }, [providersState, selectedEntry, setSelectedEntry]);
-
   // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
   // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
   // messages 时长度跳变,distance 常超 64px → 阈值卡住不滚 → 用户看不到最新。
@@ -271,11 +238,79 @@ export default function Chat() {
     el.scrollTop = el.scrollHeight;
   }, [pane, pending]);
 
-  const startNewChat = useCallback(() => {
+  // C1: 切换/恢复对话时自动恢复 provider + agent
+  // 用 seenPaneId 追踪 pane 身份变化:当 pane id 改变时(切换对话/draft)
+  // 清空 restoredForConvId,确保重新恢复。同对话的 loadConvDetail reload
+  // 不会改变 pane id,因此不会触发重复恢复。
+  const seenPaneId = useRef<string | null>(null);
+  const restoredForConvId = useRef<string | null>(null);
+  useEffect(() => {
+    const currentId = pane.kind === "draft" ? null : pane.id;
+
+    if (currentId !== seenPaneId.current) {
+      // pane 身份变了 → 清空恢复标记,下次 loaded 时重新恢复
+      restoredForConvId.current = null;
+      seenPaneId.current = currentId;
+    }
+
+    if (pane.kind !== "loaded") return;
+    if (pane.id === restoredForConvId.current) return;
+    restoredForConvId.current = pane.id;
+
+    const convo = pane.convo;
+
+    // 恢复 agent;provider 由 agent 绑定自动推导
+    if (convo.agent_profile) {
+      setSelectedAgent(convo.agent_profile);
+      const agent = agents.find((a) => a.name === convo.agent_profile);
+      setSelectedEntry(agent?.provider_profile ?? null);
+    } else {
+      setSelectedAgent(null);
+      setSelectedEntry(null);
+    }
+  }, [pane, setSelectedEntry, setSelectedAgent, agents]);
+
+  // 双向同步:页面重新可见时从 DB 拉最新 agent(应对 CLI 修改)
+  // provider 由 agent 自动推导,不再单独同步
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (pane.kind !== "loaded") return;
+      api
+        .getConversation(pane.id)
+        .then(({ conversation: c }) => {
+          const targetAgent = c.agent_profile ?? null;
+          if (targetAgent !== selectedAgent) {
+            setSelectedAgent(targetAgent);
+            // provider 由 handleSelectAgent 自动推导
+          }
+        })
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [pane, selectedAgent, setSelectedAgent]);
+
+  const startNewChat = useCallback(async () => {
     abortRef.current?.abort();
     setPending(null);
-    setActivePane({ kind: "draft" });
-  }, [setActivePane]);
+    setSelectedEntry(null);
+    setSelectedAgent(null);
+    try {
+      const conv = await api.createConversation({});
+      setActivePane({
+        kind: "loaded",
+        id: conv.id,
+        convo: conv,
+        messages: [],
+      });
+      void loadConvs();
+    } catch (e) {
+      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      alert(`创建会话失败: ${msg}`);
+      setActivePane({ kind: "draft" });
+    }
+  }, [setActivePane, setSelectedEntry, setSelectedAgent, loadConvs]);
 
   const selectConv = useCallback(
     (id: string) => {
@@ -332,15 +367,28 @@ export default function Chat() {
     [loadConvs, pane, loadConvDetail],
   );
 
+  const handleSelectAgent = useCallback(
+    (name: string | null) => {
+      setSelectedAgent(name);
+      const agent = agents.find((a) => a.name === name);
+      const derivedProvider = agent?.provider_profile ?? null;
+      setSelectedEntry(derivedProvider);
+      if (pane.kind === "loaded") {
+        api.updateConversationConfig(pane.id, { agent_profile: name }).catch(() => {});
+      }
+    },
+    [setSelectedAgent, setSelectedEntry, agents, pane],
+  );
+
   const canSend =
     !inFlight &&
     input.trim().length > 0 &&
-    selectedEntry !== null &&
+    selectedAgent !== null &&
     (pane.kind === "draft" || pane.kind === "loaded");
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || inFlight || !selectedEntry) return;
+    if (!text || inFlight || selectedAgent === null) return;
     if (pane.kind !== "draft" && pane.kind !== "loaded") return;
 
     setInput("");
@@ -384,10 +432,12 @@ export default function Chat() {
       meta: null,
     });
 
-    // 2. 取 sampling
+    // 2. 取 sampling:从 agent 绑定的 provider_profile 找 entry
+    const agentObj = agents.find((a) => a.name === selectedAgent);
+    const entryName = agentObj?.provider_profile ?? null;
     const entry =
       providersState.kind === "ok"
-        ? providersState.data.entries.find((e) => e.name === selectedEntry)
+        ? providersState.data.entries.find((e) => e.name === entryName)
         : undefined;
     const sampling = samplingFromEntry(entry);
 
@@ -399,10 +449,7 @@ export default function Chat() {
 
     try {
       const result = await runTurn(newMessages, {
-        provider: selectedEntry,
-        model: overrides.model.trim() || null,
-        baseUrl: overrides.baseUrl.trim() || null,
-        apiKey: overrides.apiKey.trim() || null,
+        provider: null,
         maxTokens: sampling.maxTokens,
         temperature: sampling.temperature,
         topP: sampling.topP,
@@ -423,7 +470,7 @@ export default function Chat() {
                 inputTokens: result.inputTokens,
                 outputTokens: result.outputTokens,
                 latencyMs: result.latencyMs,
-                model: selectedEntry,
+                model: entryName ?? "?",
               },
             }
           : cur,
@@ -444,7 +491,7 @@ export default function Chat() {
       setInFlight(false);
       abortRef.current = null;
     }
-  }, [input, inFlight, selectedEntry, selectedAgent, pane, providersState, overrides, setActivePane, loadConvDetail, loadConvs]);
+  }, [input, inFlight, selectedAgent, agents, pane, providersState, setActivePane, loadConvDetail, loadConvs]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -569,12 +616,9 @@ export default function Chat() {
         <EntryRow
           providersState={providersState}
           selectedEntry={selectedEntry}
-          onSelect={setSelectedEntry}
-          overrides={overrides}
-          onOverridesChange={setOverrides}
           agents={agents}
           selectedAgent={selectedAgent}
-          onSelectAgent={setSelectedAgent}
+          onSelectAgent={handleSelectAgent}
         />
 
         <div
@@ -620,25 +664,16 @@ const AGENT_NONE = "__none__";
 function EntryRow({
   providersState,
   selectedEntry,
-  onSelect,
-  overrides,
-  onOverridesChange,
   agents,
   selectedAgent,
   onSelectAgent,
 }: {
   providersState: ProvidersState;
   selectedEntry: string | null;
-  onSelect: (name: string) => void;
-  overrides: OverrideValues;
-  onOverridesChange: (next: OverrideValues) => void;
   agents: AgentProfile[];
   selectedAgent: string | null;
   onSelectAgent: (name: string | null) => void;
 }) {
-  // 高级面板收/展状态。in-memory(不持久化),跟 override 值同语义 —— 关窗口
-  // 默认收起,需要时手动展开
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   if (providersState.kind === "loading") {
     return <div className="mb-3 text-xs text-muted-foreground">读取 entries…</div>;
   }
@@ -649,135 +684,42 @@ function EntryRow({
       </div>
     );
   }
-  const { data } = providersState;
-  if (data.available.length === 0) {
-    return (
-      <div className="mb-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        DB 里没有 entry。在 Providers 页 + Add 新建一条后再来发消息。
-      </div>
-    );
-  }
-  const hasOverride =
-    overrides.model.trim() !== "" ||
-    overrides.baseUrl.trim() !== "" ||
-    overrides.apiKey.trim() !== "";
+
+  const agent = agents.find((a) => a.name === selectedAgent);
+  const providerName = selectedEntry ?? agent?.provider_profile ?? null;
 
   return (
-    <div className="mb-3 rounded-md border border-border bg-muted/10 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
-          provider
-        </span>
-        <Select value={selectedEntry ?? undefined} onValueChange={onSelect}>
-          <SelectTrigger className="h-8 w-56">
-            <SelectValue placeholder="选 provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {data.available.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          agent
-        </span>
-        <Select
-          value={selectedAgent ?? AGENT_NONE}
-          onValueChange={(v) => onSelectAgent(v === AGENT_NONE ? null : v)}
-        >
-          <SelectTrigger className="h-8 w-48">
-            <SelectValue placeholder="(none)" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={AGENT_NONE}>(none)</SelectItem>
-            {agents.map((a) => (
-              <SelectItem key={a.name} value={a.name}>
-                {a.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setAdvancedOpen((v) => !v)}
-        >
-          {advancedOpen ? "▴" : "▾"} 高级
-          {hasOverride && !advancedOpen && (
-            // 收起时若有 override,加一个圆点提醒"当前有 per-call 覆盖生效",
-            // 避免用户忘了上次填的值跑到这一轮
-            <span
-              className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-primary"
-              aria-label="has override"
-            />
-          )}
-        </Button>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {selectedAgent
-            ? `agent: ${selectedAgent} 覆盖 provider / prompt / tools`
-            : "sampling 走 entry.params,去 Providers 页改"}
-        </span>
-      </div>
-      {advancedOpen && (
-        <div className="mt-3 space-y-1 border-t border-border pt-3">
-          <p className="mb-1 text-[11px] text-muted-foreground">
-            per-call 临时覆盖,留空 = 走 entry 配置;**不持久化**,关窗口即丢。
-            要永久值改 Providers 页 entry.options。
-          </p>
-          <OverrideField
-            label="model"
-            value={overrides.model}
-            placeholder="临时覆盖 entry.options.model(如 claude-sonnet-4-6)"
-            onChange={(v) => onOverridesChange({ ...overrides, model: v })}
-          />
-          <OverrideField
-            label="base_url"
-            value={overrides.baseUrl}
-            placeholder="临时覆盖 entry.options.base_url(如 https://api.anthropic.com)"
-            onChange={(v) => onOverridesChange({ ...overrides, baseUrl: v })}
-          />
-          <OverrideField
-            label="api_key"
-            value={overrides.apiKey}
-            placeholder="临时覆盖 entry.options.api_key"
-            onChange={(v) => onOverridesChange({ ...overrides, apiKey: v })}
-            isSecret
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function OverrideField({
-  label,
-  value,
-  placeholder,
-  onChange,
-  isSecret = false,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (v: string) => void;
-  isSecret?: boolean;
-}) {
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">
+        agent
       </span>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        type={isSecret ? "password" : "text"}
-        className="h-7 flex-1 font-mono text-xs"
-      />
+      <Select
+        value={selectedAgent ?? AGENT_NONE}
+        onValueChange={(v) => onSelectAgent(v === AGENT_NONE ? null : v)}
+      >
+        <SelectTrigger className="h-8 w-48">
+          <SelectValue placeholder="(none)" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={AGENT_NONE}>(none)</SelectItem>
+          {agents.map((a) => (
+            <SelectItem key={a.name} value={a.name}>
+              {a.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
+        provider
+      </span>
+      <span className="h-8 min-w-[8rem] rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
+        {providerName ?? "-"}
+      </span>
+      <span className="ml-auto text-xs text-muted-foreground">
+        {selectedAgent
+          ? `agent: ${selectedAgent} 覆盖 provider / prompt / tools`
+          : "请先选择 agent"}
+      </span>
     </div>
   );
 }
@@ -1082,8 +1024,9 @@ function PendingBubble({
       </div>
       <div className="flex flex-col items-start gap-1">
         {pending.blocks.length === 0 && pending.status === "streaming" && (
-          <div className="max-w-[85%] rounded-lg border border-border bg-background px-3 py-2 text-sm">
-            <span className="text-muted-foreground">…</span>
+          <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <span className="text-muted-foreground">Thinking...</span>
           </div>
         )}
         {pending.blocks.length > 0 && (

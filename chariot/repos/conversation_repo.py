@@ -8,7 +8,7 @@ v5(0.6.0)起表名 `conversations` rename → `conversations`,字段
 - conversations CRUD:create / get / list / delete / update_title
 - ensure_exists:不存在则插入(供 dataplane auto-create 模式 A 用)
 - append_message:写一条 message,`seq` 内部 SELECT MAX 自增;若 role='assistant'
-  顺带更新 `conversations.last_model`
+  顺带更新 `conversations.agent_profile`(若 role='assistant' 且给了 agent_profile)
 - load_messages_as_anthropic:SELECT + reshape 成 Anthropic 协议 messages 数组
   形态 `[{role, content}, ...]`(content 已经是协议原生 blocks,丢掉
   seq / provider_name 等元数据列即可)
@@ -58,10 +58,10 @@ class Conversation:
 
     id: str
     title: str | None
-    last_model: str | None
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
+    agent_profile: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,7 +169,7 @@ class ConversationRepo:
         existing = await self._find_row(conversation_id)
         if existing is not None:
             raise DuplicateConversationId(f"conversation id {conversation_id!r} 已存在")
-        row = ConversationRow(id=conversation_id, title=title, last_model=None)
+        row = ConversationRow(id=conversation_id, title=title)
         self.session.add(row)
         await self.session.commit()
         await self.session.refresh(row)
@@ -181,7 +181,7 @@ class ConversationRepo:
             raise ConfigError("conversation id 必须是非空字符串")
         row = await self._find_row(conversation_id)
         if row is None:
-            row = ConversationRow(id=conversation_id, title=None, last_model=None)
+            row = ConversationRow(id=conversation_id, title=None)
             self.session.add(row)
             await self.session.commit()
             await self.session.refresh(row)
@@ -219,6 +219,24 @@ class ConversationRepo:
         await self.session.refresh(row)
         return await self._with_message_count(row)
 
+    async def update_config(
+        self,
+        conversation_id: str,
+        *,
+        agent_profile: str | None = None,
+    ) -> Conversation:
+        """更新 conversation 的 agent 配置。None 表示不动该字段。"""
+        row = await self._find_row(conversation_id)
+        if row is None:
+            raise ConversationNotFound(f"未知 conversation id: {conversation_id!r}")
+        if agent_profile is not None:
+            row.agent_profile = agent_profile
+        # 任何配置变更都撞 updated_at,让 GUI 列表按"最近活跃"排序
+        row.updated_at = datetime.now(UTC)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return await self._with_message_count(row)
+
     async def delete(self, conversation_id: str) -> None:
         """删 conversation + 手动 cascade 删 messages + 清 FTS5 索引。"""
         row = await self._find_row(conversation_id)
@@ -244,9 +262,9 @@ class ConversationRepo:
         content: str | list[dict[str, Any]],
         *,
         provider_name: str | None = None,
+        agent_profile: str | None = None,
     ) -> MessageRow:
-        """追加一条 message。`seq` 内部 SELECT MAX+1;role='assistant' 时同步更新
-        `conversations.last_model`(如果给了 provider_name)。
+        """追加一条 message。`seq` 内部 SELECT MAX+1。
 
         - `content`:字符串(纯文本)或 anthropic content blocks 数组,原样 JSON 序列化
         - role 必须 ∈ {'user', 'assistant'}(协议原生),否则 ConfigError
@@ -285,12 +303,12 @@ class ConversationRepo:
             {"mid": msg.id, "cid": conversation_id, "role": role, "content": fts_content},
         )
 
-        # 派生:assistant 行更新 conversations.last_model + 撞 updated_at
+        # 派生:assistant 行更新 conversations.agent_profile + 撞 updated_at
         # 任何写都更新 updated_at(让 GUI 列表按"最近活跃"排序)
         conversation = await self._find_row(conversation_id)
         if conversation is not None:
-            if role == self.ROLE_ASSISTANT and provider_name is not None:
-                conversation.last_model = provider_name
+            if role == self.ROLE_ASSISTANT and agent_profile is not None:
+                conversation.agent_profile = agent_profile
             # SQLAlchemy onupdate 只在 conversation 本身的列被改写时触发;为了保证即使
             # user 行写入也撞 updated_at,这里显式赋值。语义跟 ORM `_utcnow`
             # 一致(UTC,naive 一致性):chariot 全仓 datetime 都是 UTC
@@ -450,7 +468,7 @@ class ConversationRepo:
         return Conversation(
             id=row.id,
             title=row.title,
-            last_model=row.last_model,
+            agent_profile=row.agent_profile,
             created_at=row.created_at,
             updated_at=row.updated_at,
             message_count=message_count,

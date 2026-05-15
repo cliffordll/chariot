@@ -139,19 +139,11 @@ export class ChatStreamError extends Error {
  * 必填:`provider_name` + `messages`;可选:`model` / `max_tokens` / `conversation_id` 等。
  */
 export interface ChatRequest {
-  provider_name: string;
+  provider_name: string | null;
   messages: Array<{ role: "user" | "assistant"; content: string | unknown[] }>;
   model?: string | null;
-  /** 0.6.6+ per-call override:覆盖 entry.options.base_url。sidecar 会走
-   *  AgentRegistry.reserve 拿 per-call AIAgent(LRU 32 缓存),不写库。 */
-  base_url?: string | null;
-  /** 0.6.6+ per-call override:覆盖 entry.options.api_key。同 base_url。 */
-  api_key?: string | null;
   max_tokens?: number;
   conversation_id?: string | null;
-  /** 0.7.2-tool+ agent_profile name;非空时 sidecar AIAgent 解析:
-   *  profile.provider_profile 覆盖 provider_name / profile.prompt_bundle 决定 system /
-   *  profile.tool_profile 过滤 tools。dangling reference 走 fallback,不阻断。 */
   agent_profile?: string | null;
   temperature?: number | null;
   top_p?: number | null;

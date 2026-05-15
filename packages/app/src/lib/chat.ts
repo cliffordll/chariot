@@ -14,24 +14,12 @@ export interface ChatTurnMsg {
 }
 
 export interface ChatTurnOpts {
-  /** Provider entry name(对齐 sidecar `chat.provider_name`)。 */
-  provider: string;
-  /** 可选 LLM model id 覆盖(per-call,详见 chat_request.py model 字段)。 */
-  model?: string | null;
-  /** 0.6.6+ per-call override:覆盖 entry.options.base_url。空字符串 / null = 不覆盖。 */
-  baseUrl?: string | null;
-  /** 0.6.6+ per-call override:覆盖 entry.options.api_key。空字符串 / null = 不覆盖。 */
-  apiKey?: string | null;
+  /** Provider entry name(对齐 sidecar `chat.provider_name`);null = 未指定。 */
+  provider: string | null;
   maxTokens: number;
-  /**
-   * Anthropic 采样参数。两者默认 1.0(等同不调);只在 ≠ 1 时才发到 body,以遵循
-   * Anthropic 文档"建议两者只挑一个"的语义,避免显式传 1 干扰。
-   */
   temperature?: number;
   topP?: number;
-  /** 0.4.0 加。stateful 多轮 convo id;非空时 sidecar 接续历史。 */
   conversationId?: string | null;
-  /** 0.7.2-tool+ agent_profile name;非空时由 AIAgent 解析 provider/prompt/tool 三件套绑定。 */
   agentProfile?: string | null;
   signal: AbortSignal;
   onEvent: (ev: StreamEvent) => void;
@@ -58,9 +46,6 @@ export async function runTurn(messages: ChatTurnMsg[], opts: ChatTurnOpts): Prom
     messages,
     max_tokens: opts.maxTokens,
   };
-  if (opts.model) req.model = opts.model;
-  if (opts.baseUrl) req.base_url = opts.baseUrl;
-  if (opts.apiKey) req.api_key = opts.apiKey;
   if (opts.conversationId) req.conversation_id = opts.conversationId;
   if (opts.agentProfile) req.agent_profile = opts.agentProfile;
   if (opts.temperature !== undefined && opts.temperature !== 1) {

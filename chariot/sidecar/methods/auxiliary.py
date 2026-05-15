@@ -1,35 +1,31 @@
 """sidecar auxiliary client RPC adapters(B3 wave 2)。
 
-直接走 `AuxiliaryRepo`,无中间 service 层 —— surface 复杂度低,后续若引入
-provider_entry 校验 / probe 逻辑再抽 service。
-
-异常翻译走 `MethodBase._session()` 的统一映射(AuxiliaryClientNotFound →
-ERR_NOT_FOUND;DuplicateAuxiliaryClientName → ERR_DUPLICATE;ConfigError
-→ ERR_INVALID_PARAMS)。
+通过 `AuxiliaryApi` 进入 service 层，由 service 统一处理 repo 访问与异常。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from chariot.models.agent import ClearableStr
 from chariot.models.auxiliary import AuxiliaryClientEntry
-from chariot.repos.auxiliary_repo import AuxiliaryRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
 from chariot.sidecar.methods import MethodBase
+from chariot.sidecar.services import AuxiliaryApi
 
 
 class AuxiliaryMethods(MethodBase):
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            entries = await AuxiliaryRepo(session).list_entries()
+        async with self._rpc_errors():
+            entries = await AuxiliaryApi(self.runtime).list_entries()
         return {"auxiliary_clients": [self._serialize(e) for e in entries]}
 
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            entry = await AuxiliaryRepo(session).get_entry(name)
+        async with self._rpc_errors():
+            entry = await AuxiliaryApi(self.runtime).get_entry(name)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"auxiliary client {name!r} not found")
         return {"auxiliary_client": self._serialize(entry)}
@@ -38,10 +34,10 @@ class AuxiliaryMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         provider_entry = self._require_str(params, "provider_entry")
-        model = self._optional_str(params, "model")
+        model: ClearableStr = self._optional_str(params, "model")
         params_field = self._optional_dict(params, "params") or {}
-        async with self._session() as session:
-            entry = await AuxiliaryRepo(session).create(
+        async with self._rpc_errors():
+            entry = await AuxiliaryApi(self.runtime).create(
                 name=name,
                 provider_entry=provider_entry,
                 model=model,
@@ -53,10 +49,10 @@ class AuxiliaryMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         provider_entry = self._optional_str(params, "provider_entry")
-        model = self._clearable_str(params, "model")
+        model: ClearableStr = self._clearable_str(params, "model")
         params_field = self._optional_dict(params, "params")
-        async with self._session() as session:
-            entry = await AuxiliaryRepo(session).update(
+        async with self._rpc_errors():
+            entry = await AuxiliaryApi(self.runtime).update(
                 name,
                 provider_entry=provider_entry,
                 model=model,
@@ -67,8 +63,8 @@ class AuxiliaryMethods(MethodBase):
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            await AuxiliaryRepo(session).delete(name)
+        async with self._rpc_errors():
+            await AuxiliaryApi(self.runtime).delete(name)
         return {"deleted": name}
 
     @staticmethod

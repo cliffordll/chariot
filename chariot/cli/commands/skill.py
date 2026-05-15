@@ -21,8 +21,9 @@ from chariot.agent.config import ConfigError
 from chariot.audit.hooks import AuditHookManager
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.audit_repo import AuditRepo
-from chariot.repos.skill_repo import SkillEntry, SkillRepo
+from chariot.repos.skill_repo import SkillEntry
+from chariot.services.audit import AuditService
+from chariot.services.skill import SkillService
 from chariot.skills import SkillLoader, SkillManifestError, SkillRegistry
 
 skill_app = typer.Typer(
@@ -185,35 +186,33 @@ async def _install(from_: str, enabled: bool) -> None:
                 return
             yaml_text = _manifest_to_yaml(skill.manifest)
             skill_name = skill.name
-    async with installed_runtime() as agent:
-        try:
-            async with agent.session_maker() as session:
-                entry = await SkillRepo(session).create(
+        async with installed_runtime() as agent:
+            try:
+                entry = await SkillService(agent).create(
                     name=skill_name,
                     description=_extract_description(yaml_text) or None,
                     content=yaml_text,
                     enabled=enabled,
                 )
-        except ConfigError as exc:
-            Renderer.die(str(exc))
-            return
-        await agent.audit_hooks.record_skill_store(
-            skill_id=entry.id,
-            name=entry.name,
-            action="create",
-        )
+            except ConfigError as exc:
+                Renderer.die(str(exc))
+                return
+            await agent.audit_hooks.record_skill_store(
+                skill_id=entry.id,
+                name=entry.name,
+                action="create",
+            )
     Renderer.out(f"+ {entry.id} {entry.name}{' (disabled)' if not entry.enabled else ''}")
 
 
 async def _set_enabled(name: str, enabled: bool) -> None:
     async with installed_runtime() as agent:
-        entry = await _find_db_entry(agent.session_maker, name)
+        entry = await _find_db_entry(agent, name)
         if entry is None:
             Renderer.die(f"no DB skill named {name!r}(builtin 永远 enabled,无需 enable/disable)")
             return
         try:
-            async with agent.session_maker() as session:
-                updated = await SkillRepo(session).set_enabled(entry.id, enabled)
+            updated = await SkillService(agent).set_enabled(entry.id, enabled)
         except ConfigError as exc:
             Renderer.die(str(exc))
             return
@@ -233,9 +232,9 @@ async def _proposals(limit: int) -> None:
     """
     if limit <= 0:
         limit = 20
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         # 多取一些(allowance ×4),再 client-side filter source='propose'
-        events = await AuditRepo(session).list_events(limit=max(limit * 4, 50))
+        events = await AuditService(agent).list_events(limit=max(limit * 4, 50))
     filtered = [
         ev
         for ev in events
@@ -292,12 +291,11 @@ async def _curate() -> None:
 
 async def _remove(name: str) -> None:
     async with installed_runtime() as agent:
-        entry = await _find_db_entry(agent.session_maker, name)
+        entry = await _find_db_entry(agent, name)
         if entry is None:
             Renderer.die(f"no DB skill named {name!r}(builtin 不可删,可改 YAML 文件)")
             return
-        async with agent.session_maker() as session:
-            ok = await SkillRepo(session).delete(entry.id)
+        ok = await SkillService(agent).delete(entry.id)
         if not ok:
             Renderer.die(f"skill {name!r} disappeared during delete")
             return
@@ -312,9 +310,8 @@ async def _remove(name: str) -> None:
 # ---- helpers ----
 
 
-async def _find_db_entry(sm_factory, name: str) -> SkillEntry | None:  # type: ignore[no-untyped-def]
-    async with sm_factory() as session:
-        return await SkillRepo(session).get_by_name(name)
+async def _find_db_entry(runtime, name: str) -> SkillEntry | None:  # type: ignore[no-untyped-def]
+    return await SkillService(runtime).get_by_name(name)
 
 
 def _extract_description(yaml_text: str) -> str | None:

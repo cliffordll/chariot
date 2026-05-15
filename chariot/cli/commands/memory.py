@@ -11,7 +11,7 @@ import typer
 from chariot.agent.config import ConfigError
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.memory_repo import MemoryRepo
+from chariot.services.memory import MemoryService
 
 memory_app = typer.Typer(
     name="memory",
@@ -182,8 +182,8 @@ def search_cmd(
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await MemoryRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await MemoryService(agent).list_entries()
     if not entries:
         Renderer.out("(没有 memory entries)")
         return
@@ -201,13 +201,14 @@ async def _list() -> None:
 
 
 async def _show(memory_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await MemoryRepo(session).get_entry(memory_id)
+    async with installed_runtime() as agent:
+        service = MemoryService(agent)
+        entry = await service.get_entry(memory_id)
         if entry is None:
             Renderer.die(f"memory not found: {memory_id!r}")
             return
-        links = await MemoryRepo(session).list_links(memory_id=memory_id)
-        events = await MemoryRepo(session).list_events(memory_id=memory_id)
+        links = await service.list_links(memory_id=memory_id)
+        events = await service.list_events(memory_id=memory_id)
     Renderer.kv(
         {
             "id": entry.id,
@@ -258,15 +259,14 @@ async def _add(
         return
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await MemoryRepo(session).create(
-                    kind=kind.strip() or "preference",
-                    text=text,
-                    meta=_parse_meta(meta),
-                    pinned=pinned,
-                    archived=archived,
-                    links=_build_links(conversation, provider, tag),
-                )
+            entry = await MemoryService(agent).create(
+                kind=kind.strip() or "preference",
+                text=text,
+                meta=_parse_meta(meta),
+                pinned=pinned,
+                archived=archived,
+                links=_build_links(conversation, provider, tag),
+            )
         except ConfigError as exc:
             Renderer.die(f"create failed: {exc}")
             return
@@ -311,8 +311,7 @@ async def _update(
         return
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await MemoryRepo(session).update(memory_id, **changes)
+            entry = await MemoryService(agent).update(memory_id, **changes)
         except ConfigError as exc:
             Renderer.die(f"update failed: {exc}")
             return
@@ -328,8 +327,7 @@ async def _update(
 async def _delete(memory_id: str) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await MemoryRepo(session).delete(memory_id)
+            await MemoryService(agent).delete(memory_id)
         except ConfigError as exc:
             Renderer.die(f"delete failed: {exc}")
             return
@@ -343,8 +341,7 @@ async def _delete(memory_id: str) -> None:
 async def _pin(memory_id: str, pinned: bool) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await MemoryRepo(session).pin(memory_id, pinned=pinned)
+            entry = await MemoryService(agent).pin(memory_id, pinned=pinned)
         except ConfigError as exc:
             Renderer.die(f"pin failed: {exc}")
             return
@@ -360,8 +357,7 @@ async def _pin(memory_id: str, pinned: bool) -> None:
 async def _archive(memory_id: str, archived: bool) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await MemoryRepo(session).archive(memory_id, archived=archived)
+            entry = await MemoryService(agent).archive(memory_id, archived=archived)
         except ConfigError as exc:
             Renderer.die(f"archive failed: {exc}")
             return
@@ -375,8 +371,8 @@ async def _archive(memory_id: str, archived: bool) -> None:
 
 
 async def _events(memory_id: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await MemoryRepo(session).list_events(memory_id=memory_id)
+    async with installed_runtime() as agent:
+        entries = await MemoryService(agent).list_events(memory_id=memory_id)
     if not entries:
         Renderer.out("(没有 memory events)")
         return
@@ -385,8 +381,8 @@ async def _events(memory_id: str | None) -> None:
 
 
 async def _links(memory_id: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await MemoryRepo(session).list_links(memory_id=memory_id)
+    async with installed_runtime() as agent:
+        entries = await MemoryService(agent).list_links(memory_id=memory_id)
     if not entries:
         Renderer.out("(没有 memory links)")
         return
@@ -395,8 +391,8 @@ async def _links(memory_id: str | None) -> None:
 
 
 async def _search(query: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await MemoryRepo(session).search_entries(query)
+    async with installed_runtime() as agent:
+        entries = await MemoryService(agent).search_entries(query)
     if not entries:
         Renderer.out("(没有匹配的 memory)")
         return

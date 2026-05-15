@@ -21,22 +21,22 @@ const Skills = lazy(() => import("@/pages/Skills"));
 
 export const NAV_ITEMS = [
   { path: "/dashboard", label: "Dashboard" },
-  { path: "/agents", label: "Agents" },
-  { path: "/tasks", label: "Tasks" },
-  { path: "/jobs", label: "Jobs" },
+  { path: "/chat", label: "Chat" },
+  { path: "/conversations", label: "Conversations" },
   { path: "/providers", label: "Providers" },
   { path: "/tools", label: "Tools" },
   { path: "/toolsets", label: "Toolsets" },
   { path: "/memory", label: "Memory" },
   { path: "/prompt", label: "Prompt" },
   { path: "/context", label: "Context" },
+  { path: "/agents", label: "Agents" },
+  { path: "/skills", label: "Skills" },
+  { path: "/tasks", label: "Tasks" },
+  { path: "/jobs", label: "Jobs" },
   { path: "/logs", label: "Logs" },
   { path: "/traces", label: "Traces" },
   { path: "/evals", label: "Evals" },
   { path: "/security", label: "Security" },
-  { path: "/skills", label: "Skills" },
-  { path: "/conversations", label: "Conversations" },
-  { path: "/chat", label: "Chat" },
 ] as const;
 
 export function AppRoutes() {

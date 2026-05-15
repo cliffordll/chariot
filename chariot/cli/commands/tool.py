@@ -1,13 +1,13 @@
-"""`chariot tool` commands.
+"""`chariot tool` 命令。
 
-Current surfaces:
-- `list`: list all seeded tools
-- `show <name>`: show one tool's config and schema
-- `probe <name>`: validate the current config by rebuilding the tool
-- `enable / disable / config`: existing admin actions
-- `add`: create a custom tool (0.8.7); alias `create`
-- `edit <name>`: update a custom tool (0.8.7); alias `update`
-- `del <name>`: delete a custom tool (0.8.7); aliases `delete` / `rm` / `remove`
+当前 surface:
+- `list`: 列出所有工具
+- `show <name>`: 查看工具配置和 schema
+- `probe <name>`: 验证工具当前配置
+- `enable / disable / config`: 管理操作
+- `add`: 创建自定义工具 (0.8.7); 别名 `create`
+- `update <name>`: 更新自定义工具 (0.8.7); 别名 `edit`
+- `delete <name>`: 删除自定义工具 (0.8.7); 别名 `del` / `rm` / `remove`
 """
 
 from __future__ import annotations
@@ -24,24 +24,24 @@ import yaml
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.tool import ToolService
 from chariot.tools.registry import ToolRegistry
 
 tool_app = typer.Typer(
     name="tool",
-    help="Manage built-in and custom tools",
+    help="管理内置和自定义工具",
     no_args_is_help=True,
 )
 
 
-@tool_app.command("list", help="List all seeded tools")
+@tool_app.command("list", help="列出所有工具")
 def list_cmd() -> None:
     asyncio.run(_list())
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ToolRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await ToolService(agent).list_entries()
 
     rows = [
         (
@@ -56,18 +56,18 @@ async def _list() -> None:
     Renderer.table(["name", "type", "source", "enabled", "description"], rows, title="tools")
 
 
-@tool_app.command("show", help="Show one tool's config and schema")
+@tool_app.command("show", help="查看工具配置和 schema")
 def show_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+    name: Annotated[str, typer.Argument(help="工具名")],
 ) -> None:
     asyncio.run(_show(name))
 
 
 async def _show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"unknown tool: {name!r}")
+        Renderer.die(f"未知工具: {name!r}")
         return
 
     rows: list[tuple[str, str]] = [
@@ -82,24 +82,24 @@ async def _show(name: str) -> None:
     rows.append(
         (
             "schema",
-            json.dumps(schema, ensure_ascii=False, indent=2) if schema else "(invalid config)",
+            json.dumps(schema, ensure_ascii=False, indent=2) if schema else "(无效配置)",
         )
     )
     Renderer.table(["field", "value"], rows, title=f"tool {entry.name}")
 
 
-@tool_app.command("probe", help="Validate one tool's current config")
+@tool_app.command("probe", help="验证工具当前配置")
 def probe_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+    name: Annotated[str, typer.Argument(help="工具名")],
 ) -> None:
     asyncio.run(_probe(name))
 
 
 async def _probe(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"unknown tool: {name!r}")
+        Renderer.die(f"未知工具: {name!r}")
         return
 
     start = time.perf_counter()
@@ -115,16 +115,16 @@ async def _probe(name: str) -> None:
     Renderer.out(f"OK {name} ({latency_ms} ms)")
 
 
-@tool_app.command("enable", help="Enable one tool")
+@tool_app.command("enable", help="启用工具")
 def enable_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+    name: Annotated[str, typer.Argument(help="工具名")],
 ) -> None:
     asyncio.run(_set_enabled(name, True))
 
 
-@tool_app.command("disable", help="Disable one tool")
+@tool_app.command("disable", help="禁用工具")
 def disable_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+    name: Annotated[str, typer.Argument(help="工具名")],
 ) -> None:
     asyncio.run(_set_enabled(name, False))
 
@@ -132,10 +132,9 @@ def disable_cmd(
 async def _set_enabled(name: str, enabled: bool) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update(name, enabled=enabled)
+            tool = await ToolService(agent).update(name, enabled=enabled)
         except ToolNotFound as e:
-            Renderer.die(f"update failed: {e}")
+            Renderer.die(f"更新失败: {e}")
             return
     state = "ON" if tool.enabled else "off"
     Renderer.out(f"~ {tool.name}: {state}")
@@ -228,8 +227,7 @@ async def _config(name: str, options: list[str]) -> None:
     opts = _parse_kv(options)
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update(name, options=opts)
+            tool = await ToolService(agent).update(name, options=opts)
         except ToolNotFound as e:
             Renderer.die(f"update failed: {e}")
             return
@@ -338,39 +336,38 @@ async def _create(
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).create(
-                    name=name,
-                    type=type_,
-                    enabled=True,
-                    options=options,
-                    source="custom",
-                    description=desc,
-                    custom_type=type_,
-                )
+            tool = await ToolService(agent).create(
+                name=name,
+                type=type_,
+                enabled=True,
+                options=options,
+                source="custom",
+                description=desc,
+                custom_type=type_,
+            )
         except ConfigError as e:
             Renderer.die(f"create failed: {e}")
             return
     Renderer.out(f"+ {tool.name} (type={tool.custom_type}, source=custom)")
 
 
-# ---------- edit ----------
+# ---------- update ----------
 
 
-@tool_app.command("edit", help="Update a custom tool (0.8.7)")
-def edit_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+@tool_app.command("update", help="更新自定义工具 (0.8.7)")
+def update_cmd(
+    name: Annotated[str, typer.Argument(help="工具名")],
     description: Annotated[
         str | None,
-        typer.Option("--description", "-d", help="new description"),
+        typer.Option("--description", "-d", help="新描述"),
     ] = None,
     from_file: Annotated[
         str | None,
-        typer.Option("--from-file", "-f", help="YAML config file (replaces options)"),
+        typer.Option("--from-file", "-f", help="YAML 配置文件 (替换 options)"),
     ] = None,
     options: Annotated[
         list[str] | None,
-        typer.Option("-o", "--option", help="options key=value; repeatable"),
+        typer.Option("-o", "--option", help="options key=value; 可重复"),
     ] = None,
 ) -> None:
     asyncio.run(_update(name, description, from_file, options or []))
@@ -382,13 +379,13 @@ async def _update(
     from_file: str | None,
     option_items: list[str],
 ) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"unknown tool: {name!r}")
+        Renderer.die(f"未知工具: {name!r}")
         return
     if entry.source != "custom":
-        Renderer.die(f"builtin tool cannot be updated: {name!r}")
+        Renderer.die(f"内置工具不可更新: {name!r}")
         return
 
     new_description = description
@@ -397,89 +394,87 @@ async def _update(
     if from_file is not None:
         path = Path(from_file)
         if not path.exists():
-            Renderer.die(f"file not found: {from_file!r}")
+            Renderer.die(f"文件不存在: {from_file!r}")
             return
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as e:
-            Renderer.die(f"YAML parse error: {e}")
+            Renderer.die(f"YAML 解析错误: {e}")
             return
         if not isinstance(data, dict):
-            Renderer.die("YAML root must be an object")
+            Renderer.die("YAML 根必须是对象")
             return
         new_description = description or data.get("description")
         new_options = data.get("options", {})
         if not isinstance(new_options, dict):
-            Renderer.die("options must be an object")
+            Renderer.die("options 必须是对象")
             return
 
     elif option_items:
         new_options = _parse_kv(option_items)
 
     if new_description is None and new_options is None:
-        Renderer.die("at least one of --description, --from-file, or -o is required")
+        Renderer.die("至少提供 --description、--from-file 或 -o 之一")
         return
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update_full(
-                    name,
-                    options=new_options,
-                    description=new_description,
-                )
+            tool = await ToolService(agent).update_full(
+                name,
+                options=new_options,
+                description=new_description,
+            )
         except ToolNotFound as e:
-            Renderer.die(f"update failed: {e}")
+            Renderer.die(f"更新失败: {e}")
             return
         except ConfigError as e:
-            Renderer.die(f"update failed: {e}")
+            Renderer.die(f"更新失败: {e}")
             return
     Renderer.out(f"~ {tool.name} (type={tool.custom_type})")
 
 
-# ---------- del ----------
+# ---------- delete ----------
 
 
-@tool_app.command("del", help="Delete a custom tool (0.8.7)")
-def del_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+@tool_app.command("delete", help="删除自定义工具 (0.8.7)")
+def delete_cmd(
+    name: Annotated[str, typer.Argument(help="工具名")],
     yes: Annotated[
         bool,
-        typer.Option("--yes", "-y", help="skip confirmation prompt"),
+        typer.Option("--yes", "-y", help="跳过确认提示"),
     ] = False,
 ) -> None:
     asyncio.run(_delete(name, yes))
 
 
 async def _delete(name: str, yes: bool) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"unknown tool: {name!r}")
+        Renderer.die(f"未知工具: {name!r}")
         return
     if entry.source == "builtin":
-        Renderer.die(f"builtin tool cannot be deleted: {name!r}")
+        Renderer.die(f"内置工具不可删除: {name!r}")
         return
 
     if not yes:
-        print(f"Delete custom tool '{name}'? [y/N] ", end="")
+        print(f"删除自定义工具 '{name}'? [y/N] ", end="")
         try:
             confirm = input().strip().lower()
         except EOFError:
             confirm = "n"
         if confirm != "y":
-            Renderer.out("cancelled")
+            Renderer.out("已取消")
             return
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await ToolRepo(session).delete(name)
+            await ToolService(agent).delete(name)
         except ToolNotFound as e:
-            Renderer.die(f"delete failed: {e}")
+            Renderer.die(f"删除失败: {e}")
             return
         except ConfigError as e:
-            Renderer.die(f"delete failed: {e}")
+            Renderer.die(f"删除失败: {e}")
             return
     Renderer.out(f"- {name}")
 

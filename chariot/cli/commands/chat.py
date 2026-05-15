@@ -6,23 +6,9 @@
 flags:
 - `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认
   (`chariot provider use <name>` 设置)。两者都没 → die 提示设默认或加 --provider
-- `--model <id>`(0.6.5+ 起走 per-call ChatRequest.model 字段,不重建 Provider /
-  httpx client):本次会话覆盖 LLM 真实 id;仅 inline 优先级,无 env 兜底
-- `--base-url <url>`(可选):本次会话覆盖 entry.options.base_url;
-  优先级 CLI flag → DB inline → `ANTHROPIC_BASE_URL` env → 默认。**会触发
-  Provider 重建 + 走 ClientSpec 命中 / 新建 httpx client**(同 spec 命中复用)
-- `--api-key <key>`(可选):本次会话覆盖 entry.options.api_key;同 base_url
-  也走 Provider 重建路径
-- `--max-tokens N`(messages 协议的 max_tokens)
 - `--conversation <id|new>`(主名) / `--convo <id|new>`(兼容别名):走 stateful path;
   `new` → CLI 生成 ULID 并打印;ULID 字面量 → 接续该会话;不传 → stateless
   (单轮 / 不持久化)
-
-`--model` vs `--base-url` / `--api-key` 路径分裂(0.6.5 起):
-- `--model` 只切 wire LLM id,不影响 (base_url, api_key) → 不动 ClientSpec →
-  零客户端开销;走 ChatContext.model_override → ChatRequest.model
-- `--base-url` / `--api-key` 改连接信息 → 走 provider_overrides → AgentRegistry
-  重建 Provider 实例,同 (base_url, api_key) 命中 ClientCache(连接 keepalive 保住)
 """
 
 from __future__ import annotations
@@ -39,7 +25,6 @@ from chariot.cli._runtime import installed_runtime
 from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
 from chariot.database.session import DEFAULT_DB_PATH
-from chariot.repos.provider_repo import ProviderRepo
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符。偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
@@ -57,28 +42,6 @@ def chat_cmd(
             help="本次会话用的 provider entry name;不传走 DB 默认",
         ),
     ] = None,
-    model: Annotated[
-        str | None,
-        typer.Option(
-            "--model",
-            help="本次覆盖 entry.options.model(LLM 真实 id,如 claude-sonnet-4-6)",
-        ),
-    ] = None,
-    base_url: Annotated[
-        str | None,
-        typer.Option(
-            "--base-url",
-            help=("本次覆盖 entry.options.base_url;不传按 inline → ANTHROPIC_BASE_URL env → 默认 解析"),
-        ),
-    ] = None,
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="本次覆盖 entry.options.api_key;不传按 inline → api_key_env 指向的 env 解析",
-        ),
-    ] = None,
-    max_tokens: Annotated[int, typer.Option("--max-tokens", help="messages 协议的 max_tokens")] = 1024,
     conversation: Annotated[
         str | None,
         typer.Option(
@@ -98,8 +61,6 @@ def chat_cmd(
             help=(
                 "agent_profile name;非空时 AIAgent 解析后用其 binding:"
                 "provider_profile 覆盖 --provider、prompt_bundle 决定 prompt、tool_profile 做 toolset filter。"
-                "跟 --base-url / --api-key 配合需注意:那两个 patch 被 keyed 到 --provider entry,"
-                "若 agent 把路由切到别的 entry,patch 不会跟过去。"
             ),
         ),
     ] = None,
@@ -131,10 +92,6 @@ def chat_cmd(
         _run(
             text=text,
             provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            max_tokens=max_tokens,
             conversation_id=conversation_id,
             agent_profile=agent,
             reflection_enabled=reflect,
@@ -164,62 +121,29 @@ def _resolve_conversation_id(raw: str | None) -> str | None:
     return None  # pragma: no cover · die 已退出
 
 
-def _collect_options_overrides(
-    *,
-    base_url: str | None,
-    api_key: str | None,
-) -> dict[str, str]:
-    """把 CLI flag(连接类)收集成 options patch dict;空 flag 不进 dict
-    (避免覆盖成空串)。
-
-    0.6.5 起 `--model` 不在这里 —— 它走 per-call `ChatRequest.model` 字段,
-    不需要重建 Provider / ClientSpec。只有改 `(base_url, api_key)` 这种
-    "连接维度" override 才需要重建 Provider 拿新 ClientSpec。
-    """
-    out: dict[str, str] = {}
-    if base_url is not None:
-        out["base_url"] = base_url
-    if api_key is not None:
-        out["api_key"] = api_key
-    return out
-
-
 async def _run(
     *,
     text: str | None,
     provider: str | None,
-    model: str | None,
-    base_url: str | None,
-    api_key: str | None,
-    max_tokens: int,
     conversation_id: str | None,
     agent_profile: str | None,
     reflection_enabled: bool = False,
     reflection_max_retries: int = 2,
     skill: str | None = None,
 ) -> None:
-    # Phase 1:开 DB 查默认 provider,把 CLI flag override merge 起来 keyed 到
-    # 实际使用的 provider_name。开 DB 用的是 idempotent init_db,后续
-    # installed_runtime 内部再 init_db 会复用已装载的 engine
-    provider_name = await _resolve_provider_name(provider)
+    # Phase 0:若 --conversation <id>,先查 DB 恢复 agent 配置
+    restored_agent = await _restore_conversation_config(conversation_id)
 
-    # Phase 2:把 --base-url / --api-key 收集成 provider_overrides(连接维度,
-    # 进 entry.options 重建 Provider + 命中 / 新建 ClientSpec)。`--model` 不在
-    # 这里走,它通过 ctx.model_override → ChatRequest.model 实现 per-call 覆盖,
-    # 不重建 Provider。
-    options_patch = _collect_options_overrides(base_url=base_url, api_key=api_key)
-    overrides = {provider_name: options_patch} if options_patch else None
-
-    # Phase 3:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
+    # Phase 1:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
     try:
-        async with installed_runtime(provider_overrides=overrides) as agent:
+        async with installed_runtime() as agent:
+            provider_name = provider or await _resolve_provider_name(agent)
+            resolved_agent = agent_profile or restored_agent
             ctx = ChatContext(
                 agent=agent,
                 provider_name=provider_name,
-                max_tokens=max_tokens,
                 conversation_id=conversation_id,
-                model_override=model,
-                agent_profile=agent_profile,
+                agent_profile=resolved_agent,
                 reflection_enabled=reflection_enabled,
                 reflection_max_retries=reflection_max_retries,
                 skill=skill,
@@ -237,28 +161,30 @@ async def _run(
         Renderer.die(f"AIAgent 装载失败: {e}")
 
 
-async def _resolve_provider_name(override: str | None) -> str:
-    """优先级:CLI flag --provider > DB 默认。两者都没 → die 提示。
-
-    在 installed_runtime 之前调用 —— 用 idempotent `init_db` 临时开 session 查
-    默认 provider name。返回 entry name(给 ChatContext.provider_name + provider_overrides
-    keying 用);后续 AIAgent.bootstrap 会复用同一个 engine,不会重复 init。
+async def _restore_conversation_config(conversation_id: str | None) -> str | None:
+    """若给了 conversation_id,查 DB 恢复该对话的 agent 配置。
+    返回 restored_agent;无 conversation_id 或找不到 → None。
+    provider 由 agent_profile 绑定自动推导,不再单独存储。
     """
-    if override is not None and override.strip():
-        return override.strip()
-
-    # 惰性查 default(只用 DB,不构造 Provider 实例 → 不动 ClientCache)
+    if conversation_id is None:
+        return None
     from chariot.database.session import init_db
+    from chariot.services.conversation import ConversationService
 
     sm = await init_db(DEFAULT_DB_PATH)
-    async with sm() as session:
-        default = await ProviderRepo(session).get_default()
-    if default is None:
-        Renderer.die(
-            "没有指定 provider:加 `--provider <name>`,或 `chariot provider use <name>` 设个默认",
-        )
-        raise SystemExit(1)  # pragma: no cover · die 已退出
-    return default.name
+    async with sm():
+        conv = await ConversationService(sm).get(conversation_id)
+    if conv is None:
+        return None
+    return conv.agent_profile
+
+
+async def _resolve_provider_name(agent: object) -> str | None:
+    """返回 CLI 默认 provider;没有默认时保持 None。"""
+    from chariot.services.provider import ProviderService
+
+    default = await ProviderService(agent).get_default()
+    return default.name if default is not None else None
 
 
 def register(app: typer.Typer) -> None:

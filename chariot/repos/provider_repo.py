@@ -193,6 +193,11 @@ class ProviderRepo:
     def _check_type(type_: str) -> None:
         if not type_:
             raise ConfigError("provider type 必须是非空字符串")
+        from chariot.providers.registry import ProviderRegistry
+
+        if type_ not in ProviderRegistry.known_types():
+            known = ", ".join(sorted(ProviderRegistry.known_types()))
+            raise ConfigError(f"未知 provider type: {type_!r};已知类型: {known}")
 
     @staticmethod
     def _serialize_json(label: str, data: dict[str, Any]) -> str:

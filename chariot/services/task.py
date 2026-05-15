@@ -19,6 +19,8 @@ from chariot.models.task import (
     TaskRunStatus,
     TaskStatus,
 )
+from chariot.repos.task_repo import TaskRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 
 class TaskStore(Protocol):
@@ -40,8 +42,8 @@ class TaskStore(Protocol):
 
 
 class TaskService:
-    def __init__(self, store: TaskStore) -> None:
-        self._store = store
+    def __init__(self, session_maker: object) -> None:
+        self._store = SessionRepoProxy(session_maker, TaskRepo)
 
     async def create_task(self, spec: TaskCreate) -> Task:
         return await self._store.create_task(spec)

@@ -87,6 +87,30 @@ const TYPE_SCHEMAS: Record<string, FieldSchema[]> = {
       placeholder: "https://api.anthropic.com(默认)",
     },
   ],
+  openai: [
+    {
+      key: "model",
+      label: "model",
+      required: true,
+      placeholder: "gpt-4",
+    },
+    {
+      key: "api_key",
+      label: "api_key(留空则用 env)",
+      placeholder: "sk-...",
+      isSecret: true,
+    },
+    {
+      key: "api_key_env",
+      label: "api_key_env",
+      placeholder: "OPENAI_API_KEY(默认)",
+    },
+    {
+      key: "base_url",
+      label: "base_url",
+      placeholder: "https://api.openai.com(默认)",
+    },
+  ],
 };
 
 /**
@@ -118,6 +142,18 @@ const TEMPLATES: ProviderTemplate[] = [
     label: "Claude Haiku 4.5",
     type: "anthropic",
     options: { model: "claude-haiku-4-5" },
+  },
+  {
+    id: "gpt-4",
+    label: "GPT-4",
+    type: "openai",
+    options: { model: "gpt-4" },
+  },
+  {
+    id: "gpt-4o",
+    label: "GPT-4o",
+    type: "openai",
+    options: { model: "gpt-4o" },
   },
 ];
 
@@ -154,7 +190,7 @@ export default function Providers() {
       const [{ providers }, status] = await Promise.all([api.listProviders(), api.getProviderStatus()]);
       const data: ProvidersListResponse = {
         available: providers.map((p) => p.name),
-        types: [],
+        types: status.known_types,
         entries: providers,
       };
       setProvidersState({ kind: "ok", data, status });

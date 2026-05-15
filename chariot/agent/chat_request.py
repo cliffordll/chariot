@@ -108,11 +108,9 @@ class ChatRequest:
     `messages` 是必填(Claude API 要求);其它字段都有合理默认。
     """
 
-    # ─── chariot 路由字段(必填) ───
-    provider_name: str  # entry name(chariot 内部当 Provider 路由 key)
-
     # ─── Claude Messages API 字段(顺序按官方 spec) ───
     messages: list[Message]
+    provider_name: str | None = None  # entry name(chariot 内部当 Provider 路由 key);None = 未指定
     model: str | None = None  # 0.6.5+ per-call LLM id 覆盖;None = 用 entry.options.model
     max_tokens: int = 4096
     system: str | list[SystemBlock] | None = None

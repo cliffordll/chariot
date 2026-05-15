@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
-from chariot.repos.memory_repo import MemoryRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+from chariot.services.memory import MemoryService
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -16,7 +16,6 @@ class MemoryApi:
 
     async def list_entries(
         self,
-        session: Any,
         *,
         kind: str | None = None,
         pinned: bool | None = None,
@@ -28,7 +27,7 @@ class MemoryApi:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        entries = await MemoryRepo(session).list_entries(
+        entries = await MemoryService(self._runtime).list_entries(
             kind=kind,
             pinned=pinned,
             archived=archived,
@@ -41,15 +40,14 @@ class MemoryApi:
         )
         return [self._entry_to_dict(entry) for entry in entries]
 
-    async def get_entry(self, session: Any, *, memory_id: str) -> dict[str, Any]:
-        entry = await MemoryRepo(session).get_entry(memory_id)
+    async def get_entry(self, *, memory_id: str) -> dict[str, Any]:
+        entry = await MemoryService(self._runtime).get_entry(memory_id)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"memory {memory_id!r} not found")
         return self._entry_to_dict(entry)
 
     async def create_entry(
         self,
-        session: Any,
         *,
         kind: str,
         text: str,
@@ -58,7 +56,7 @@ class MemoryApi:
         archived: bool = False,
         links: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        entry = await MemoryRepo(session).create(
+        entry = await MemoryService(self._runtime).create(
             kind=kind,
             text=text,
             meta=meta,
@@ -70,7 +68,6 @@ class MemoryApi:
 
     async def update_entry(
         self,
-        session: Any,
         *,
         memory_id: str,
         kind: str | None = None,
@@ -80,7 +77,7 @@ class MemoryApi:
         archived: bool | None = None,
         links: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        entry = await MemoryRepo(session).update(
+        entry = await MemoryService(self._runtime).update(
             memory_id,
             kind=kind,
             text=text,
@@ -91,57 +88,54 @@ class MemoryApi:
         )
         return self._entry_to_dict(entry)
 
-    async def delete_entry(self, session: Any, *, memory_id: str) -> dict[str, Any]:
-        await MemoryRepo(session).delete(memory_id)
+    async def delete_entry(self, *, memory_id: str) -> dict[str, Any]:
+        await MemoryService(self._runtime).delete(memory_id)
         return {"deleted": memory_id}
 
-    async def pin_entry(self, session: Any, *, memory_id: str, pinned: bool = True) -> dict[str, Any]:
-        entry = await MemoryRepo(session).pin(memory_id, pinned=pinned)
+    async def pin_entry(self, *, memory_id: str, pinned: bool = True) -> dict[str, Any]:
+        entry = await MemoryService(self._runtime).pin(memory_id, pinned=pinned)
         return self._entry_to_dict(entry)
 
     async def archive_entry(
         self,
-        session: Any,
         *,
         memory_id: str,
         archived: bool = True,
     ) -> dict[str, Any]:
-        entry = await MemoryRepo(session).archive(memory_id, archived=archived)
+        entry = await MemoryService(self._runtime).archive(memory_id, archived=archived)
         return self._entry_to_dict(entry)
 
-    async def list_events(self, session: Any, *, memory_id: str | None = None) -> list[dict[str, Any]]:
-        entries = await MemoryRepo(session).list_events(memory_id=memory_id)
+    async def list_events(self, *, memory_id: str | None = None) -> list[dict[str, Any]]:
+        entries = await MemoryService(self._runtime).list_events(memory_id=memory_id)
         return [self._event_to_dict(entry) for entry in entries]
 
     async def list_links(
         self,
-        session: Any,
         *,
         memory_id: str | None = None,
         link_type: str | None = None,
         link_value: str | None = None,
     ) -> list[dict[str, Any]]:
-        entries = await MemoryRepo(session).list_links(
+        entries = await MemoryService(self._runtime).list_links(
             memory_id=memory_id,
             link_type=link_type,
             link_value=link_value,
         )
         return [self._link_to_dict(entry) for entry in entries]
 
-    async def search_entries(self, session: Any, *, query: str) -> list[dict[str, Any]]:
-        entries = await MemoryRepo(session).search_entries(query)
+    async def search_entries(self, *, query: str) -> list[dict[str, Any]]:
+        entries = await MemoryService(self._runtime).search_entries(query)
         return [self._entry_to_dict(entry) for entry in entries]
 
     async def list_relevant_entries(
         self,
-        session: Any,
         *,
         conversation_id: str | None = None,
         provider_name: str | None = None,
         tags: list[str] | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        entries = await MemoryRepo(session).list_relevant_entries(
+        entries = await MemoryService(self._runtime).list_relevant_entries(
             conversation_id=conversation_id,
             provider_name=provider_name,
             tags=tags,

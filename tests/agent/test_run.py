@@ -113,8 +113,8 @@ class TestRouting:
 
 
 class TestDefaultToolsInjection:
-    async def test_none_tools_injects_all(self) -> None:
-        """req.tools=None + 装载 N 个 tool → AgentLoop 拿到 N 个 schema。"""
+    async def test_none_tools_without_agent_injects_none(self) -> None:
+        """req.tools=None + 无 agent_profile → 不挂载任何工具(0.8.8+ 行为变更)。"""
         provider = _CapturingProvider("p")
         agent = AIAgent(
             providers={"p": provider},
@@ -123,13 +123,11 @@ class TestDefaultToolsInjection:
         req = ChatRequest(
             provider_name="p",
             messages=[Message(role="user", content="hi")],
-            tools=None,  # 触发 default 注入
+            tools=None,
         )
         _ = [ev async for ev in agent.run_chat(req)]
         assert provider.last_req is not None
-        assert provider.last_req.tools is not None
-        names = sorted(t.name for t in provider.last_req.tools)
-        assert names == ["t1", "t2"]
+        assert provider.last_req.tools == []
 
     async def test_empty_tools_passes_through(self) -> None:
         """req.tools=[] → 透传(不被默认替换)。"""

@@ -91,7 +91,7 @@ async def test_skill_activated_from_profile_default_when_request_none(tmp_path: 
         from chariot.models.agent import AgentProfile
 
         profile = AgentProfile(name="x", role="dev", default_skill="debug_helper")
-        binding = _AgentBinding(profile=profile)
+        binding = _AgentBinding(agent_profile=profile)
         req = ChatRequest(
             provider_name="mock",
             messages=[Message(role="user", content="hi")],
@@ -113,7 +113,7 @@ async def test_request_empty_string_overrides_profile_default(tmp_path: Path) ->
         from chariot.models.agent import AgentProfile
 
         profile = AgentProfile(name="x", role="dev", default_skill="debug_helper")
-        binding = _AgentBinding(profile=profile)
+        binding = _AgentBinding(agent_profile=profile)
         req = ChatRequest(
             provider_name="mock",
             messages=[Message(role="user", content="hi")],

@@ -10,7 +10,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.context_repo import ContextRepo
+from chariot.services.context import ContextService
 
 context_app = typer.Typer(
     name="context",
@@ -56,8 +56,8 @@ def inspect_cmd(
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ContextRepo(session).list_snapshots()
+    async with installed_runtime() as agent:
+        entries = await ContextService(agent).list_snapshots()
     if not entries:
         Renderer.out("(没有 context snapshots)")
         return
@@ -80,8 +80,8 @@ async def _list() -> None:
 
 
 async def _traces(conversation_id: str | None, *, limit: int, offset: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ContextRepo(session).list_traces(
+    async with installed_runtime() as agent:
+        entries = await ContextService(agent).list_traces(
             conversation_id=conversation_id,
             limit=limit,
             offset=offset,
@@ -109,8 +109,8 @@ async def _traces(conversation_id: str | None, *, limit: int, offset: int) -> No
 
 
 async def _inspect(context_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ContextRepo(session).inspect_context(context_id)
+    async with installed_runtime() as agent:
+        entry = await ContextService(agent).inspect_context(context_id)
     if entry is None:
         Renderer.die(f"未找到 context: {context_id!r}")
         return

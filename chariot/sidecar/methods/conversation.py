@@ -1,31 +1,36 @@
 """sidecar conversation method handlers(0.6.5 S.8c)。
 
 `ConversationMethods`:list / get / rename / delete 4 个 method,全部走
-`MethodBase._session()` 开 DB session + 翻译 repo 异常 → RpcError。
+`ConversationApi` → `ConversationService` → `ConversationRepo`。
+本层只负责:JSON-RPC 参数解析 + 调用 Api + 异常翻译。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.conversation_repo import Conversation, ConversationRepo, MessageSearchHit
-from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
+from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
+from chariot.sidecar.services.conversation import ConversationApi
 
 
 class ConversationMethods(MethodBase):
     """conversation CRUD method handlers(list_conversations / get_conversation / rename_conversation / delete_conversation)。"""  # noqa: E501
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._api = ConversationApi(self.runtime)
+
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`list_conversations`:按 created_at 降序列所有 conversation(简略字段)。
 
-        params:无;返:`{"conversations": [{id, title, last_model, created_at,
+        params:无;返:`{"conversations": [{id, title, last_provider, created_at,
         updated_at, message_count}, ...]}`
         """
         del params, ctx
-        async with self._session() as session:
-            entries = await ConversationRepo(session).list_entries()
-        return {"conversations": [self._serialize(c) for c in entries]}
+        async with self._rpc_errors():
+            entries = await self._api.list_conversations()
+        return {"conversations": entries}
 
     async def get(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`get_conversation`:按 id 取 conversation + 全部 messages(Anthropic 形态)。
@@ -35,30 +40,34 @@ class ConversationMethods(MethodBase):
         """
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
-        async with self._session() as session:
-            repo = ConversationRepo(session)
-            conversation = await repo.get(conversation_id)
-            if conversation is None:
-                raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"conversation {conversation_id!r} not found")
-            messages = await repo.load_messages_as_anthropic(conversation_id)
-        return {"conversation": self._serialize(conversation), "messages": messages}
+        async with self._rpc_errors():
+            return await self._api.get_conversation(conversation_id=conversation_id)
 
     async def rename(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`rename_conversation`:改 conversation title。title=None 清空。"""
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
         title = self._optional_str(params, "title")
-        async with self._session() as session:
-            conversation = await ConversationRepo(session).update_title(conversation_id, title)
-        return {"conversation": self._serialize(conversation)}
+        async with self._rpc_errors():
+            return await self._api.rename_conversation(conversation_id=conversation_id, title=title)
+
+    async def update_config(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """`update_conversation_config`:更新 agent_profile。"""
+        del ctx
+        conversation_id = self._require_str(params, "conversation_id")
+        agent_profile = self._optional_str(params, "agent_profile")
+        async with self._rpc_errors():
+            return await self._api.update_config(
+                conversation_id=conversation_id,
+                agent_profile=agent_profile,
+            )
 
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`delete_conversation`:删 conversation + cascade 删 messages。"""
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
-        async with self._session() as session:
-            await ConversationRepo(session).delete(conversation_id)
-        return {"deleted": conversation_id}
+        async with self._rpc_errors():
+            return await self._api.delete_conversation(conversation_id=conversation_id)
 
     async def search(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`search_conversation`(B3 wave 1):FTS5 全文搜索 messages。
@@ -71,35 +80,15 @@ class ConversationMethods(MethodBase):
         limit_raw = params.get("limit")
         limit = int(limit_raw) if isinstance(limit_raw, int) and not isinstance(limit_raw, bool) else 20
         conversation_id = self._optional_str(params, "conversation_id")
-        async with self._session() as session:
-            hits = await ConversationRepo(session).search(query, limit=limit, conversation_id=conversation_id)
-        return {"hits": [self._serialize_hit(h) for h in hits]}
+        async with self._rpc_errors():
+            return await self._api.search_conversation(
+                query=query,
+                limit=limit,
+                conversation_id=conversation_id,
+            )
 
     async def rebuild_fts(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`rebuild_conversation_fts`(B3 wave 1):灾备清空 + 全量回填 messages_fts。"""
         del params, ctx
-        async with self._session() as session:
-            rebuilt = await ConversationRepo(session).rebuild_fts()
-        return {"rebuilt": rebuilt}
-
-    @staticmethod
-    def _serialize_hit(hit: MessageSearchHit) -> dict[str, Any]:
-        return {
-            "message_id": hit.message_id,
-            "conversation_id": hit.conversation_id,
-            "role": hit.role,
-            "snippet": hit.snippet,
-            "rank": hit.rank,
-        }
-
-    @staticmethod
-    def _serialize(conversation: Conversation) -> dict[str, Any]:
-        """`Conversation` dataclass → wire dict(datetime → ISO str)。"""
-        return {
-            "id": conversation.id,
-            "title": conversation.title,
-            "last_model": conversation.last_model,
-            "created_at": conversation.created_at.isoformat(),
-            "updated_at": conversation.updated_at.isoformat(),
-            "message_count": conversation.message_count,
-        }
+        async with self._rpc_errors():
+            return await self._api.rebuild_conversation_fts()

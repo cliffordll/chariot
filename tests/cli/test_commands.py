@@ -95,23 +95,23 @@ def test_provider_help_contains_crud_and_probe() -> None:
     result = runner.invoke(app, ["provider", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "use", "probe", "add", "update", "delete", "rm", "copy", "status"):
+    for sub in ("list", "show", "use", "probe", "add", "update", "delete", "copy", "status"):
         assert sub in out
 
 
-def test_conversation_help_contains_list_show_rm_rename() -> None:
+def test_conversation_help_contains_list_show_delete_rename() -> None:
     result = runner.invoke(app, ["conversation", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for sub in ("list", "show", "rm", "rename"):
+    for sub in ("list", "show", "delete", "rename"):
         assert sub in out
 
 
-def test_chat_help_contains_conversation_provider_and_override_options() -> None:
+def test_chat_help_contains_conversation_provider_and_agent_options() -> None:
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
     out = _plain(result.output)
-    for flag in ("--conversation", "--provider", "--model", "--base-url", "--api-key"):
+    for flag in ("--conversation", "--provider", "--agent"):
         assert flag in out
     assert "new|ULID" in out
 

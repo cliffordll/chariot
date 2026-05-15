@@ -1,7 +1,7 @@
 """ChatRepl slash 命令测试(0.6.0 库化版)。
 
 slash 命令分单 / 复数:**单数 = 显示当前状态(只读)**,**复数 = 列全部(走 repo)**。
-覆盖 /model · /models · /convo · /convos · /tool · /tools。
+覆盖 /agent · /agents · /convo · /convos · /tool · /tools。
 
 REPL 主循环不测(input 阻塞难自动化);只针对 `_handle_slash` + `_slash_*`
 方法,直接 await 调,断 ctx 状态变化 + Renderer 输出 + DB 形态变化。
@@ -25,7 +25,7 @@ from chariot.cli.render import Renderer
 from chariot.cli.repl import ChatRepl
 from chariot.database.session import dispose_db
 from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.provider_repo import ProviderRepo
+from chariot.repos.task_repo import TaskRepo
 from chariot.repos.tool_repo import ToolRepo
 
 # ============================================================
@@ -84,100 +84,64 @@ _Capt = list[tuple[str, str]]
 
 
 # ==========================================================
-# /provider · /providers
+# /agent · /agents
 # ==========================================================
 
 
-async def test_slash_provider_no_arg_shows_current(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
-    """`/provider` 无参数:显示 ctx.provider_name,不查 DB。"""
+async def test_slash_agent_no_arg_shows_current(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
+    """`/agent` 无参数:显示 ctx.agent_profile。"""
     ctx = _make_ctx(agent)
-    await ChatRepl(ctx=ctx)._handle_slash("/provider")
+    await ChatRepl(ctx=ctx)._handle_slash("/agent")
     outs = [c for c in _capture_renderer_output if c[0] == "out"]
     assert len(outs) == 1
-    assert "claude-haiku-4-5" in outs[0][1]
+    assert "(none)" in outs[0][1]
 
 
-async def test_slash_provider_with_name_sets_ctx_provider(agent: AIAgent) -> None:
-    """`/provider <name>` 本次会话切到 entry(写到 ctx.provider_name,不动 DB)。"""
+async def test_slash_agent_with_name_sets_ctx_agent_profile(agent: AIAgent) -> None:
+    """`/agent <name>` 设置 ctx.agent_profile。"""
     ctx = _make_ctx(agent)
-    await ChatRepl(ctx=ctx)._handle_slash("/provider new-entry-id")
-    assert ctx.provider_name == "new-entry-id"
-    # 首启默认 provider 还是 mock
-    async with agent.session_maker() as session:
-        default = await ProviderRepo(session).get_default()
-        assert default is not None
-        assert default.name == "mock"
+    await ChatRepl(ctx=ctx)._handle_slash("/agent dev-helper")
+    assert ctx.agent_profile == "dev-helper"
 
 
-async def test_slash_provider_use_persists_default_to_db(agent: AIAgent) -> None:
-    """`/provider use <name>` 设 DB 默认 + 同步本次 ctx 切到它。"""
-    async with agent.session_maker() as session:
-        await ProviderRepo(session).create(
-            name="claude-haiku-4-5",
-            type="anthropic",
-            options={},
-            params={},
-        )
-    ctx = _make_ctx(agent)  # provider_name=claude-haiku-4-5
-    ctx.set_provider("mock")  # 先切到本地 mock
-    await ChatRepl(ctx=ctx)._handle_slash("/provider use claude-haiku-4-5")
-
-    assert ctx.provider_name == "claude-haiku-4-5"
-    async with agent.session_maker() as session:
-        default = await ProviderRepo(session).get_default()
-    assert default is not None and default.name == "claude-haiku-4-5"
-
-
-async def test_slash_provider_use_unknown_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
-    """`/provider use <unknown>` 报 error;ctx 不变。"""
+async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
+    """`/agent clear` 清空 ctx.agent_profile。"""
     ctx = _make_ctx(agent)
-    original = ctx.provider_name
-    await ChatRepl(ctx=ctx)._handle_slash("/provider use ghost")
-    errs = [c for c in _capture_renderer_output if c[0] == "err"]
-    assert len(errs) == 1
-    assert ctx.provider_name == original
+    ctx.agent_profile = "dev-helper"
+    await ChatRepl(ctx=ctx)._handle_slash("/agent clear")
+    assert ctx.agent_profile is None
 
 
-async def test_slash_providers_lists_entries_with_current_and_default_markers(
-    agent: AIAgent, _capture_renderer_output: _Capt
-) -> None:
-    """`/providers` 走 ProviderRepo,带 default `*` + ← current 标记。
-
-    fresh DB 默认 seed 1 条 mock entry;手动加一条 claude-haiku-4-5 当前 provider 且设默认。
-    """
+async def test_slash_agents_lists_entries_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
+    """`/agents` 走 AgentService,带 ← current 标记。"""
     async with agent.session_maker() as session:
-        repo = ProviderRepo(session)
-        await repo.create(
-            name="claude-haiku-4-5",
-            type="anthropic",
-            options={},
-            params={},
-        )
-        await repo.set_default("claude-haiku-4-5")
+        from chariot.services.agent import AgentService
 
-    ctx = _make_ctx(agent)  # ctx.provider_name = claude-haiku-4-5
-    await ChatRepl(ctx=ctx)._handle_slash("/providers")
+        await AgentService(TaskRepo(session)).create_agent(
+            name="dev-helper",
+            role="developer",
+        )
+
+    ctx = _make_ctx(agent)
+    ctx.agent_profile = "dev-helper"
+    await ChatRepl(ctx=ctx)._handle_slash("/agents")
 
     tables = [c for c in _capture_renderer_output if c[0] == "table"]
     assert len(tables) == 1
     title, body = tables[0][1].split("::", 1)
-    assert title == "entries"
-    assert "claude-haiku-4-5" in body
+    assert title == "agent profiles"
+    assert "dev-helper" in body
     assert "← current" in body
     assert body.count("← current") == 1
-    # default 标记 `*` 也只一条
-    assert " * " in body or body.endswith(" *") or "* " in body
-    # mock 也在表里(seeded)
-    assert "mock" in body
 
 
-async def test_slash_providers_with_arg_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
-    """`/providers <arg>` 报 error 引导用 `/provider <name>` 切 provider。"""
+async def test_slash_agents_with_arg_errors(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
+    """`/agents <arg>` 报 error 引导用 `/agent <name>` 切 agent。"""
     ctx = _make_ctx(agent)
-    await ChatRepl(ctx=ctx)._handle_slash("/providers foo")
+    await ChatRepl(ctx=ctx)._handle_slash("/agents foo")
     errs = [c for c in _capture_renderer_output if c[0] == "err"]
     assert len(errs) == 1
-    assert "/provider" in errs[0][1]
+    assert "/agent" in errs[0][1]
 
 
 # ==========================================================

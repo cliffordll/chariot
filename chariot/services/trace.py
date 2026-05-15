@@ -22,11 +22,12 @@ from chariot.models.trace import (
     TurnStatus,
 )
 from chariot.repos.trace_repo import TraceRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 
 class TraceService:
-    def __init__(self, repo: TraceRepo) -> None:
-        self._repo = repo
+    def __init__(self, session_maker: object) -> None:
+        self._repo = SessionRepoProxy(session_maker, TraceRepo)
 
     # ---- turn 生命周期 ----
 

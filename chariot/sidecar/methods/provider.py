@@ -17,15 +17,15 @@ class ProviderMethods(MethodBase):
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            providers = await self._service.list_entries(session)
+        async with self._rpc_errors():
+            providers = await self._service.list_entries()
         return {"providers": providers}
 
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            provider = await self._service.show_entry(session, name=name)
+        async with self._rpc_errors():
+            provider = await self._service.show_entry(name=name)
         return {"provider": provider}
 
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -34,9 +34,8 @@ class ProviderMethods(MethodBase):
         type_ = self._require_str(params, "type")
         options = self._require_dict(params, "options")
         params_field = self._optional_dict(params, "params") or {}
-        async with self._session() as session:
+        async with self._rpc_errors():
             provider = await self._service.add_entry(
-                session,
                 name=name,
                 type_=type_,
                 options=options,
@@ -50,9 +49,8 @@ class ProviderMethods(MethodBase):
         type_ = self._optional_str(params, "type")
         options = self._optional_dict(params, "options")
         params_field = self._optional_dict(params, "params")
-        async with self._session() as session:
+        async with self._rpc_errors():
             provider = await self._service.update_entry(
-                session,
                 name=name,
                 type_=type_,
                 options=options,
@@ -63,24 +61,24 @@ class ProviderMethods(MethodBase):
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            deleted = await self._service.delete_entry(session, name=name)
+        async with self._rpc_errors():
+            deleted = await self._service.delete_entry(name=name)
         return {"deleted": deleted}
 
     async def use(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            provider = await self._service.set_default_entry(session, name=name)
+        async with self._rpc_errors():
+            provider = await self._service.set_default_entry(name=name)
         return {"provider": provider}
 
     async def probe(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            return await self._service.probe(session, name=name)
+        async with self._rpc_errors():
+            return await self._service.probe(name=name)
 
     async def status(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            return await self._service.status(session)
+        async with self._rpc_errors():
+            return await self._service.status()

@@ -15,11 +15,12 @@ from typing import Any
 
 from chariot.models.toolset import Toolset
 from chariot.repos.toolset_repo import ToolsetRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 
 class ToolsetService:
-    def __init__(self, repo: ToolsetRepo) -> None:
-        self._repo = repo
+    def __init__(self, session_maker: object) -> None:
+        self._repo = SessionRepoProxy(session_maker, ToolsetRepo)
 
     async def list_entries(self) -> list[Toolset]:
         return await self._repo.list_entries()

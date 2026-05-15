@@ -12,7 +12,6 @@ from chariot.models.trace import (
     TraceTurn,
     TurnStatus,
 )
-from chariot.repos.trace_repo import TraceRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.trace import TraceService
 from chariot.sidecar.runtime import SidecarRuntime
@@ -24,7 +23,6 @@ class TraceApi:
 
     async def list_turns(
         self,
-        session: Any,
         *,
         conversation_id: str | None = None,
         task_id: str | None = None,
@@ -34,7 +32,7 @@ class TraceApi:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         status_enum = self._parse_status(status)
-        service = TraceService(TraceRepo(session))
+        service = TraceService(self._runtime)
         turns = await service.list_turns(
             conversation_id=conversation_id,
             task_id=task_id,
@@ -45,22 +43,22 @@ class TraceApi:
         )
         return [self.serialize_turn(turn) for turn in turns]
 
-    async def get_turn(self, session: Any, *, turn_id: str) -> dict[str, Any]:
-        service = TraceService(TraceRepo(session))
+    async def get_turn(self, *, turn_id: str) -> dict[str, Any]:
+        service = TraceService(self._runtime)
         turn = await service.get_turn(turn_id)
         if turn is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"trace turn {turn_id!r} not found")
         return self.serialize_turn(turn)
 
-    async def get_tree(self, session: Any, *, turn_id: str) -> dict[str, Any]:
-        service = TraceService(TraceRepo(session))
+    async def get_tree(self, *, turn_id: str) -> dict[str, Any]:
+        service = TraceService(self._runtime)
         tree = await service.get_tree(turn_id)
         if tree is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"trace turn {turn_id!r} not found")
         return self.serialize_tree(tree)
 
-    async def reconcile_stale(self, session: Any, *, older_than_seconds: int = 3600) -> dict[str, Any]:
-        service = TraceService(TraceRepo(session))
+    async def reconcile_stale(self, *, older_than_seconds: int = 3600) -> dict[str, Any]:
+        service = TraceService(self._runtime)
         cleaned = await service.reconcile_stale(older_than_seconds=older_than_seconds)
         return {"cleaned": cleaned}
 

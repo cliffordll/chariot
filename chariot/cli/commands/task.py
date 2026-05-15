@@ -17,7 +17,6 @@ from chariot.models.task import (
     TaskKind,
     TaskRunCreate,
 )
-from chariot.repos.task_repo import TaskRepo
 from chariot.services.task import TaskService
 
 task_app = typer.Typer(name="task", help="管理 tasks / task runs / delegation", no_args_is_help=True)
@@ -184,8 +183,8 @@ def task_cancel_run_cmd(
 
 
 async def _task_list(parent_task_id: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await TaskService(TaskRepo(session)).list_tasks(parent_task_id=parent_task_id)
+    async with installed_runtime() as agent:
+        entries = await TaskService(agent).list_tasks(parent_task_id=parent_task_id)
     if not entries:
         Renderer.out("(没有 tasks)")
         return
@@ -204,14 +203,13 @@ async def _task_list(parent_task_id: str | None) -> None:
 
 
 async def _task_show(task_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         entry = await service.get_task(task_id)
         if entry is None:
             Renderer.die(f"task not found: {task_id!r}")
             return
-        runs = await repo.list_runs(task_id)
+        runs = await service.list_task_runs(task_id)
         child_summary = await service.summarize_child_statuses(task_id)
     Renderer.kv(
         {
@@ -270,9 +268,9 @@ async def _task_create(
     except ValueError:
         Renderer.die(f"invalid task kind: {kind!r}")
         return
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            entry = await TaskService(TaskRepo(session)).create_task(
+            entry = await TaskService(agent).create_task(
                 TaskCreate(
                     goal=goal,
                     kind=task_kind,
@@ -288,8 +286,8 @@ async def _task_create(
 
 
 async def _task_transition(task_id: str, action: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             if action == "pause":
                 entry = await service.pause_task(task_id)
@@ -314,8 +312,8 @@ async def _task_start_run(
     meta: str,
 ) -> None:
     parsed_meta = _parse_meta(meta) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             run = await service.start_task_run(
                 TaskRunCreate(
@@ -332,8 +330,8 @@ async def _task_start_run(
 
 
 async def _task_runs(task_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             runs = await service.list_task_runs(task_id)
         except ValueError as exc:
@@ -359,8 +357,8 @@ async def _task_runs(task_id: str) -> None:
 
 
 async def _task_show_run(run_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        run = await TaskService(TaskRepo(session)).get_task_run(run_id)
+    async with installed_runtime() as agent:
+        run = await TaskService(agent).get_task_run(run_id)
         if run is None:
             Renderer.die(f"task run not found: {run_id!r}")
             return
@@ -391,8 +389,8 @@ async def _task_complete_run(
     error: str | None,
 ) -> None:
     parsed_result = _parse_meta(result) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             run = await service.complete_task_run(run_id, result=parsed_result, error=error)
         except ValueError as exc:
@@ -411,8 +409,8 @@ async def _task_fail_run(
         Renderer.die("--error is required")
         return
     parsed_result = _parse_meta(result) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             run = await service.fail_task_run(run_id, error=error, result=parsed_result)
         except ValueError as exc:
@@ -428,8 +426,8 @@ async def _task_cancel_run(
     result: str,
 ) -> None:
     parsed_result = _parse_meta(result) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             run = await service.cancel_task_run(run_id, error=error, result=parsed_result)
         except ValueError as exc:
@@ -459,8 +457,8 @@ async def _task_delegate(
     if not specs:
         Renderer.die("at least one non-empty --goal is required")
         return
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = TaskService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = TaskService(agent)
         try:
             result = await service.delegate(
                 DelegationRequest(

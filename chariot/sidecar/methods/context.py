@@ -22,9 +22,8 @@ class ContextMethods(MethodBase):
             raise TypeError("conversation_id must be a string")
         limit = int(params.get("limit", 50))
         offset = int(params.get("offset", 0))
-        async with self._session() as session:
+        async with self._rpc_errors():
             snapshots = await self._service.list_snapshots(
-                session,
                 conversation_id=conversation_id,
                 limit=limit,
                 offset=offset,
@@ -34,15 +33,15 @@ class ContextMethods(MethodBase):
     async def inspect(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         context_id = self._require_str(params, "context_id")
-        async with self._session() as session:
-            entry = await self._service.inspect_context(session, context_id=context_id)
+        async with self._rpc_errors():
+            entry = await self._service.inspect_context(context_id=context_id)
         return entry
 
     async def get(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         snapshot_id = self._require_str(params, "snapshot_id")
-        async with self._session() as session:
-            entry = await self._service.get_snapshot(session, snapshot_id=snapshot_id)
+        async with self._rpc_errors():
+            entry = await self._service.get_snapshot(snapshot_id=snapshot_id)
         return {"snapshot": entry}
 
     async def traces(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -52,9 +51,8 @@ class ContextMethods(MethodBase):
             raise TypeError("conversation_id must be a string")
         limit = int(params.get("limit", 50))
         offset = int(params.get("offset", 0))
-        async with self._session() as session:
+        async with self._rpc_errors():
             traces = await self._service.list_traces(
-                session,
                 conversation_id=conversation_id,
                 limit=limit,
                 offset=offset,

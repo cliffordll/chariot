@@ -17,7 +17,7 @@ slash 命令(v6 起 model→provider rename;v7 起加默认 provider)
 - `/conversation new`                 生成新 ULID 并切到 stateful 模式
 - `/conversation <ULID>`              接续指定会话
 - `/conversation off`                 切回 stateless
-- `/conversations`                    列最近会话(id / title / last_model / msg 数)
+ - `/conversations`                    列最近会话(id / title / agent / msg 数)
 - `/tool`                      显示当前已启用工具(filter enabled=True)
 - `/tools`                     列全部内置工具(含未启用,带 ON / off 标记)
 
@@ -59,9 +59,8 @@ from ulid import ULID
 
 from chariot.cli.context import ChatContext, ChatError
 from chariot.cli.render import Renderer
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.provider_repo import ProviderRepo
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.conversation import ConversationService
+from chariot.services.tool import ToolService
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符;偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
@@ -84,8 +83,8 @@ class ChatRepl:
         "/quit",
         "/reset",
         "/help",
-        "/provider",
-        "/providers",
+        "/agent",
+        "/agents",
         "/conversation",
         "/convo",
         "/conversations",
@@ -101,10 +100,10 @@ class ChatRepl:
         "slash 命令:\n"
         "  /exit, /quit           退出 REPL\n"
         "  /reset                 清空本地对话历史\n"
-        "  /provider              显示当前 provider\n"
-        "  /provider <name>       本次会话切到指定 entry\n"
-        "  /provider use <name>   把 <name> 设为 DB 默认\n"
-        "  /providers             列已注册 provider entries\n"
+        "  /agent                 显示当前 agent_profile\n"
+        "  /agent <name>          本次会话切换到指定 agent_profile\n"
+        "  /agent clear           清空当前 agent_profile\n"
+        "  /agents                列已注册 agent profiles\n"
         "  /conversation, /convo  显示当前会话\n"
         "  /conversation new      生成新 ULID 并切换\n"
         "  /convo new             `/conversation new` 别名\n"
@@ -122,13 +121,34 @@ class ChatRepl:
         "  /help                  本说明"
     )
 
+    async def _refresh_conversation_config(self) -> None:
+        """每轮输入前重新查 DB,恢复 conversation 最新 agent 配置。
+        若用户中途在 UI 改了,CLI REPL 能同步到最新值。DB 是 canonical 真源。
+        provider 由 agent_profile 绑定自动推导,不再单独存储。
+        """
+        from chariot.database.session import DEFAULT_DB_PATH, init_db
+        from chariot.services.conversation import ConversationService
+
+        conv_id = self.ctx.conversation_id
+        if conv_id is None:
+            return
+        assert isinstance(conv_id, str)
+        sm = await init_db(DEFAULT_DB_PATH)
+        async with sm():
+            conv = await ConversationService(sm).get(conv_id)
+        if conv is None:
+            return
+        # DB 是 canonical 真源:恢复 agent;provider 由 agent 推导
+        if conv.agent_profile is not None:
+            self.ctx.agent_profile = conv.agent_profile
+
     async def run(self) -> None:
         """主循环:读输入 → 分派 slash / 发请求 → 打印 meta 行。
 
         Ctrl+C / EOF / `/exit` / `/quit` 退出。
         """
         Renderer.out(
-            f"chariot chat · provider={self.ctx.provider_name}"
+            f"chariot chat · agent={self.ctx.agent_profile or '(none)'}"
             + (f" · conversation={self.ctx.conversation_id}" if self.ctx.conversation_id else "")
             + " · /help 查看命令",
         )
@@ -144,6 +164,10 @@ class ChatRepl:
             line = line.strip()
             if not line:
                 continue
+
+            # C1: REPL 每轮输入前重新查 conversation 最新配置(防止 UI 中途改了)
+            if self.ctx.conversation_id is not None:
+                await self._refresh_conversation_config()
 
             if line.startswith("/"):
                 if await self._handle_slash(line):
@@ -170,15 +194,21 @@ class ChatRepl:
 
         AIAgent 可能产多 message(stop_reason=tool_use 中转 + 最终 end_turn);
         Renderer.render_event 把 ChatEvent 分派为屏幕输出。
+        请求发出后到第一个 event 到达前显示旋转 spinner(由 Renderer 统一管理,
+        和 rich Live 不冲突)。
         """
         self.ctx.append_user(user_text)
+        Renderer.start_spinner()
         try:
             result = await self.ctx.run_turn(Renderer.render_event)
         except ChatError as e:
+            Renderer.stop_spinner()
             Renderer.stream_newline()
             self.ctx.pop_last()
             Renderer.error_bubble(f"{e.error_type}: {e.short_message()}")
             return
+        finally:
+            Renderer.stop_spinner()
 
         Renderer.stream_newline()
         self.ctx.append_assistant(result.text)
@@ -209,11 +239,11 @@ class ChatRepl:
             self.ctx.reset()
             Renderer.out("history cleared")
             return False
-        if cmd == "/provider":
-            await self._slash_provider(arg)
+        if cmd == "/agent":
+            await self._slash_agent(arg)
             return False
-        if cmd == "/providers":
-            await self._slash_providers_list(arg)
+        if cmd == "/agents":
+            await self._slash_agents_list(arg)
             return False
         if cmd in ("/conversation", "/convo"):
             await self._slash_conversation(arg)
@@ -280,69 +310,64 @@ class ChatRepl:
             badge = "ON" if s.enabled else "off"
             Renderer.out(f"  {badge}  {s.name}  [{s.source}]  {s.manifest.description}")
 
-    # ---------- /provider · /providers ----------
+    # ---------- /agent ----------
 
-    async def _slash_provider(self, arg: str) -> None:
-        """- `/provider` 显示当前 provider
-        - `/provider <name>` 本次会话切到 <name>(只改本地 ctx,不动 DB 默认)
-        - `/provider use <name>` 把 <name> 设为 DB 默认(等价 `chariot provider use`)
-
-        本地 ctx 写到 `ctx.provider_name`(对应 ChatRequest.model 字段)。
+    async def _slash_agent(self, arg: str) -> None:
+        """- `/agent` 显示当前 agent_profile
+        - `/agent <name>` 本次会话切换到 <name>(本地 + 同步到 conversation DB)
+        - `/agent clear` / `/agent ""` 显式清空
         """
         if not arg:
-            Renderer.out(f"provider: {self.ctx.provider_name}")
+            cur = self.ctx.agent_profile
+            Renderer.out(f"agent_profile: {cur or '(none)'}")
             return
 
-        # /provider use <name> —— 持久化到 DB 默认
-        head, _, tail = arg.partition(" ")
-        if head == "use":
-            target = tail.strip()
-            if not target:
-                Renderer.error_bubble("/provider use 需要 entry name 参数")
-                return
-            await self._slash_provider_use(target)
-            return
+        if arg in ("clear", '""', "''"):
+            self.ctx.agent_profile = None
+            Renderer.out("agent_profile cleared")
+        else:
+            self.ctx.agent_profile = arg
+            Renderer.out(f"agent_profile → {arg}")
 
-        # /provider <name> —— 本地切换
-        self.ctx.set_provider(arg)
-        Renderer.out(f"provider → {self.ctx.provider_name} (this session)")
-
-    async def _slash_provider_use(self, name: str) -> None:
-        """把 <name> 设为 DB 默认 + 同步本地 ctx 切到它。"""
-        async with self.ctx.agent.session_maker() as session:
+        if self.ctx.conversation_id is not None:
             try:
-                await ProviderRepo(session).set_default(name)
-            except Exception as e:
-                Renderer.error_bubble(f"设置默认失败: {e}")
-                return
-        self.ctx.set_provider(name)
-        Renderer.out(f"default → {name} (persisted; this session also)")
+                from chariot.services.conversation import ConversationService
 
-    async def _slash_providers_list(self, arg: str) -> None:
-        """`/providers` — 列已注册的 provider entries(name / type / default 标记)。"""
+                await ConversationService(self.ctx.agent).update_config(
+                    self.ctx.conversation_id,
+                    agent_profile=self.ctx.agent_profile,
+                )
+            except Exception:
+                pass  # 同步失败不阻断
+
+    async def _slash_agents_list(self, arg: str) -> None:
+        """`/agents` — 列已注册的 agent profiles。"""
         if arg:
             Renderer.error_bubble(
-                "/providers 不接受参数;切 provider 用 `/provider <name>` 或 `/provider use <name>`",
+                "/agents 不接受参数;切换 agent 用 `/agent <name>`",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            repo = ProviderRepo(session)
-            entries = await repo.list_entries()
-            default = await repo.get_default()
-        default_name = default.name if default is not None else None
+        from chariot.services.agent import AgentService
+
+        entries = await AgentService(self.ctx.agent).list_agents()
         if not entries:
-            Renderer.out("(没有 entry — `chariot provider add` 加一条)")
+            Renderer.out("(没有 agent profile — `chariot agent add` 加一个)")
             return
         rows = [
             (
                 e.name,
-                e.type,
-                "*" if e.name == default_name else "",
-                "← current" if e.name == self.ctx.provider_name else "",
+                e.role or "-",
+                e.provider_profile or "-",
+                e.tool_profile or "-",
+                "← current" if e.name == self.ctx.agent_profile else "",
             )
             for e in entries
         ]
-        Renderer.table(["name", "type", "default", ""], rows, title="entries")
+        Renderer.table(
+            ["name", "role", "provider", "tool_profile", ""],
+            rows,
+            title="agent profiles",
+        )
 
     # ---------- /conversation · /conversations ----------
 
@@ -367,6 +392,8 @@ class ChatRepl:
             new_id = str(ULID())
             self.ctx.conversation_id = new_id
             self.ctx.reset()
+            self.ctx.set_provider(None)
+            self.ctx.agent_profile = None
             Renderer.out(f"conversation → {new_id} (new)")
             return
 
@@ -376,19 +403,33 @@ class ChatRepl:
             )
             return
 
+        # 切到已有会话:先查 DB 恢复 agent 配置;provider 由 agent 绑定自动推导
+        try:
+            from chariot.services.conversation import ConversationService
+
+            conv = await ConversationService(self.ctx.agent).get(arg)
+            if conv is not None and conv.agent_profile:
+                self.ctx.agent_profile = conv.agent_profile
+                from chariot.services.agent import AgentService
+
+                agent = await AgentService(self.ctx.agent).get_agent(conv.agent_profile)
+                if agent is not None and agent.provider_profile:
+                    self.ctx.set_provider(agent.provider_profile)
+        except Exception:
+            pass
+
         self.ctx.conversation_id = arg
         self.ctx.reset()
         Renderer.out(f"conversation → {arg}")
 
     def _show_current_convo(self) -> None:
         """`/conversation` 无参数:打印当前会话快照(只读 ctx)。"""
+        provider_s = self.ctx.provider_name or "(none)"
         if self.ctx.conversation_id is None:
-            Renderer.out(f"conversation: off (stateless) · provider={self.ctx.provider_name}")
+            Renderer.out(f"conversation: off (stateless) · provider={provider_s}")
             return
         Renderer.out(
-            f"conversation: {self.ctx.conversation_id} · "
-            f"provider={self.ctx.provider_name} · "
-            f"local msgs={len(self.ctx.messages)}",
+            f"conversation: {self.ctx.conversation_id} · provider={provider_s} · local msgs={len(self.ctx.messages)}",
         )
 
     async def _slash_conversations_list(self, arg: str) -> None:
@@ -398,8 +439,7 @@ class ChatRepl:
                 "/conversations 不接受参数;切会话用 `/conversation <ULID|new|off>`",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            conversations = await ConversationRepo(session).list_entries(limit=20)
+        conversations = await ConversationService(self.ctx.agent).list_conversations(limit=20)
         if not conversations:
             Renderer.out("(没有会话 — `/conversation new` 开一个)")
             return
@@ -407,14 +447,14 @@ class ChatRepl:
             (
                 c.id,
                 _truncate(c.title or "(无标题)", 30),
-                c.last_model or "-",
+                c.agent_profile or "-",
                 str(c.message_count),
                 "← current" if c.id == self.ctx.conversation_id else "",
             )
             for c in conversations
         ]
         Renderer.table(
-            ["id", "title", "last_model", "msgs", ""],
+            ["id", "title", "agent", "msgs", ""],
             rows,
             title="conversations",
         )
@@ -431,8 +471,7 @@ class ChatRepl:
                 "/tool 不接受参数;改启用 / options 用 `chariot tool enable|disable|config <name>` 或 GUI Tools 页",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            entries = await ToolRepo(session).list_enabled()
+        entries = await ToolService(self.ctx.agent).list_enabled()
         if not entries:
             Renderer.out("(没有已启用的工具 — `chariot tool enable <name>` 启用一个)")
             return
@@ -453,8 +492,7 @@ class ChatRepl:
                 "/tools 不接受参数;启用 / 关闭工具用 `chariot tool enable|disable <name>`",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            entries = await ToolRepo(session).list_entries()
+        entries = await ToolService(self.ctx.agent).list_entries()
         if not entries:
             Renderer.out("(没有注册工具)")
             return

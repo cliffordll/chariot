@@ -14,12 +14,14 @@ from __future__ import annotations
 from chariot.providers.base import BaseProvider, BaseProviderConfig
 from chariot.providers.builtin.anthropic import AnthropicProvider
 from chariot.providers.builtin.mock import MockProvider
+from chariot.providers.builtin.openai import OpenAIProvider
 from chariot.providers.registry import ProviderRegistry
 
 # 注册内置 Provider —— 模块级单例注册(CLAUDE.md ⭐ 2:模块级单例实例化允许)。
 # 调用方 import chariot.providers 后 ProviderRegistry 立即可用。
 ProviderRegistry.register("mock", MockProvider)
 ProviderRegistry.register("anthropic", AnthropicProvider)
+ProviderRegistry.register("openai", OpenAIProvider)
 
 
 __all__ = [
@@ -27,5 +29,6 @@ __all__ = [
     "BaseProvider",
     "BaseProviderConfig",
     "MockProvider",
+    "OpenAIProvider",
     "ProviderRegistry",
 ]

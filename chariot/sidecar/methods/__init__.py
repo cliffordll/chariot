@@ -24,8 +24,6 @@ from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.agent.config import Capabilities
@@ -71,25 +69,24 @@ class MethodBase:
         self.agent = runtime.agent
 
     @asynccontextmanager
-    async def _session(self) -> AsyncGenerator[AsyncSession, None]:
-        async with self.runtime.session_maker() as session:
-            try:
-                yield session
-            except (
-                ConversationNotFound,
-                ProviderNotFound,
-                ToolNotFound,
-                AuxiliaryClientNotFound,
-            ) as e:
-                raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
-            except (
-                DuplicateConversationId,
-                DuplicateProviderName,
-                DuplicateAuxiliaryClientName,
-            ) as e:
-                raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
-            except ConfigError as e:
-                raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
+    async def _rpc_errors(self):
+        try:
+            yield
+        except (
+            ConversationNotFound,
+            ProviderNotFound,
+            ToolNotFound,
+            AuxiliaryClientNotFound,
+        ) as e:
+            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
+        except (
+            DuplicateConversationId,
+            DuplicateProviderName,
+            DuplicateAuxiliaryClientName,
+        ) as e:
+            raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
+        except ConfigError as e:
+            raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
 
     @staticmethod
     def _require_str(params: dict[str, Any], key: str) -> str:
@@ -212,6 +209,7 @@ def register_methods(
     server.method("get_conversation")(conversations.get)
     server.method("rename_conversation")(conversations.rename)
     server.method("delete_conversation")(conversations.delete)
+    server.method("update_conversation_config")(conversations.update_config)
     server.method("list_convos")(conversations.list_)
     server.method("get_convo")(conversations.get)
     server.method("rename_convo")(conversations.rename)
@@ -268,14 +266,14 @@ def register_methods(
     server.method("disable_tool")(tools.disable)
     server.method("config_tool")(tools.config)
     server.method("probe_tool")(tools.probe)
-    server.method("create_custom_tool")(tools.create_custom_tool)
-    server.method("delete_custom_tool")(tools.delete_custom_tool)
-    server.method("update_custom_tool")(tools.update_custom_tool)
+    server.method("add_tool")(tools.add)
+    server.method("delete_tool")(tools.delete)
+    server.method("update_tool")(tools.update)
 
     toolsets = ToolsetMethods(runtime)
     server.method("list_toolsets")(toolsets.list_)
     server.method("get_toolset")(toolsets.show)
-    server.method("create_toolset")(toolsets.add)
+    server.method("add_toolset")(toolsets.add)
     server.method("update_toolset")(toolsets.update)
     server.method("delete_toolset")(toolsets.delete)
     server.method("add_toolset_member")(toolsets.add_member)

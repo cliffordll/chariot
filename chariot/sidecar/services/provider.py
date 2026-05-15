@@ -7,9 +7,8 @@ from typing import Any
 from chariot.models.provider import ProviderEntry
 from chariot.providers.prober import ProviderProber
 from chariot.providers.registry import ProviderRegistry
-from chariot.repos.provider_health_repo import ProviderHealthRepo
-from chariot.repos.provider_repo import ProviderRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
+from chariot.services.provider import ProviderService
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -17,13 +16,11 @@ class ProviderApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
-    async def list_entries(self, session: Any) -> list[dict[str, Any]]:
-        repo = ProviderRepo(session)
-        health_repo = ProviderHealthRepo(session)
-        entries = await repo.list_entries()
-        default = await repo.get_default()
+    async def list_entries(self) -> list[dict[str, Any]]:
+        service = ProviderService(self._runtime)
+        entries, default = await service.list_with_default()
         default_name = default.name if default else None
-        health_map = {row["provider_name"]: row for row in await health_repo.list_entries()}
+        health_map = {row["provider_name"]: row for row in await service.list_health_entries()}
         return [
             {
                 **self.serialize(entry, health=health_map.get(entry.name)),
@@ -32,25 +29,24 @@ class ProviderApi:
             for entry in entries
         ]
 
-    async def show_entry(self, session: Any, *, name: str) -> dict[str, Any]:
-        repo = ProviderRepo(session)
-        health_repo = ProviderHealthRepo(session)
-        entry = await repo.get_entry(name)
-        if entry is None:
+    async def show_entry(self, *, name: str) -> dict[str, Any]:
+        service = ProviderService(self._runtime)
+        result = await service.show_with_default(name)
+        if result is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
-        default = await repo.get_default()
-        health = await health_repo.get(entry.name)
+        entry, is_default = result
+        health = await service.get_health(entry.name)
         return {
             **self.serialize(entry, health=health),
-            "default": default is not None and default.name == entry.name,
+            "default": is_default,
         }
 
-    async def status(self, session: Any) -> dict[str, Any]:
-        repo = ProviderRepo(session)
-        health_repo = ProviderHealthRepo(session)
-        entries = await repo.list_entries()
-        default = await repo.get_default()
-        health_map = {row["provider_name"]: row for row in await health_repo.list_entries()}
+    async def status(self) -> dict[str, Any]:
+        service = ProviderService(self._runtime)
+        result = await service.status()
+        entries = result["entries"]
+        default = result["default"]
+        health_map = {row["provider_name"]: row for row in await service.list_health_entries()}
         return {
             "default_provider": default.name if default is not None else None,
             "provider_count": len(entries),
@@ -66,14 +62,13 @@ class ProviderApi:
 
     async def add_entry(
         self,
-        session: Any,
         *,
         name: str,
         type_: str,
         options: dict[str, Any],
         params: dict[str, Any],
     ) -> dict[str, Any]:
-        entry = await ProviderRepo(session).create(
+        entry = await ProviderService(self._runtime).create(
             name=name,
             type=type_,
             options=options,
@@ -84,14 +79,13 @@ class ProviderApi:
 
     async def update_entry(
         self,
-        session: Any,
         *,
         name: str,
         type_: str | None,
         options: dict[str, Any] | None,
         params: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        entry = await ProviderRepo(session).update(
+        entry = await ProviderService(self._runtime).update(
             name,
             type=type_,
             options=options,
@@ -100,30 +94,31 @@ class ProviderApi:
         await self._runtime.reload()
         return self.serialize(entry)
 
-    async def delete_entry(self, session: Any, *, name: str) -> str:
-        await ProviderRepo(session).delete(name)
+    async def delete_entry(self, *, name: str) -> str:
+        await ProviderService(self._runtime).delete(name)
         await self._runtime.reload()
         return name
 
-    async def set_default_entry(self, session: Any, *, name: str) -> dict[str, Any]:
-        repo = ProviderRepo(session)
-        await repo.set_default(name)
+    async def set_default_entry(self, *, name: str) -> dict[str, Any]:
+        service = ProviderService(self._runtime)
+        await service.set_default(name)
         await self._runtime.reload()
-        entry = await repo.get_entry(name)
-        if entry is None:
+        result = await service.show_with_default(name)
+        if result is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
-        default = await repo.get_default()
+        entry, is_default = result
         return {
             **self.serialize(entry),
-            "default": default is not None and default.name == entry.name,
+            "default": is_default,
         }
 
-    async def probe(self, session: Any, *, name: str) -> dict[str, Any]:
-        entry = await ProviderRepo(session).get_entry(name)
+    async def probe(self, *, name: str) -> dict[str, Any]:
+        service = ProviderService(self._runtime)
+        entry = await service.get_entry(name)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
         result = await ProviderProber.probe(entry)
-        await ProviderHealthRepo(session).record_probe(
+        await service.record_health_probe(
             entry.name,
             ok=result.ok,
             latency_ms=result.latency_ms,

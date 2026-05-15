@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import time
 from typing import Any
 
-from chariot.database.session import init_db
-from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
 from chariot.sidecar.runtime import SidecarRuntime
-from chariot.sidecar.services import ChatService
+from chariot.sidecar.services import ChatService, LogApi
 
 
 class ChatMethod(MethodBase):
@@ -70,16 +69,12 @@ class ChatMethod(MethodBase):
         started_at: float,
         error: str | None,
     ) -> None:
-        try:
-            sm = await init_db(self.runtime.db_path)
-            async with sm() as session:
-                await LogRepo(session).create(
-                    provider=provider,
-                    status=status,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    latency_ms=int((time.perf_counter() - started_at) * 1000),
-                    error=error,
-                )
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            await LogApi(self.runtime).create(
+                provider=provider,
+                status=status,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=int((time.perf_counter() - started_at) * 1000),
+                error=error,
+            )

@@ -76,7 +76,7 @@ class ChatContext:
     # provider entry name(0.6.0 v6 起):chariot 路由 key,对应 DB providers
     # 表的 entry name。透传给 ChatRequest.provider_name(0.6.5+ 起字段名跟
     # wire `model` 区分开)。
-    provider_name: str = ""
+    provider_name: str | None = None
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
     # 0.4.0:可选 conversation id(ULID)。给了则 ChatRequest.conversation_id 透传给 AIAgent,
@@ -120,7 +120,7 @@ class ChatContext:
         """清空对话历史,保留会话配置(provider_name / max_tokens / conversation_id)。"""
         self.messages.clear()
 
-    def set_provider(self, name: str) -> None:
+    def set_provider(self, name: str | None) -> None:
         self.provider_name = name
 
     # ---------- 核心:一轮请求 ----------

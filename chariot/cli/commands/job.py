@@ -10,9 +10,7 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.task_repo import TaskRepo
 from chariot.services.job import JobService
-from chariot.services.task import TaskService
 
 job_app = typer.Typer(name="job", help="查看 scheduled jobs", no_args_is_help=True)
 
@@ -121,8 +119,8 @@ def job_run_now_cmd(
 
 
 async def _job_list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await JobService(TaskRepo(session), TaskService(TaskRepo(session))).list_jobs()
+    async with installed_runtime() as agent:
+        entries = await JobService(agent).list_jobs()
     if not entries:
         Renderer.out("(没有 jobs)")
         return
@@ -140,9 +138,8 @@ async def _job_list() -> None:
 
 
 async def _job_show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         entry = await service.get_job(name)
         if entry is None:
             Renderer.die(f"job not found: {name!r}")
@@ -196,9 +193,8 @@ async def _job_add(
         Renderer.die("--name, --goal and --cron are required")
         return
     parsed_meta = _parse_meta(meta) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         try:
             entry = await service.create_job(
                 name=name.strip(),
@@ -223,9 +219,8 @@ async def _job_update(
     meta: str,
 ) -> None:
     parsed_meta = _parse_meta(meta) if meta.strip() else None
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         try:
             entry = await service.update_job(
                 name=name,
@@ -241,9 +236,8 @@ async def _job_update(
 
 
 async def _job_set_enabled(name: str, enabled: bool) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         try:
             entry = await (service.enable_job(name) if enabled else service.disable_job(name))
         except ValueError as exc:
@@ -253,9 +247,8 @@ async def _job_set_enabled(name: str, enabled: bool) -> None:
 
 
 async def _job_run_now(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         try:
             task, run = await service.run_job_now(name)
         except ValueError as exc:
@@ -265,9 +258,8 @@ async def _job_run_now(name: str) -> None:
 
 
 async def _job_remove(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async with installed_runtime() as agent:
+        service = JobService(agent)
         try:
             await service.delete_job(name)
         except ValueError as exc:

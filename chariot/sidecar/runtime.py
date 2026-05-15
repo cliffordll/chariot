@@ -44,7 +44,7 @@ class SidecarRuntime:
 
     async def reserve_chat_agent(
         self,
-        provider_name: str,
+        provider_name: str | None,
         *,
         base_url: str | None,
         api_key: str | None,
@@ -52,6 +52,9 @@ class SidecarRuntime:
         """Return the default agent or a cached override-specific agent."""
 
         if base_url is None and api_key is None:
+            return self._agent
+
+        if provider_name is None:
             return self._agent
 
         options: dict[str, str] = {}
