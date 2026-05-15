@@ -33,13 +33,13 @@ class AuxiliaryMethods(MethodBase):
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        provider_entry = self._require_str(params, "provider_entry")
+        provider_id = self._provider_ref(params)
         model: ClearableStr = self._optional_str(params, "model")
         params_field = self._optional_dict(params, "params") or {}
         async with self._rpc_errors():
             entry = await AuxiliaryApi(self.runtime).create(
                 name=name,
-                provider_entry=provider_entry,
+                provider_id=provider_id,
                 model=model,
                 params=params_field,
             )
@@ -48,13 +48,13 @@ class AuxiliaryMethods(MethodBase):
     async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        provider_entry = self._optional_str(params, "provider_entry")
+        provider_id = self._optional_provider_ref(params)
         model: ClearableStr = self._clearable_str(params, "model")
         params_field = self._optional_dict(params, "params")
         async with self._rpc_errors():
             entry = await AuxiliaryApi(self.runtime).update(
                 name,
-                provider_entry=provider_entry,
+                provider_id=provider_id,
                 model=model,
                 params=params_field,
             )
@@ -71,7 +71,13 @@ class AuxiliaryMethods(MethodBase):
     def _serialize(entry: AuxiliaryClientEntry) -> dict[str, Any]:
         return {
             "name": entry.name,
-            "provider_entry": entry.provider_entry,
+            "provider_id": entry.provider_id,
             "model": entry.model,
             "params": entry.params,
         }
+
+    def _provider_ref(self, params: dict[str, Any]) -> str:
+        return self._require_str(params, "provider_id")
+
+    def _optional_provider_ref(self, params: dict[str, Any]) -> str | None:
+        return self._optional_str(params, "provider_id")

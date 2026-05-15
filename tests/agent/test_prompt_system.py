@@ -57,6 +57,6 @@ class TestPromptSystem:
             traces = await PromptRepo(session).list_traces()
         assert len(traces) == 1
         trace = traces[0]
-        assert trace.provider_name == "mock"
+        assert trace.provider_name_snapshot == "mock"
         assert trace.request["system"] == "system prompt"
         assert trace.source_refs[0]["layer"] == "base_system"

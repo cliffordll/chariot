@@ -4,7 +4,8 @@
 `agent.run_chat(req)`,不再起独立 server。
 
 flags:
-- `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认
+- `--provider <ref>`(可选):本次会话用的 provider 引用(优先 slug / id,兼容 legacy
+  name)。不传 = 走 DB 默认
   (`chariot provider use <name>` 设置)。两者都没 → die 提示设默认或加 --provider
 - `--conversation <id|new>`(主名) / `--convo <id|new>`(兼容别名):走 stateful path;
   `new` → CLI 生成 ULID 并打印;ULID 字面量 → 接续该会话;不传 → stateless
@@ -39,7 +40,7 @@ def chat_cmd(
         str | None,
         typer.Option(
             "--provider",
-            help="本次会话用的 provider entry name;不传走 DB 默认",
+            help="本次会话用的 provider 引用(优先 slug / id,兼容 legacy name);不传走 DB 默认",
         ),
     ] = None,
     conversation: Annotated[
@@ -60,7 +61,8 @@ def chat_cmd(
             "--agent",
             help=(
                 "agent_profile name;非空时 AIAgent 解析后用其 binding:"
-                "provider_profile 覆盖 --provider、prompt_bundle 决定 prompt、tool_profile 做 toolset filter。"
+                "provider_id 覆盖 --provider、"
+                "prompt_bundle 决定 prompt、tool_profile 做 toolset filter。"
             ),
         ),
     ] = None,

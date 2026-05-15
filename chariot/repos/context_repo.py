@@ -69,7 +69,8 @@ class ContextRepo:
     async def record_snapshot(self, snapshot: ContextSnapshot) -> ContextSnapshotEntry:
         row = ContextSnapshotRow(
             conversation_id=snapshot.conversation_id,
-            provider_name=snapshot.provider_name,
+            provider_id=snapshot.provider_id,
+            provider_name_snapshot=snapshot.provider_name_snapshot,
             model=snapshot.model,
             request=self._serialize_json("request", snapshot.request),
             slices=self._serialize_json("slices", [self._slice_to_dict(s) for s in snapshot.slices]),
@@ -102,7 +103,8 @@ class ContextRepo:
         row = ContextTraceRow(
             snapshot_id=snapshot_id,
             conversation_id=snapshot.conversation_id,
-            provider_name=snapshot.provider_name,
+            provider_id=snapshot.provider_id,
+            provider_name_snapshot=snapshot.provider_name_snapshot,
             model=snapshot.model,
             prompt_trace_id=prompt_trace_id,
             policy=self._serialize_json(
@@ -153,7 +155,8 @@ class ContextRepo:
         return {
             "id": entry.id,
             "conversation_id": entry.conversation_id,
-            "provider_name": entry.provider_name,
+            "provider_id": entry.provider_id,
+            "provider_name_snapshot": entry.provider_name_snapshot,
             "model": entry.model,
             "request": entry.request,
             "slices": entry.slices,
@@ -170,7 +173,8 @@ class ContextRepo:
             "id": entry.id,
             "snapshot_id": entry.snapshot_id,
             "conversation_id": entry.conversation_id,
-            "provider_name": entry.provider_name,
+            "provider_id": entry.provider_id,
+            "provider_name_snapshot": entry.provider_name_snapshot,
             "model": entry.model,
             "prompt_trace_id": entry.prompt_trace_id,
             "policy": entry.policy,
@@ -183,7 +187,8 @@ class ContextRepo:
         return ContextSnapshotEntry(
             id=row.id,
             conversation_id=row.conversation_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_name_snapshot=row.provider_name_snapshot,
             model=row.model,
             request=cast(dict[str, Any], json.loads(row.request)),
             slices=cast(list[dict[str, Any]], json.loads(row.slices)),
@@ -198,7 +203,8 @@ class ContextRepo:
             id=row.id,
             snapshot_id=row.snapshot_id,
             conversation_id=row.conversation_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_name_snapshot=row.provider_name_snapshot,
             model=row.model,
             prompt_trace_id=row.prompt_trace_id,
             policy=cast(dict[str, Any], json.loads(row.policy)),

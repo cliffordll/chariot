@@ -95,7 +95,13 @@ async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AI
 
     listed = await _call(server, "list_context_snapshots")
     assert listed["result"]["snapshots"][0]["id"] == recorded.id
+    assert listed["result"]["snapshots"][0]["provider_name_snapshot"] == "mock"
+    assert "provider_name" not in listed["result"]["snapshots"][0]
 
     inspected = await _call(server, "inspect_context", {"context_id": recorded.id})
     assert inspected["result"]["snapshot"]["id"] == recorded.id
     assert inspected["result"]["trace"]["snapshot_id"] == recorded.id
+    assert inspected["result"]["snapshot"]["provider_name_snapshot"] == "mock"
+    assert inspected["result"]["trace"]["provider_name_snapshot"] == "mock"
+    assert "provider_name" not in inspected["result"]["snapshot"]
+    assert "provider_name" not in inspected["result"]["trace"]

@@ -15,6 +15,7 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
 from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.services.agent import AgentService
 from chariot.services.job import JobService
@@ -80,7 +81,7 @@ async def test_list_agents_returns_created_profiles(server: JsonRpcServer, agent
         name="planner",
         role="planner",
         tool_profile="default",
-        provider_profile="mock",
+        provider_id="mock",
     )
 
     line = await _call(server, "list_agents")
@@ -98,12 +99,13 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
             "name": "planner",
             "role": "planner",
             "tool_profile": "default",
-            "provider_profile": "mock",
+            "provider_id": "mock",
             "budget": {"max_steps": 5},
         },
     )
     agent = line["result"]["agent"]
     assert agent["name"] == "planner"
+    assert agent["provider_id"]
     assert agent["budget"]["max_steps"] == 5
 
     detail = await _call(server, "get_agent", {"name": "planner"})
@@ -140,23 +142,23 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
             "role": "research",
             "prompt_bundle": "research",
             "tool_profile": "fs_safe",
-            "provider_profile": "claude",
+            "provider_id": "claude",
         },
     )
 
     # 只改 role,binding 字段 key 不在 payload 里 → 保留
     only_role = await _call(server, "update_agent", {"name": "researcher", "role": "planner"})
     assert only_role["result"]["agent"]["role"] == "planner"
-    assert only_role["result"]["agent"]["provider_profile"] == "claude"
+    assert only_role["result"]["agent"]["provider_id"] == "claude"
     assert only_role["result"]["agent"]["prompt_bundle"] == "research"
 
-    # provider_profile=null → 清空,其它保留
+    # provider_id=null → 清空,其它保留
     cleared = await _call(
         server,
         "update_agent",
-        {"name": "researcher", "provider_profile": None},
+        {"name": "researcher", "provider_id": None},
     )
-    assert cleared["result"]["agent"]["provider_profile"] is None
+    assert cleared["result"]["agent"]["provider_id"] is None
     assert cleared["result"]["agent"]["prompt_bundle"] == "research"
     assert cleared["result"]["agent"]["tool_profile"] == "fs_safe"
 
@@ -164,9 +166,24 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
     reset = await _call(
         server,
         "update_agent",
-        {"name": "researcher", "provider_profile": "ollama"},
+        {"name": "researcher", "provider_id": "ollama"},
     )
-    assert reset["result"]["agent"]["provider_profile"] == "ollama"
+    assert reset["result"]["agent"]["provider_id"] == "ollama"
+
+
+@pytest.mark.asyncio
+async def test_update_agent_accepts_provider_id_alias(server: JsonRpcServer, agent: AIAgent) -> None:
+    await _call(server, "create_agent", {"name": "planner", "role": "planner"})
+    updated = await _call(
+        server,
+        "update_agent",
+        {"name": "planner", "provider_id": "mock"},
+    )
+    async with agent._sessionmaker() as session:  # type: ignore[attr-defined]
+        mock = await ProviderRepo(session).get_entry("mock")
+    assert mock is not None
+    entry = updated["result"]["agent"]
+    assert entry["provider_id"] == mock.id
 
 
 @pytest.mark.asyncio

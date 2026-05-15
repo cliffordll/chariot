@@ -4,7 +4,7 @@ Update 语义需要区分两种 None:
 - 字段没传(skip)→ `UNSET` 哨兵
 - 字段传 null(用户清空 binding)→ `None`,落库 set NULL
 
-只有三个 binding 字段(prompt_bundle / tool_profile / provider_profile)
+只有三个 binding 字段(prompt_bundle / tool_profile / provider_id)
 clearable;role/budget/meta 没有"清空到 NULL"语义,仍用 `None=skip`。
 B4 wave 3 加 reflection 字段(`reflection_enabled` / `reflection_max_retries`),
 仍走 `None=skip` 语义(bool / int 默认值有意义,不需要 clear)。
@@ -34,7 +34,7 @@ class AgentProfileStore(Protocol):
         role: str,
         prompt_bundle: str | None = None,
         tool_profile: str | None = None,
-        provider_profile: str | None = None,
+        provider_id: str | None = None,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
         reflection_enabled: bool = False,
@@ -48,7 +48,7 @@ class AgentProfileStore(Protocol):
         role: str | None = None,
         prompt_bundle: ClearableStr = UNSET,
         tool_profile: ClearableStr = UNSET,
-        provider_profile: ClearableStr = UNSET,
+        provider_id: ClearableStr = UNSET,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
         reflection_enabled: bool | None = None,
@@ -75,7 +75,7 @@ class AgentService:
         role: str,
         prompt_bundle: str | None = None,
         tool_profile: str | None = None,
-        provider_profile: str | None = None,
+        provider_id: str | None = None,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
         reflection_enabled: bool = False,
@@ -86,7 +86,7 @@ class AgentService:
             role=role,
             prompt_bundle=prompt_bundle,
             tool_profile=tool_profile,
-            provider_profile=provider_profile,
+            provider_id=provider_id,
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,
@@ -100,7 +100,7 @@ class AgentService:
         role: str | None = None,
         prompt_bundle: ClearableStr = UNSET,
         tool_profile: ClearableStr = UNSET,
-        provider_profile: ClearableStr = UNSET,
+        provider_id: ClearableStr = UNSET,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
         reflection_enabled: bool | None = None,
@@ -113,7 +113,7 @@ class AgentService:
             role is None
             and isinstance(prompt_bundle, _UnsetType)
             and isinstance(tool_profile, _UnsetType)
-            and isinstance(provider_profile, _UnsetType)
+            and isinstance(provider_id, _UnsetType)
             and budget is None
             and meta is None
             and reflection_enabled is None
@@ -125,7 +125,7 @@ class AgentService:
             role=role,
             prompt_bundle=prompt_bundle,
             tool_profile=tool_profile,
-            provider_profile=provider_profile,
+            provider_id=provider_id,
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,

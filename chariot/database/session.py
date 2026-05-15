@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 25
+CURRENT_SCHEMA_VERSION = 2
 
 
 def _db_url(db_path: Path) -> str:
@@ -71,8 +71,22 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         row = result.fetchone()
     current = int(row[0]) if row else 0
 
+    # 0.8.9 provider identity 清理后把 002..028 历史链压成单个 squashed migration。
+    # 现网只需要兼容:
+    # - v0/v1:空库或 0.1.0 `logs` 单表库,按 001 + 002 升到当前
+    # - v28/v29:旧开发库已在最终 schema,只需把 user_version 收敛回 2
+    # 中间版本链(2..27)在 squash 后不再保留自动升级承诺。
+    if current in {28, 29}:
+        async with engine.begin() as conn:
+            await conn.execute(text(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}"))
+        return
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
+    if current not in {0, 1, CURRENT_SCHEMA_VERSION}:
+        raise RuntimeError(
+            f"DB schema version {current} 不在 squash 后支持的自动升级集合内; "
+            "当前仅支持 v0/v1 新装或历史 0.1.0 库、以及已到 v28/v29 的现有库"
+        )
     if current == CURRENT_SCHEMA_VERSION:
         return
 

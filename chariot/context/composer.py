@@ -27,6 +27,7 @@ class ContextComposer:
         cls,
         req: ChatRequest,
         *,
+        provider_id: str | None = None,
         provider_name: str,
         model: str | None,
         history: list[dict[str, Any]],
@@ -64,12 +65,13 @@ class ContextComposer:
         )
         return ContextSnapshot(
             conversation_id=req.conversation_id,
-            provider_name=provider_name,
+            provider_name_snapshot=provider_name,
             model=model,
             request=request,
             slices=slices,
             source_refs=source_refs,
             context_size=context_size,
+            provider_id=provider_id,
         )
 
     @staticmethod
@@ -86,6 +88,7 @@ class ContextComposer:
         tool_names = [tool.name for tool in req.tools] if req.tools is not None else None
         provider_state = {
             "provider_name": provider_name,
+            "provider_name_snapshot": provider_name,
             "model": model,
             "capabilities": provider_capabilities or {},
         }
@@ -107,6 +110,7 @@ class ContextComposer:
                 content={
                     "conversation_id": req.conversation_id,
                     "provider_name": provider_name,
+                    "provider_name_snapshot": provider_name,
                     "model": model,
                     "agent_id": req.agent_id,
                     "message_count": len(req.messages),

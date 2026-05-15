@@ -227,7 +227,8 @@ class TestProviderMethods:
         line = await _call(server, "list_providers")
         providers = line["result"]["providers"]
         assert len(providers) == 1
-        assert providers[0]["name"] == "mock"
+        assert providers[0]["name"] == "Mock"
+        assert providers[0]["slug"] == "mock"
         assert providers[0]["type"] == "mock"
         # seed_if_empty ______________________?mock ___________________?provider
         assert providers[0]["default"] is True
@@ -245,16 +246,32 @@ class TestProviderMethods:
         )
         result = line["result"]["provider"]
         assert result["name"] == "mock2"
+        assert result["slug"] == "mock-mock2"
         assert result["type"] == "mock"
 
-    async def test_add_provider_duplicate_returns_err_duplicate(self, server: JsonRpcServer) -> None:
-        """seed _____________?'mock',___________________?_?ERR_DUPLICATE_?"""
+    async def test_add_provider_duplicate_name_gets_incremented_default_slug(self, server: JsonRpcServer) -> None:
+        first = await _call(
+            server,
+            "add_provider",
+            {"name": "Qwen", "type": "mock", "options": {}},
+        )
+        second = await _call(
+            server,
+            "add_provider",
+            {"name": "Qwen", "type": "mock", "options": {}},
+        )
+        assert first["result"]["provider"]["slug"] == "mock-qwen"
+        assert second["result"]["provider"]["slug"] == "mock-qwen-2"
+
+    async def test_add_provider_duplicate_name_still_succeeds_with_new_slug(self, server: JsonRpcServer) -> None:
+        """name 可重复;默认 slug 自动避让。"""
         line = await _call(
             server,
             "add_provider",
             {"name": "mock", "type": "mock", "options": {}},
         )
-        assert line["error"]["code"] == JsonRpcServer.ERR_DUPLICATE
+        assert line["result"]["provider"]["name"] == "mock"
+        assert line["result"]["provider"]["slug"] == "mock-mock"
 
     async def test_update_provider(self, server: JsonRpcServer) -> None:
         await _call(

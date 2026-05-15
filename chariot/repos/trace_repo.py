@@ -62,6 +62,7 @@ class TraceRepo:
     async def create_turn(
         self,
         *,
+        provider_id: str | None = None,
         provider_name: str,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
@@ -77,7 +78,8 @@ class TraceRepo:
             agent_profile=agent_profile,
             task_id=task_id,
             task_run_id=task_run_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_name_snapshot=provider_name,
             model=model,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
@@ -204,6 +206,7 @@ class TraceRepo:
         self,
         turn_id: str,
         *,
+        provider_id: str | None = None,
         provider_name: str,
         model: str | None = None,
         log_id: str | None = None,
@@ -216,7 +219,8 @@ class TraceRepo:
     ) -> TraceProviderCall:
         row = TraceProviderCallRow(
             turn_id=turn_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_name_snapshot=provider_name,
             model=model,
             log_id=log_id,
             request_summary=self._serialize_json("request_summary", request_summary or {}),
@@ -303,7 +307,7 @@ class TraceRepo:
         if task_id is not None:
             stmt = stmt.where(TraceTurnRow.task_id == task_id)
         if provider_name is not None:
-            stmt = stmt.where(TraceTurnRow.provider_name == provider_name)
+            stmt = stmt.where(TraceTurnRow.provider_name_snapshot == provider_name)
         if status is not None:
             stmt = stmt.where(TraceTurnRow.status == status.value)
         stmt = stmt.limit(limit).offset(offset)
@@ -396,7 +400,8 @@ class TraceRepo:
             agent_profile=row.agent_profile,
             task_id=row.task_id,
             task_run_id=row.task_run_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_name_snapshot=row.provider_name_snapshot,
             model=row.model,
             prompt_trace_id=row.prompt_trace_id,
             context_trace_id=row.context_trace_id,
@@ -422,7 +427,8 @@ class TraceRepo:
         return TraceProviderCall(
             id=row.id,
             turn_id=row.turn_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_name_snapshot=row.provider_name_snapshot,
             model=row.model,
             log_id=row.log_id,
             request_summary=cls._deserialize_dict("request_summary", row.request_summary),

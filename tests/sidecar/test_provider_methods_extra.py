@@ -74,7 +74,8 @@ def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
 async def test_show_provider_includes_capabilities(server: JsonRpcServer) -> None:
     line = await _call(server, "show_provider", {"name": "mock"})
     provider = line["result"]["provider"]
-    assert provider["name"] == "mock"
+    assert provider["name"] == "Mock"
+    assert provider["slug"] == "mock"
     assert provider["capabilities"]["supports_system"] is False
 
 
@@ -82,9 +83,10 @@ async def test_show_provider_includes_capabilities(server: JsonRpcServer) -> Non
 async def test_get_provider_status_returns_summary(server: JsonRpcServer) -> None:
     line = await _call(server, "get_provider_status")
     status = line["result"]
-    assert status["default_provider"] == "mock"
+    assert status["default_provider"] == "Mock (mock)"
     assert status["provider_count"] == 1
-    assert status["providers"][0]["name"] == "mock"
+    assert status["providers"][0]["name"] == "Mock"
+    assert status["providers"][0]["slug"] == "mock"
 
 
 @pytest.mark.asyncio
@@ -102,7 +104,7 @@ async def test_use_provider_switches_default(server: JsonRpcServer) -> None:
     assert provider["default"] is True
 
     status = await _call(server, "get_provider_status")
-    assert status["result"]["default_provider"] == "mock2"
+    assert status["result"]["default_provider"] == "mock2 (mock-mock2)"
     assert any(p["name"] == "mock2" and p["default"] is True for p in status["result"]["providers"])
 
 
@@ -112,6 +114,6 @@ async def test_probe_provider_updates_health(server: JsonRpcServer) -> None:
     assert line["result"]["ok"] is True
 
     status = await _call(server, "get_provider_status")
-    provider = next(p for p in status["result"]["providers"] if p["name"] == "mock")
+    provider = next(p for p in status["result"]["providers"] if p["slug"] == "mock")
     assert provider["health"]["last_ok"] is True
     assert provider["health"]["latency_ms"] is not None

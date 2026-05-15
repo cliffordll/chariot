@@ -130,7 +130,7 @@ async def serve_stdio() -> None:
         agent = await AgentRegistry.reserve(_SESSION_KEY, db_path=DEFAULT_DB_PATH)
         log.info(
             "AIAgent loaded (providers=%s, tools=%s)",
-            list(agent.providers),
+            [entry.slug for entry in agent.provider_entries],
             list(agent.tools),
         )
 

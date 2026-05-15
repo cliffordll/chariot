@@ -98,7 +98,7 @@ class _StubVerdictProvider(BaseProvider):
 
 async def test_critique_end_to_end_with_stub_pass() -> None:
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="critic_stub"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="critic_stub"),
         provider=_StubVerdictProvider("VERDICT: PASS\n\nlooks good"),
     )
     critic = CriticAgent(aux)
@@ -109,7 +109,7 @@ async def test_critique_end_to_end_with_stub_pass() -> None:
 
 async def test_critique_end_to_end_with_stub_fail() -> None:
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="critic_stub"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="critic_stub"),
         provider=_StubVerdictProvider("VERDICT: FAIL\n\nmissing impl"),
     )
     critic = CriticAgent(aux)
@@ -133,7 +133,7 @@ async def test_critique_provider_error_returns_unsure() -> None:
             yield ChatEvent.error_event(error_type="upstream_stream_error", error_message="boom")
 
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="err"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="err"),
         provider=_ErrProvider(),
     )
     critic = CriticAgent(aux)
@@ -146,7 +146,7 @@ async def test_critique_with_mock_provider_falls_back_to_unsure() -> None:
     """MockProvider echo 输入文本,不含 VERDICT 行 → parser 兜底 UNSURE。
     顺便验证 critic + mock 这条 sanity 链路。"""
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="mock"),
         provider=MockProvider.create({}),
     )
     critic = CriticAgent(aux)
@@ -160,8 +160,8 @@ async def test_critique_with_mock_provider_falls_back_to_unsure() -> None:
 
 def test_from_auxiliary_clients_finds_critic() -> None:
     entries = [
-        AuxiliaryClientEntry(name="summarizer", provider_entry="mock"),
-        AuxiliaryClientEntry(name="critic", provider_entry="mock", model="mock-1"),
+        AuxiliaryClientEntry.from_provider_id(name="summarizer", provider_id="mock"),
+        AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="mock", model="mock-1"),
     ]
     providers = {"mock": MockProvider.create({})}
     critic = CriticAgent.from_auxiliary_clients(entries, providers)
@@ -170,14 +170,14 @@ def test_from_auxiliary_clients_finds_critic() -> None:
 
 
 def test_from_auxiliary_clients_returns_none_without_critic_row() -> None:
-    entries = [AuxiliaryClientEntry(name="summarizer", provider_entry="mock")]
+    entries = [AuxiliaryClientEntry.from_provider_id(name="summarizer", provider_id="mock")]
     providers = {"mock": MockProvider.create({})}
     critic = CriticAgent.from_auxiliary_clients(entries, providers)
     assert critic is None
 
 
 def test_from_auxiliary_clients_returns_none_when_provider_dangling() -> None:
-    entries = [AuxiliaryClientEntry(name="critic", provider_entry="ghost")]
+    entries = [AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="ghost")]
     providers = {"mock": MockProvider.create({})}
     critic = CriticAgent.from_auxiliary_clients(entries, providers)
     assert critic is None

@@ -155,7 +155,7 @@ class TrajectoryExporter:
         # 3. provider_call(取第一条;rare 多条时仅记 latest)
         pc = provider_calls[-1] if provider_calls else None
         provider_call_dict: dict[str, Any] = {
-            "provider": pc.provider_name if pc else turn.provider_name,
+            "provider": pc.provider_name_snapshot if pc else turn.provider_name_snapshot,
             "model": pc.model if pc else turn.model,
             "latency_ms": pc.latency_ms if pc else None,
             "usage": {

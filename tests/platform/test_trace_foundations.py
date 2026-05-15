@@ -30,7 +30,7 @@ class TestTraceRepoTurnLifecycle:
         repo = TraceRepo(session)
         turn = await repo.create_turn(provider_name="mock", conversation_id="conv-1")
         assert turn.status == TurnStatus.RUNNING
-        assert turn.provider_name == "mock"
+        assert turn.provider_name_snapshot == "mock"
         assert turn.conversation_id == "conv-1"
 
         loaded = await repo.get_turn(turn.id)

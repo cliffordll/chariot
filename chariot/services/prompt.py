@@ -106,6 +106,7 @@ class PromptService:
         self,
         req: ChatRequest,
         *,
+        provider_id: str | None = None,
         provider_name: str,
         model: str | None,
         bundle_name: str | None = None,
@@ -115,6 +116,7 @@ class PromptService:
     ) -> PromptTraceEntry:
         return await self._repo.record_trace(
             req,
+            provider_id=provider_id,
             provider_name=provider_name,
             model=model,
             bundle_name=bundle_name,

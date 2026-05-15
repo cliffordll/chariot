@@ -63,7 +63,7 @@ async def agent_with_critic(tmp_path: Path):
     """先插入 critic auxiliary entry,再 bootstrap,装载 critic。"""
     # 第一次 bootstrap 跑 migrations + seed
     a = await AIAgent.bootstrap(tmp_path / "test.db")
-    await AuxiliaryService(a).create(name="critic", provider_entry="mock")
+    await AuxiliaryService(a).create(name="critic", provider_id="mock")
     # 第二次 bootstrap 把 critic 装上(同一 sm 复用,但 dispose 后重建 agent)
     AgentRegistry._agents.clear()
     await dispose_db()
@@ -107,8 +107,9 @@ async def test_get_critic_config_loaded_false_when_no_critic_row(server_no_criti
 async def test_get_critic_config_loaded_true_when_critic_row_present(server_with_critic: JsonRpcServer) -> None:
     resp = await _call(server_with_critic, "get_critic_config", {})
     assert resp["result"]["loaded"] is True
-    assert resp["result"]["auxiliary_client"]["name"] == "critic"
-    assert resp["result"]["auxiliary_client"]["provider_entry"] == "mock"
+    aux = resp["result"]["auxiliary_client"]
+    assert aux["name"] == "critic"
+    assert aux["provider_id"]
 
 
 # ---- critique_text ----

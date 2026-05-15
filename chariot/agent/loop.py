@@ -59,9 +59,7 @@ class AgentLoop:
         self._max_iter = max_iter
         self._turn = turn
         self._agent_profile = agent_profile
-        self._provider_name = (
-            provider_name  # entry name,用于持久化 last_provider  # Phase B1:trace 写入 handle;None = 不记录
-        )
+        self._provider_name = provider_name  # provider 展示名快照,用于持久化 last_provider;None = 不记录
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -77,7 +75,7 @@ class AgentLoop:
             # Phase B1:provider call trace 配对(turn=None 时退化为 no-op)
             pc_handle = (
                 self._turn.begin_provider_call(
-                    provider_name=self._provider.config.name,
+                    provider_name=self._provider_name or self._provider.config.name,
                     model=self._provider.config.model,
                 )
                 if self._turn is not None

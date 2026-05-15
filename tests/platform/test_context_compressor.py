@@ -14,7 +14,7 @@ class _StubAuxOk(AuxiliaryClient):
     """跳过 BaseProvider,直接返固定摘要 — 不调用 super().__init__。"""
 
     def __init__(self, *, summary: str = "STUB_SUMMARY") -> None:
-        self._entry = AuxiliaryClientEntry(name="stub", provider_entry="mock")
+        self._entry = AuxiliaryClientEntry.from_provider_id(name="stub", provider_id="mock")
         self._summary = summary
 
     async def summarize(self, text: str) -> str:
@@ -27,7 +27,7 @@ class _StubAuxOk(AuxiliaryClient):
 
 class _StubAuxFail(AuxiliaryClient):
     def __init__(self) -> None:
-        self._entry = AuxiliaryClientEntry(name="stub_fail", provider_entry="mock")
+        self._entry = AuxiliaryClientEntry.from_provider_id(name="stub_fail", provider_id="mock")
 
     async def summarize(self, text: str) -> str:
         raise AuxiliarySummarizeFailed("stub fail")

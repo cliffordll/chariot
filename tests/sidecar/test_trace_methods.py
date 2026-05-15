@@ -98,15 +98,21 @@ class TestTraceMethods:
         listed = await _call(server, "list_traces")
         assert len(listed["result"]["turns"]) == 1
         assert listed["result"]["turns"][0]["status"] == "completed"
+        assert listed["result"]["turns"][0]["provider_name_snapshot"] == "mock"
+        assert "provider_name" not in listed["result"]["turns"][0]
 
         shown = await _call(server, "get_trace_turn", {"turn_id": turn.id})
         assert shown["result"]["turn"]["id"] == turn.id
         assert shown["result"]["turn"]["input_tokens"] == 20
+        assert shown["result"]["turn"]["provider_name_snapshot"] == "mock"
+        assert "provider_name" not in shown["result"]["turn"]
 
         viewed = await _call(server, "view_trace_tree", {"turn_id": turn.id})
         assert len(viewed["result"]["provider_calls"]) == 1
         assert len(viewed["result"]["tool_calls"]) == 1
         assert viewed["result"]["tool_calls"][0]["tool_name"] == "read_file"
+        assert viewed["result"]["provider_calls"][0]["provider_name_snapshot"] == "mock"
+        assert "provider_name" not in viewed["result"]["provider_calls"][0]
 
     async def test_show_not_found(self, server: JsonRpcServer) -> None:
         line = await _call(server, "get_trace_turn", {"turn_id": "ghost"})

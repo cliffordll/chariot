@@ -34,7 +34,9 @@ class TraceService:
     async def create_turn(
         self,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_name: str | None = None,
+        provider_name_snapshot: str | None = None,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
         task_id: str | None = None,
@@ -44,8 +46,12 @@ class TraceService:
         context_trace_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> TraceTurn:
+        resolved_provider_name = provider_name_snapshot or provider_name
+        if resolved_provider_name is None:
+            raise ValueError("provider_name or provider_name_snapshot is required")
         return await self._repo.create_turn(
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_name=resolved_provider_name,
             conversation_id=conversation_id,
             agent_profile=agent_profile,
             task_id=task_id,
@@ -98,7 +104,9 @@ class TraceService:
         self,
         turn_id: str,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_name: str | None = None,
+        provider_name_snapshot: str | None = None,
         model: str | None = None,
         log_id: str | None = None,
         request_summary: dict[str, Any] | None = None,
@@ -108,9 +116,13 @@ class TraceService:
         latency_ms: int | None = None,
         error_type: str | None = None,
     ) -> TraceProviderCall:
+        resolved_provider_name = provider_name_snapshot or provider_name
+        if resolved_provider_name is None:
+            raise ValueError("provider_name or provider_name_snapshot is required")
         return await self._repo.record_provider_call(
             turn_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_name=resolved_provider_name,
             model=model,
             log_id=log_id,
             request_summary=request_summary,
@@ -177,6 +189,7 @@ class TraceService:
         conversation_id: str | None = None,
         task_id: str | None = None,
         provider_name: str | None = None,
+        provider_name_snapshot: str | None = None,
         status: TurnStatus | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -184,7 +197,7 @@ class TraceService:
         return await self._repo.list_turns(
             conversation_id=conversation_id,
             task_id=task_id,
-            provider_name=provider_name,
+            provider_name=provider_name_snapshot or provider_name,
             status=status,
             limit=limit,
             offset=offset,

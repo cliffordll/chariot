@@ -191,7 +191,7 @@ async def test_reflection_max_retries_zero_disables(tmp_path: Path) -> None:
 # stub helper: AuxiliaryClient 直接构造(无需真 provider)用在导入校验上
 def _build_aux_for_imports() -> AuxiliaryClient:
     return AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="mock"),
         provider=MockProvider.create({}),
     )
 

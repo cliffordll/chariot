@@ -1,4 +1,4 @@
-"""phase 4 binding tests:agent_profile -> provider_profile / prompt_bundle / tool_profile。"""
+"""phase 4 binding tests:agent_profile -> provider_id / prompt_bundle / tool_profile。"""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ class TestAgentProfileBinding:
         assert provider.last_req is not None
         assert provider.last_req.provider_name == "mock"
 
-    async def test_provider_profile_overrides_provider_name(self, sessionmaker) -> None:
+    async def test_provider_id_overrides_provider_name(self, sessionmaker) -> None:
         primary = _CapturingProvider("primary")
         secondary = _CapturingProvider("secondary")
         agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})
@@ -111,7 +111,7 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="researcher",
                 role="research",
-                provider_profile="secondary",
+                provider_id="secondary",
             )
         events = [e async for e in agent.run_chat(_stateless("primary", agent_profile="researcher"))]
         assert any(e.kind == "stream_done" for e in events)

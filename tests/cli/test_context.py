@@ -25,6 +25,9 @@ from chariot.repos.log_repo import LogRepo
 class _DummyAgent:
     """ChatContext._build_request ???? agent;????? dataclass ???"""
 
+    async def resolve_chat_provider_display(self, req):  # type: ignore[no-untyped-def]
+        return req.provider_name
+
     async def run_chat(self, req):  # type: ignore[no-untyped-def]
         yield ChatEvent.message_start(
             message_id="m1",
@@ -154,6 +157,7 @@ async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
     ctx.append_user("hi")
 
     result = await ctx.run_turn(lambda ev: None)
+    assert result.provider_name_snapshot == "claude-haiku-4-5"
     assert result.input_tokens == 3
     assert result.output_tokens == 7
 
@@ -166,3 +170,20 @@ async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
     assert logs[0].status == "ok"
     assert logs[0].input_tokens == 3
     assert logs[0].output_tokens == 7
+
+
+@pytest.mark.asyncio
+async def test_run_turn_uses_effective_provider_display_from_agent() -> None:
+    class _OverrideAgent(_DummyAgent):
+        async def resolve_chat_provider_display(self, req):  # type: ignore[no-untyped-def]
+            return "ollama-qwen"
+
+    ctx = ChatContext(
+        agent=_OverrideAgent(),  # type: ignore[arg-type]
+        provider_name="mock",
+    )
+    ctx.append_user("hi")
+
+    result = await ctx.run_turn(lambda ev: None)
+
+    assert result.provider_name_snapshot == "ollama-qwen"

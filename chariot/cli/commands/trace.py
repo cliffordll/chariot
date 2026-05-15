@@ -54,7 +54,7 @@ def _parse_status(value: str) -> TurnStatus | None:
 def trace_list_cmd(
     conversation: Annotated[str, typer.Option("--conversation", help="filter by conversation_id")] = "",
     task: Annotated[str, typer.Option("--task", help="filter by task_id")] = "",
-    provider: Annotated[str, typer.Option("--provider", help="filter by provider_name")] = "",
+    provider: Annotated[str, typer.Option("--provider", help="filter by provider_name_snapshot")] = "",
     status: Annotated[str, typer.Option("--status", help="running / completed / failed / cancelled")] = "",
     limit: Annotated[int, typer.Option("--limit", help="max rows")] = 50,
     offset: Annotated[int, typer.Option("--offset", help="page offset")] = 0,
@@ -116,7 +116,7 @@ async def _trace_list(
     rows = [
         (
             t.id,
-            t.provider_name,
+            t.provider_name_snapshot,
             t.status.value,
             t.conversation_id or "-",
             t.task_id or "-",
@@ -142,7 +142,7 @@ async def _trace_show(turn_id: str) -> None:
         {
             "id": turn.id,
             "status": turn.status.value,
-            "provider": turn.provider_name,
+            "provider": turn.provider_name_snapshot,
             "model": turn.model or "-",
             "conversation_id": turn.conversation_id or "-",
             "agent_profile": turn.agent_profile or "-",
@@ -179,7 +179,9 @@ async def _trace_view(turn_id: str) -> None:
         return
 
     turn = tree.turn
-    Renderer.out(f"▼ {turn.id}  [{turn.status.value}]  {turn.provider_name}{('/' + turn.model) if turn.model else ''}")
+    Renderer.out(
+        f"▼ {turn.id}  [{turn.status.value}]  {turn.provider_name_snapshot}{('/' + turn.model) if turn.model else ''}"
+    )
     Renderer.out(
         f"  duration={_fmt_dur(turn.duration_ms)}  in/out={turn.input_tokens}/{turn.output_tokens}  "
         f"cost=${turn.cost_usd if turn.cost_usd is not None else '-'}"
@@ -193,7 +195,7 @@ async def _trace_view(turn_id: str) -> None:
         for pc in tree.provider_calls:
             err = f"  error={pc.error_type}" if pc.error_type else ""
             pc_model = f"/{pc.model}" if pc.model else ""
-            Renderer.out(f"  - {pc.id}  {pc.provider_name}{pc_model}  latency={_fmt_dur(pc.latency_ms)}{err}")
+            Renderer.out(f"  - {pc.id}  {pc.provider_name_snapshot}{pc_model}  latency={_fmt_dur(pc.latency_ms)}{err}")
             if pc.response_summary:
                 Renderer.out(f"    response: {json.dumps(pc.response_summary, ensure_ascii=False)}")
 

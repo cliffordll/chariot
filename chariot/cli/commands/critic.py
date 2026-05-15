@@ -40,7 +40,7 @@ async def _show() -> None:
         return
     entry = critic.aux.entry
     Renderer.out(f"name:           {entry.name}")
-    Renderer.out(f"provider_entry: {entry.provider_entry}")
+    Renderer.out(f"provider_id:    {entry.provider_id}")
     Renderer.out(f"model:          {entry.model or '(继承 provider)'}")
     Renderer.out(f"params:         {json.dumps(entry.params, ensure_ascii=False)}")
 

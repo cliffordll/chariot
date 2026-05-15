@@ -151,7 +151,13 @@ class _MissingApiKeyProvider(BaseProvider):
 
 
 def _entry(type_name: str) -> ProviderEntry:
-    return ProviderEntry(name=f"{type_name}-entry", type=type_name, options={})
+    return ProviderEntry(
+        id=f"{type_name}-id",
+        slug=f"{type_name}-entry",
+        name=f"{type_name}-entry",
+        type=type_name,
+        options={},
+    )
 
 
 @pytest.fixture

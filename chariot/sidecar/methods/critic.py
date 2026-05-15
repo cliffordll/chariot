@@ -55,7 +55,7 @@ class CriticMethods(MethodBase):
             "loaded": True,
             "auxiliary_client": {
                 "name": entry.name,
-                "provider_entry": entry.provider_entry,
+                "provider_id": entry.provider_id,
                 "model": entry.model,
                 "params": entry.params,
             },

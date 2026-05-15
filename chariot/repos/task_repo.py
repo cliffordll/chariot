@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
-from chariot.database.models import AgentProfileRow, JobRunRow, ScheduledJobRow, TaskRow, TaskRunRow
+from chariot.database.models import AgentProfileRow, JobRunRow, ProviderRow, ScheduledJobRow, TaskRow, TaskRunRow
 from chariot.models.agent import UNSET, AgentProfile, ClearableStr, _UnsetType
 from chariot.models.job import JobRunRecord, ScheduledJob
 from chariot.models.task import Task, TaskCreate, TaskRun, TaskRunCreate
@@ -44,7 +44,7 @@ class TaskRepo:
         role: str,
         prompt_bundle: str | None = None,
         tool_profile: str | None = None,
-        provider_profile: str | None = None,
+        provider_id: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         reflection_enabled: bool = False,
@@ -60,7 +60,7 @@ class TaskRepo:
             role=role,
             prompt_bundle=prompt_bundle,
             tool_profile=tool_profile,
-            provider_profile=provider_profile,
+            provider_id=await self._resolve_provider_ref(provider_id),
             budget=self._serialize_object("budget", budget or {}),
             meta=self._serialize_object("meta", meta or {}),
             reflection_enabled=1 if reflection_enabled else 0,
@@ -91,7 +91,7 @@ class TaskRepo:
         role: str | None = None,
         prompt_bundle: ClearableStr = UNSET,
         tool_profile: ClearableStr = UNSET,
-        provider_profile: ClearableStr = UNSET,
+        provider_id: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         reflection_enabled: bool | None = None,
@@ -106,8 +106,8 @@ class TaskRepo:
             row.prompt_bundle = prompt_bundle
         if not isinstance(tool_profile, _UnsetType):
             row.tool_profile = tool_profile
-        if not isinstance(provider_profile, _UnsetType):
-            row.provider_profile = provider_profile
+        if not isinstance(provider_id, _UnsetType):
+            row.provider_id = await self._resolve_provider_ref(provider_id)
         if budget is not None:
             row.budget = self._serialize_object("budget", budget)
         if meta is not None:
@@ -333,6 +333,22 @@ class TaskRepo:
         row.last_run_status = status
         row.last_run_at = datetime.now(UTC)
 
+    async def _resolve_provider_ref(self, ref: str | None) -> str | None:
+        if ref is None:
+            return None
+        stmt = select(ProviderRow).where(
+            (ProviderRow.id == ref) | (ProviderRow.slug == ref) | (ProviderRow.name == ref)
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return ref
+        if len(rows) > 1:
+            exact = [row for row in rows if row.id == ref or row.slug == ref]
+            if len(exact) == 1:
+                return exact[0].id
+            raise ConfigError(f"provider 引用 {ref!r} 不唯一,请改用 slug 或 id")
+        return rows[0].id
+
     @staticmethod
     def _require_non_empty(value: str, label: str) -> None:
         if not value:
@@ -374,12 +390,12 @@ class TaskRepo:
 
     @classmethod
     def _row_to_agent_profile(cls, row: AgentProfileRow) -> AgentProfile:
-        return AgentProfile(
+        return AgentProfile.from_provider_id(
             name=row.name,
             role=row.role,
             prompt_bundle=row.prompt_bundle,
             tool_profile=row.tool_profile,
-            provider_profile=row.provider_profile,
+            provider_id=row.provider_id,
             budget=cls._deserialize_object("budget", row.budget),
             meta=cls._deserialize_object("meta", row.meta),
             reflection_enabled=bool(row.reflection_enabled),

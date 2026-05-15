@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chariot.models.agent import ClearableStr
 from chariot.rpc.jsonrpc import RpcContext
 from chariot.sidecar.methods import MethodBase
 from chariot.sidecar.runtime import SidecarRuntime
@@ -34,7 +35,7 @@ class AgentMethods(MethodBase):
         role = self._require_str(params, "role")
         prompt_bundle = self._optional_str(params, "prompt_bundle")
         tool_profile = self._optional_str(params, "tool_profile")
-        provider_profile = self._optional_str(params, "provider_profile")
+        provider_id = self._provider_binding(params)
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
         reflection_enabled = bool(params.get("reflection_enabled", False))
@@ -45,7 +46,7 @@ class AgentMethods(MethodBase):
                 role=role,
                 prompt_bundle=prompt_bundle,
                 tool_profile=tool_profile,
-                provider_profile=provider_profile,
+                provider_id=provider_id,
                 budget=budget,
                 meta=meta,
                 reflection_enabled=reflection_enabled,
@@ -60,7 +61,7 @@ class AgentMethods(MethodBase):
         # 三个 binding 字段走 clearable 语义:key 缺席 → UNSET(skip);null → 清空;str → set
         prompt_bundle = self._clearable_str(params, "prompt_bundle")
         tool_profile = self._clearable_str(params, "tool_profile")
-        provider_profile = self._clearable_str(params, "provider_profile")
+        provider_id = self._clearable_provider_binding(params)
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
         reflection_enabled = bool(params["reflection_enabled"]) if "reflection_enabled" in params else None
@@ -71,7 +72,7 @@ class AgentMethods(MethodBase):
                 role=role,
                 prompt_bundle=prompt_bundle,
                 tool_profile=tool_profile,
-                provider_profile=provider_profile,
+                provider_id=provider_id,
                 budget=budget,
                 meta=meta,
                 reflection_enabled=reflection_enabled,
@@ -91,6 +92,12 @@ class AgentMethods(MethodBase):
         if not isinstance(val, int) or isinstance(val, bool):
             raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, f"{key!r} must be an integer")
         return val
+
+    def _provider_binding(self, params: dict[str, Any]) -> str | None:
+        return self._optional_str(params, "provider_id")
+
+    def _clearable_provider_binding(self, params: dict[str, Any]) -> ClearableStr:
+        return self._clearable_str(params, "provider_id")
 
     async def delete_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx

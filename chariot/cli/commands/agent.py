@@ -57,7 +57,14 @@ def agent_add_cmd(
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
     tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
-    provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
+    provider_id: Annotated[
+        str,
+        typer.Option(
+            "--provider-id",
+            "--provider-profile",
+            help="provider 绑定(推荐 --provider-id; --provider-profile 保留兼容)",
+        ),
+    ] = "",
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
     reflection_enabled: Annotated[
@@ -78,7 +85,7 @@ def agent_add_cmd(
             role=role,
             prompt_bundle=prompt_bundle or None,
             tool_profile=tool_profile or None,
-            provider_profile=provider_profile or None,
+            provider_id=provider_id or None,
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,
@@ -99,9 +106,13 @@ def agent_update_cmd(
         str | None,
         typer.Option("--tool-profile", help="tool profile name(传空串清空)"),
     ] = None,
-    provider_profile: Annotated[
+    provider_id: Annotated[
         str | None,
-        typer.Option("--provider-profile", help="provider profile name(传空串清空)"),
+        typer.Option(
+            "--provider-id",
+            "--provider-profile",
+            help="provider 绑定(推荐 --provider-id;传空串清空; --provider-profile 保留兼容)",
+        ),
     ] = None,
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
@@ -134,7 +145,7 @@ def agent_update_cmd(
             role=role or None,
             prompt_bundle=_to_clearable(prompt_bundle),
             tool_profile=_to_clearable(tool_profile),
-            provider_profile=_to_clearable(provider_profile),
+            provider_id=_to_clearable(provider_id),
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,
@@ -176,11 +187,11 @@ async def _agent_list() -> None:
             entry.role,
             entry.prompt_bundle or "-",
             entry.tool_profile or "-",
-            entry.provider_profile or "-",
+            entry.provider_id or "-",
         )
         for entry in entries
     ]
-    Renderer.table(["name", "role", "prompt_bundle", "tool_profile", "provider_profile"], rows, title="agents")
+    Renderer.table(["name", "role", "prompt_bundle", "tool_profile", "provider_id"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -195,7 +206,7 @@ async def _agent_show(name: str) -> None:
             "role": entry.role,
             "prompt_bundle": entry.prompt_bundle or "-",
             "tool_profile": entry.tool_profile or "-",
-            "provider_profile": entry.provider_profile or "-",
+            "provider_id": entry.provider_id or "-",
             "reflection_enabled": str(entry.reflection_enabled).lower(),
             "reflection_max_retries": str(entry.reflection_max_retries),
             "created_at": _fmt_dt(entry.created_at),
@@ -216,7 +227,7 @@ async def _agent_add(
     role: str,
     prompt_bundle: str | None,
     tool_profile: str | None,
-    provider_profile: str | None,
+    provider_id: str | None,
     budget: str,
     meta: str,
     reflection_enabled: bool = False,
@@ -233,7 +244,7 @@ async def _agent_add(
             role=role.strip(),
             prompt_bundle=prompt_bundle,
             tool_profile=tool_profile,
-            provider_profile=provider_profile,
+            provider_id=provider_id,
             budget=parsed_budget,
             meta=parsed_meta,
             reflection_enabled=reflection_enabled,
@@ -248,7 +259,7 @@ async def _agent_update(
     role: str | None,
     prompt_bundle: ClearableStr,
     tool_profile: ClearableStr,
-    provider_profile: ClearableStr,
+    provider_id: ClearableStr,
     budget: str,
     meta: str,
     reflection_enabled: bool | None = None,
@@ -264,7 +275,7 @@ async def _agent_update(
                 role=role,
                 prompt_bundle=prompt_bundle,
                 tool_profile=tool_profile,
-                provider_profile=provider_profile,
+                provider_id=provider_id,
                 budget=parsed_budget,
                 meta=parsed_meta,
                 reflection_enabled=reflection_enabled,

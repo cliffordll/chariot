@@ -213,7 +213,7 @@ class ChatRepl:
         Renderer.stream_newline()
         self.ctx.append_assistant(result.text)
         Renderer.meta_line(
-            provider=self.ctx.provider_name,
+            provider=result.provider_name_snapshot,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,
@@ -357,7 +357,7 @@ class ChatRepl:
             (
                 e.name,
                 e.role or "-",
-                e.provider_profile or "-",
+                e.provider_id or "-",
                 e.tool_profile or "-",
                 "← current" if e.name == self.ctx.agent_profile else "",
             )
@@ -413,8 +413,8 @@ class ChatRepl:
                 from chariot.services.agent import AgentService
 
                 agent = await AgentService(self.ctx.agent).get_agent(conv.agent_profile)
-                if agent is not None and agent.provider_profile:
-                    self.ctx.set_provider(agent.provider_profile)
+                if agent is not None and agent.provider_id:
+                    self.ctx.set_provider(agent.provider_id)
         except Exception:
             pass
 

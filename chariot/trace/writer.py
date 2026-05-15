@@ -52,6 +52,7 @@ class ProviderCallHandle:
 
     writer: TraceWriter
     turn_id: str | None
+    provider_id: str | None
     provider_name: str
     model: str | None
     started_at: datetime
@@ -76,6 +77,7 @@ class ProviderCallHandle:
             async with self.writer._session() as session:
                 await TraceRepo(session).record_provider_call(
                     self.turn_id,
+                    provider_id=self.provider_id,
                     provider_name=self.provider_name,
                     model=self.model,
                     log_id=log_id,
@@ -147,6 +149,7 @@ class TurnHandle:
     turn_id: str | None
     started_at: datetime
     _start_perf: float
+    provider_id: str | None = None
     _finalized: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -159,6 +162,7 @@ class TurnHandle:
         return ProviderCallHandle(
             writer=self.writer,
             turn_id=self.turn_id,
+            provider_id=self.provider_id,
             provider_name=provider_name,
             model=model,
             started_at=_utcnow(),
@@ -282,6 +286,7 @@ class TraceWriter:
     async def begin_turn(
         self,
         *,
+        provider_id: str | None = None,
         provider_name: str,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
@@ -305,6 +310,7 @@ class TraceWriter:
         try:
             async with self._session() as session:
                 turn = await TraceRepo(session).create_turn(
+                    provider_id=provider_id,
                     provider_name=provider_name,
                     conversation_id=conversation_id,
                     agent_profile=agent_profile,
@@ -320,6 +326,7 @@ class TraceWriter:
                     turn_id=turn.id,
                     started_at=started_at,
                     _start_perf=start_perf,
+                    provider_id=provider_id,
                     meta=meta or {},
                 )
         except Exception as exc:  # pragma: no cover - best-effort 容错
@@ -329,5 +336,6 @@ class TraceWriter:
                 turn_id=None,
                 started_at=started_at,
                 _start_perf=start_perf,
+                provider_id=provider_id,
                 meta=meta or {},
             )

@@ -69,7 +69,7 @@ def test_agent_add_and_show() -> None:
             "planner",
             "--tool-profile",
             "default",
-            "--provider-profile",
+            "--provider-id",
             "mock",
             "--budget",
             '{"max_steps": 5}',

@@ -46,7 +46,8 @@ class TraceTurn:
     agent_profile: str | None
     task_id: str | None
     task_run_id: str | None
-    provider_name: str
+    provider_id: str | None
+    provider_name_snapshot: str
     model: str | None
     prompt_trace_id: str | None
     context_trace_id: str | None
@@ -73,7 +74,8 @@ class TraceProviderCall:
 
     id: str
     turn_id: str
-    provider_name: str
+    provider_id: str | None
+    provider_name_snapshot: str
     model: str | None
     log_id: str | None
     request_summary: dict[str, Any]

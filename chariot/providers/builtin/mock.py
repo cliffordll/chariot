@@ -52,8 +52,8 @@ class MockProvider(BaseProvider):
     def create(cls, options: dict[str, Any]) -> Self:
         """`options` 不消费(沿用 0.5.0 MockModel 行为)。
 
-        Provider 实例的 `name` / `model` 都用 mock 默认 —— 用户填的 entry name
-        在外层(`AIAgent.bootstrap`)做路由,不需要传进 Provider 自身。
+        Provider 实例的 `name` / `model` 都用 mock 默认 —— 用户传入的 provider
+        ref 在外层(`AIAgent.bootstrap`)完成路由,不需要传进 Provider 自身。
         """
         del options  # 标记参数已知未用,避免 ruff ARG003
         return cls(config=BaseProviderConfig(name="mock", model=cls._MODEL_ID))

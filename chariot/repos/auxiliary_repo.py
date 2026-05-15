@@ -8,7 +8,7 @@
 
 非职责
 ------
-- **不**校验 `provider_entry` 真存在 —— 业务规则归 service / agent 层
+- **不**强制 `provider_id` 对应 provider 真存在 —— 业务规则归 service / agent 层
 - **不**触发 ContextCompressor reload —— 调用方负责
 
 模块级零自由函数;所有逻辑收在 `AuxiliaryRepo` 类。
@@ -28,7 +28,7 @@ from chariot.agent.exceptions import (
     ConfigError,
     DuplicateAuxiliaryClientName,
 )
-from chariot.database.models import AuxiliaryClientRow
+from chariot.database.models import AuxiliaryClientRow, ProviderRow
 from chariot.models.agent import UNSET, ClearableStr, _UnsetType
 from chariot.models.auxiliary import AuxiliaryClientEntry
 
@@ -53,21 +53,17 @@ class AuxiliaryRepo:
         self,
         *,
         name: str,
-        provider_entry: str,
+        provider_id: str,
         model: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> AuxiliaryClientEntry:
         """新增 entry。重名 → DuplicateAuxiliaryClientName;params 不可序列化 → ConfigError。"""
         self._check_name(name)
-        self._check_provider(provider_entry)
+        self._check_provider(provider_id)
+        provider_ref = await self._resolve_provider_ref(provider_id)
         params_json = self._serialize_params(params or {})
 
-        row = AuxiliaryClientRow(
-            name=name,
-            provider_entry=provider_entry,
-            model=model,
-            params=params_json,
-        )
+        row = AuxiliaryClientRow(name=name, provider_id=provider_ref, model=model, params=params_json)
         self.session.add(row)
         try:
             await self.session.commit()
@@ -81,19 +77,20 @@ class AuxiliaryRepo:
         self,
         name: str,
         *,
-        provider_entry: str | None = None,
+        provider_id: str | None = None,
         model: ClearableStr = UNSET,
         params: dict[str, Any] | None = None,
     ) -> AuxiliaryClientEntry:
-        """改字段。`provider_entry`/`params` None 表示不动;`model` 用 UNSET sentinel
+        """改字段。`provider_id`/`params` None 表示不动;`model` 用 UNSET sentinel
         区分 "不传" 与 "显式 clear"(给前端清空字段的能力)。
         """
         row = await self._find_row(name)
         if row is None:
             raise AuxiliaryClientNotFound(f"未知 auxiliary client name: {name!r}")
-        if provider_entry is not None:
-            self._check_provider(provider_entry)
-            row.provider_entry = provider_entry
+        if provider_id is not None:
+            provider_ref = await self._resolve_provider_ref(provider_id)
+            self._check_provider(provider_ref)
+            row.provider_id = provider_ref
         if not isinstance(model, _UnsetType):
             row.model = model  # None = clear
         if params is not None:
@@ -119,9 +116,9 @@ class AuxiliaryRepo:
             raise ConfigError("auxiliary client name 过长(> 128 chars)")
 
     @staticmethod
-    def _check_provider(provider_entry: str) -> None:
-        if not provider_entry:
-            raise ConfigError("auxiliary client provider_entry 必须是非空字符串")
+    def _check_provider(provider_id: str) -> None:
+        if not provider_id:
+            raise ConfigError("auxiliary client provider_id 必须是非空字符串")
 
     @staticmethod
     def _serialize_params(data: dict[str, Any]) -> str:
@@ -142,9 +139,9 @@ class AuxiliaryRepo:
 
     @classmethod
     def _row_to_entry(cls, row: AuxiliaryClientRow) -> AuxiliaryClientEntry:
-        return AuxiliaryClientEntry(
+        return AuxiliaryClientEntry.from_provider_id(
             name=row.name,
-            provider_entry=row.provider_entry,
+            provider_id=row.provider_id,
             model=row.model,
             params=cls._deserialize_params(row.params),
         )
@@ -152,3 +149,17 @@ class AuxiliaryRepo:
     async def _find_row(self, name: str) -> AuxiliaryClientRow | None:
         stmt = select(AuxiliaryClientRow).where(AuxiliaryClientRow.name == name)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def _resolve_provider_ref(self, ref: str) -> str:
+        stmt = select(ProviderRow).where(
+            (ProviderRow.id == ref) | (ProviderRow.slug == ref) | (ProviderRow.name == ref)
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return ref
+        if len(rows) > 1:
+            exact = [row for row in rows if row.id == ref or row.slug == ref]
+            if len(exact) == 1:
+                return exact[0].id
+            raise ConfigError(f"provider 引用 {ref!r} 不唯一,请改用 slug 或 id")
+        return rows[0].id

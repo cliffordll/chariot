@@ -53,7 +53,7 @@ async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], ag
     async with sm() as session:
         aux_entry = await AuxiliaryRepo(session).get_entry("summarizer")
     assert aux_entry is not None
-    provider = agent.providers[aux_entry.provider_entry]
+    provider = agent.providers[aux_entry.provider_id]
     agent._context_compressor = ContextCompressor(
         AuxiliaryClient(entry=aux_entry, provider=provider),
         threshold=0.1,

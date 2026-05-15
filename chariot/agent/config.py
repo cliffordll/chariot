@@ -2,7 +2,7 @@
 
 0.3.0 起源数据来源从 TOML 文件迁到 DB(`providers` 表;v6 之前叫 `models`),
 由 `ProviderRepo` 持久化。
-0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 entry name 路由。
+0.3.1 路由模型重构:active 概念删除,client 在 body.model 写 provider 路由引用。
 0.4.0 加 Tool 层:`ToolEntry` / `ToolConfig`(纯 enabled tools 容器)与
 `ChariotConfig` 同结构。本模块汇总:
 
@@ -122,9 +122,9 @@ class ChariotConfig:
     def is_empty(self) -> bool:
         return not self.providers
 
-    def find_entry(self, name: str) -> ProviderEntry | None:
+    def find_entry(self, ref: str) -> ProviderEntry | None:
         for entry in self.providers:
-            if entry.name == name:
+            if entry.id == ref or entry.slug == ref or entry.name == ref:
                 return entry
         return None
 
