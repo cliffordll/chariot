@@ -30,7 +30,6 @@ export async function rpc<T>(method: string, params: Record<string, unknown> = {
 export interface Conversation {
   id: string;
   title: string | null;
-  last_provider: string | null;
   agent_profile: string | null;
   created_at: string;
   updated_at: string;
@@ -651,6 +650,13 @@ const apiCore = {
 
   renameConversation(conversation_id: string, title: string | null): Promise<{ conversation: Conversation }> {
     return rpc("rename_conversation", { conversation_id, title });
+  },
+
+  updateConversationConfig(
+    conversation_id: string,
+    config: { agent_profile?: string | null },
+  ): Promise<{ conversation: Conversation }> {
+    return rpc("update_conversation_config", { conversation_id, ...config });
   },
 
   deleteConversation(conversation_id: string): Promise<{ deleted: string }> {

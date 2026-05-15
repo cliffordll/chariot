@@ -216,12 +216,15 @@ class TestParamsValidation:
 
     async def test_missing_provider_name(self) -> None:
         line = await self._send({"messages": [{"role": "user", "content": "x"}]})
-        assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
-        assert "provider_name" in line["error"]["message"]
+        # provider_name 可选;不传时 AIAgent 层报 missing_provider error event
+        assert "result" in line
+        assert "stream_id" in line["result"]
 
     async def test_provider_name_empty_string(self) -> None:
         line = await self._send({"provider_name": "", "messages": [{"role": "user", "content": "x"}]})
-        assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
+        # 空串视为 null;AIAgent 层报 missing_provider error event
+        assert "result" in line
+        assert "stream_id" in line["result"]
 
     async def test_missing_messages(self) -> None:
         line = await self._send({"provider_name": "mock"})

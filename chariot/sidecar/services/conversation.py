@@ -44,6 +44,21 @@ class ConversationApi:
         conversation = await service.rename(conversation_id, title)
         return {"conversation": self._serialize(conversation)}
 
+    async def update_config(
+        self,
+        session: Any,
+        *,
+        conversation_id: str,
+        agent_profile: str | None = None,
+    ) -> dict[str, Any]:
+        """更新 conversation 的 agent 配置。"""
+        service = ConversationService(ConversationRepo(session))
+        conversation = await service.update_config(
+            conversation_id,
+            agent_profile=agent_profile,
+        )
+        return {"conversation": self._serialize(conversation)}
+
     async def delete_conversation(self, session: Any, *, conversation_id: str) -> dict[str, Any]:
         service = ConversationService(ConversationRepo(session))
         await service.delete(conversation_id)
@@ -82,7 +97,6 @@ class ConversationApi:
         return {
             "id": conversation.id,
             "title": conversation.title,
-            "last_provider": conversation.last_provider,
             "agent_profile": conversation.agent_profile,
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),

@@ -51,6 +51,18 @@ class ConversationMethods(MethodBase):
         async with self._session() as session:
             return await self._api.rename_conversation(session, conversation_id=conversation_id, title=title)
 
+    async def update_config(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        """`update_conversation_config`:更新 agent_profile。"""
+        del ctx
+        conversation_id = self._require_str(params, "conversation_id")
+        agent_profile = self._optional_str(params, "agent_profile")
+        async with self._session() as session:
+            return await self._api.update_config(
+                session,
+                conversation_id=conversation_id,
+                agent_profile=agent_profile,
+            )
+
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`delete_conversation`:删 conversation + cascade 删 messages。"""
         del ctx

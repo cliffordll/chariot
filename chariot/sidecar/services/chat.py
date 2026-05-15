@@ -61,10 +61,13 @@ class ChatRequestDecoder:
     @classmethod
     def parse(cls, params: dict[str, Any]) -> ChatRequest:
         pn = params.get("provider_name")
-        if not isinstance(pn, str) or not pn:
+        # 空串视为 null(与前端未选 provider 对齐)
+        if pn == "":
+            pn = None
+        if pn is not None and (not isinstance(pn, str) or not pn):
             raise RpcError(
                 JsonRpcServer.ERR_INVALID_PARAMS,
-                "'provider_name' is required and must be a non-empty string",
+                "'provider_name' must be a non-empty string or null",
             )
 
         msgs_raw = params.get("messages")

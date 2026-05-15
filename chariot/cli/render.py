@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.status import Status
 from rich.table import Table
 
 if TYPE_CHECKING:
@@ -64,6 +65,10 @@ class Renderer:
     # tool_use 内容块缓冲:content_block_start(tool_use) 起,input_json_delta 拼,
     # content_block_stop 时一次性打 tool_use_line。key = block index。
     _tool_use_buffer: ClassVar[dict[int, dict[str, str]]] = {}
+
+    # spinner 状态:请求发出后到第一个 event 到达前显示旋转动画;由 stream_token
+    # 懒启动时自动停掉,避免和 rich Live 冲突。
+    _spinner: ClassVar[Status | None] = None
 
     # ---------- stdout(受 QUIET 影响)----------
 
@@ -107,6 +112,25 @@ class Renderer:
         cls._stdout.print(t)
 
     @classmethod
+    def start_spinner(cls, text: str = "Thinking...") -> None:
+        """请求发出后、第一个 event 到达前显示旋转 spinner。
+
+        使用 rich Status(和 Live 不冲突);stream_token 首次调用时自动停掉。
+        """
+        if cls.QUIET or cls._spinner is not None:
+            return
+        cls._spinner = cls._stdout.status(text, spinner="dots")
+        cls._spinner.start()
+
+    @classmethod
+    def stop_spinner(cls) -> None:
+        """停掉当前 spinner(若开);stream_token / error 首次到达时调用。"""
+        if cls._spinner is None:
+            return
+        cls._spinner.stop()
+        cls._spinner = None
+
+    @classmethod
     def stream_token(cls, tok: str) -> None:
         """流式打印单个文本增量,送入 Live + Markdown 实时重渲染。
 
@@ -115,6 +139,7 @@ class Renderer:
         """
         if cls.QUIET:
             return
+        cls.stop_spinner()  # 第一个 text 到达时停掉等待 spinner
         cls._live_buffer += tok
         if cls._live is None:
             cls._live = Live(
@@ -246,23 +271,24 @@ class Renderer:
     def meta_line(
         cls,
         *,
-        provider: str,
+        provider: str | None,
         input_tokens: int,
         output_tokens: int,
         latency_ms: int,
     ) -> None:
         """打 chat 收尾的 meta 行。
 
-        形如 `[claude-haiku · 8→21 tok · 412ms]`(显示的是 provider entry name)。
+        形如 `[claude-haiku · 8→21 tokens · 412ms]`(显示的是 provider entry name)。
 
         tok 数为 0 时显示 `?` 占位。`--quiet` 时完全抑制 meta 行。
         """
         if cls.QUIET:
             return
         cls._close_live()
-        in_s = str(input_tokens) if input_tokens > 0 else "?"
-        out_s = str(output_tokens) if output_tokens > 0 else "?"
-        line = f"[{provider} · {in_s}→{out_s} tok · {latency_ms}ms]"
+        in_s = str(input_tokens) if input_tokens > 0 else "0"
+        out_s = str(output_tokens) if output_tokens > 0 else "0"
+        provider_s = provider or "no provider"
+        line = f"[{provider_s} · {in_s}→{out_s} tokens · {latency_ms}ms]"
         cls._stdout.print(f"[dim]{line}[/dim]", highlight=False)
 
     # ---------- stderr(不受 QUIET 影响)----------

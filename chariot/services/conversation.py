@@ -55,17 +55,30 @@ class ConversationService:
     async def rename(self, conversation_id: str, title: str | None) -> Conversation:
         return await self._repo.update_title(conversation_id, title=title)
 
+    async def update_config(
+        self,
+        conversation_id: str,
+        *,
+        agent_profile: str | None = None,
+    ) -> Conversation:
+        """更新 conversation 的 agent 配置。"""
+        return await self._repo.update_config(
+            conversation_id,
+            agent_profile=agent_profile,
+        )
+
     # ---- C1: 配置恢复 ----
 
     async def get_config(self, conversation_id: str) -> tuple[str | None, str | None]:
-        """获取对话持久化的 provider + agent 配置。
+        """获取对话持久化的 agent 配置。
 
-        返回 (last_provider, agent_profile);找不到对话 → (None, None)。
+        返回 (None, agent_profile);找不到对话 → (None, None)。
+        provider 由 agent_profile 绑定自动推导,不再单独存储。
         """
         conv = await self._repo.get(conversation_id)
         if conv is None:
             return None, None
-        return conv.last_provider, conv.agent_profile
+        return None, conv.agent_profile
 
     # ---- 搜索 ----
 

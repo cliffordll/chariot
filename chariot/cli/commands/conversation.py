@@ -6,7 +6,7 @@
 
 只读:
 - `chariot conversation list [--limit N] [--offset M]`:列 conversations
-  按 updated_at desc 排序,展示 id / title / last_provider / message_count
+  按 updated_at desc 排序,展示 id / title / agent_profile / message_count
 
 写:
 - `chariot conversation show <id>`:详情 + 最近 N 条 messages 摘要
@@ -67,12 +67,12 @@ async def _list(limit: int, offset: int) -> None:
         (
             c.id,
             _truncate(c.title or "(无标题)", 30),
-            c.last_provider or "-",
+            c.agent_profile or "-",
             str(c.message_count),
         )
         for c in conversations
     ]
-    Renderer.table(["id", "title", "last_provider", "msgs"], rows, title="conversations")
+    Renderer.table(["id", "title", "agent", "msgs"], rows, title="conversations")
 
 
 # ---------- show ----------
@@ -95,12 +95,12 @@ async def _show(conversation_id: str, tail: int) -> None:
             return
         msgs = await service.list_message_rows(conversation_id)
 
-    Renderer.out(f"id:           {conversation.id}")
-    Renderer.out(f"title:        {conversation.title or '(无)'}")
-    Renderer.out(f"last_provider:   {conversation.last_provider or '-'}")
+    Renderer.out(f"id:            {conversation.id}")
+    Renderer.out(f"title:         {conversation.title or '(无)'}")
+    Renderer.out(f"agent_profile: {conversation.agent_profile or '-'}")
     Renderer.out(f"message_count: {conversation.message_count}")
-    Renderer.out(f"created_at:   {conversation.created_at.isoformat()}")
-    Renderer.out(f"updated_at:   {conversation.updated_at.isoformat()}")
+    Renderer.out(f"created_at:    {conversation.created_at.isoformat()}")
+    Renderer.out(f"updated_at:    {conversation.updated_at.isoformat()}")
     Renderer.out("")
 
     tail_msgs = msgs[-tail:]
@@ -126,7 +126,6 @@ async def _show(conversation_id: str, tail: int) -> None:
 
 
 @conversation_app.command("delete", help="删除会话(cascade messages)")
-@conversation_app.command("rm", help="删除会话(cascade messages); `delete` 的兼容别名")
 def rm_cmd(
     conversation_id: Annotated[str, typer.Argument(help="conversation id (ULID)")],
 ) -> None:

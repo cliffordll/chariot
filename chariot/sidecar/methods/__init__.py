@@ -212,6 +212,7 @@ def register_methods(
     server.method("get_conversation")(conversations.get)
     server.method("rename_conversation")(conversations.rename)
     server.method("delete_conversation")(conversations.delete)
+    server.method("update_conversation_config")(conversations.update_config)
     server.method("list_convos")(conversations.list_)
     server.method("get_convo")(conversations.get)
     server.method("rename_convo")(conversations.rename)

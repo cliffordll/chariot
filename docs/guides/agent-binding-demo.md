@@ -67,8 +67,7 @@ uv run pytest tests/providers/ tests/sidecar/test_provider_methods_extra.py test
 
 ```powershell
 uv run chariot prompt list
-uv run chariot prompt add research --layer `
-  '[{"name":"base_system","source":"researcher prompt","content":"You are a careful researcher. Always cite sources."}]'
+uv run chariot prompt add research --layer '[{"name":"base_system","source":"researcher prompt","content":"You are a careful researcher. Always cite sources."}]'
 uv run chariot prompt show research
 # 注意:add 命令会把新 bundle 设为 active;如不希望 research 是全局 active,
 # 跑完后再 activate 回 default:
@@ -89,8 +88,7 @@ uv run pytest tests/platform/test_prompt_management.py tests/agent/test_prompt_s
 uv run chariot tool list                                         # 4 seeded fixtures
 uv run chariot tool enable read_file
 uv run chariot tool enable list_dir
-uv run chariot toolset add --name fs_safe --description "只读文件操作" `
-  --members read_file,list_dir
+uv run chariot toolset add --name fs_safe --description "只读文件操作" --members read_file,list_dir
 uv run chariot toolset show fs_safe
 uv run chariot toolset list
 ```
