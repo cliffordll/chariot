@@ -16,6 +16,7 @@ class AuxiliaryClientEntry:
     provider_id: str
     model: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
+    id: str = ""
 
     @classmethod
     def from_provider_id(
@@ -25,10 +26,12 @@ class AuxiliaryClientEntry:
         provider_id: str,
         model: str | None = None,
         params: dict[str, Any] | None = None,
+        id: str = "",
     ) -> AuxiliaryClientEntry:
         return cls(
             name=name,
             provider_id=provider_id,
             model=model,
             params=params or {},
+            id=id,
         )

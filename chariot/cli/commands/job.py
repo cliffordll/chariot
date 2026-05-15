@@ -45,7 +45,7 @@ def job_list_cmd() -> None:
 
 @job_app.command("show", help="查看单个 job 和最近 runs")
 def job_show_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
 ) -> None:
     asyncio.run(_job_show(name))
 
@@ -73,7 +73,7 @@ def job_add_cmd(
 
 @job_app.command("update", help="update scheduled job")
 def job_update_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
     goal: Annotated[str, typer.Option("--goal", help="job goal")] = "",
     cron: Annotated[str, typer.Option("--cron", help="cron expression")] = "",
     agent_profile: Annotated[str, typer.Option("--agent-profile", help="agent profile name")] = "",
@@ -92,28 +92,28 @@ def job_update_cmd(
 
 @job_app.command("enable", help="enable scheduled job")
 def job_enable_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
 ) -> None:
     asyncio.run(_job_set_enabled(name, True))
 
 
 @job_app.command("disable", help="disable scheduled job")
 def job_disable_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
 ) -> None:
     asyncio.run(_job_set_enabled(name, False))
 
 
 @job_app.command("remove", help="remove scheduled job")
 def job_remove_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
 ) -> None:
     asyncio.run(_job_remove(name))
 
 
 @job_app.command("run-now", help="立刻触发一次 job")
 def job_run_now_cmd(
-    name: Annotated[str, typer.Argument(help="job name")],
+    name: Annotated[str, typer.Argument(help="job name or id")],
 ) -> None:
     asyncio.run(_job_run_now(name))
 
@@ -126,6 +126,7 @@ async def _job_list() -> None:
         return
     rows = [
         (
+            entry.id or "-",
             entry.name,
             "yes" if entry.enabled else "no",
             entry.agent_profile or "-",
@@ -134,7 +135,7 @@ async def _job_list() -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["name", "enabled", "agent_profile", "cron", "last_run_status"], rows, title="jobs")
+    Renderer.table(["id", "name", "enabled", "agent_profile", "cron", "last_run_status"], rows, title="jobs")
 
 
 async def _job_show(name: str) -> None:
@@ -147,6 +148,7 @@ async def _job_show(name: str) -> None:
         runs = await service.list_job_runs(name)
     Renderer.kv(
         {
+            "id": entry.id or "-",
             "name": entry.name,
             "goal": entry.goal,
             "cron": entry.cron,
@@ -165,10 +167,11 @@ async def _job_show(name: str) -> None:
     if runs:
         Renderer.out("")
         Renderer.table(
-            ["run_id", "task_id", "status", "started_at", "finished_at"],
+            ["run_id", "job_id", "task_id", "status", "started_at", "finished_at"],
             [
                 (
                     run.id,
+                    run.job_id or "-",
                     run.task_id or "-",
                     run.status,
                     _fmt_dt(run.started_at),

@@ -57,7 +57,7 @@ def toolset_list_cmd() -> None:
 
 @toolset_app.command("show", help="查看单个 toolset")
 def toolset_show_cmd(
-    name: Annotated[str, typer.Argument(help="toolset name")],
+    name: Annotated[str, typer.Argument(help="toolset name or id")],
 ) -> None:
     asyncio.run(_toolset_show(name))
 
@@ -81,7 +81,7 @@ def toolset_add_cmd(
 
 @toolset_app.command("update", help="更新 toolset")
 def toolset_update_cmd(
-    name: Annotated[str, typer.Argument(help="toolset name")],
+    name: Annotated[str, typer.Argument(help="toolset name or id")],
     description: Annotated[str, typer.Option("--description", help="描述")] = "",
     members: Annotated[str, typer.Option("--members", help="逗号分隔;给空字符串清空")] = "__UNSET__",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
@@ -98,14 +98,14 @@ def toolset_update_cmd(
 
 @toolset_app.command("delete", help="删除 toolset(成员级联清理)")
 def toolset_delete_cmd(
-    name: Annotated[str, typer.Argument(help="toolset name")],
+    name: Annotated[str, typer.Argument(help="toolset name or id")],
 ) -> None:
     asyncio.run(_toolset_delete(name))
 
 
 @members_app.command("add", help="给 toolset 加成员")
 def members_add_cmd(
-    name: Annotated[str, typer.Argument(help="toolset name")],
+    name: Annotated[str, typer.Argument(help="toolset name or id")],
     tool_name: Annotated[str, typer.Argument(help="tool name")],
 ) -> None:
     asyncio.run(_members_add(name, tool_name))
@@ -113,7 +113,7 @@ def members_add_cmd(
 
 @members_app.command("delete", help="从 toolset 删成员")
 def members_delete_cmd(
-    name: Annotated[str, typer.Argument(help="toolset name")],
+    name: Annotated[str, typer.Argument(help="toolset name or id")],
     tool_name: Annotated[str, typer.Argument(help="tool name")],
 ) -> None:
     asyncio.run(_members_delete(name, tool_name))
@@ -127,13 +127,14 @@ async def _toolset_list() -> None:
         return
     rows = [
         (
+            entry.id or "-",
             entry.name,
             entry.description or "-",
             ", ".join(entry.members) if entry.members else "-",
         )
         for entry in entries
     ]
-    Renderer.table(["name", "description", "members"], rows, title="toolsets")
+    Renderer.table(["id", "name", "description", "members"], rows, title="toolsets")
 
 
 async def _toolset_show(name: str) -> None:
@@ -144,6 +145,7 @@ async def _toolset_show(name: str) -> None:
         return
     Renderer.kv(
         {
+            "id": entry.id or "-",
             "name": entry.name,
             "description": entry.description or "-",
             "members": ", ".join(entry.members) if entry.members else "(空)",

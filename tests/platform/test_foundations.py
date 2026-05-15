@@ -66,6 +66,40 @@ class TestMigrationV10:
         )
         assert names.issubset(set(rows))
 
+    async def test_agent_profile_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        task_cols = (await session.execute(text("PRAGMA table_info(tasks)"))).mappings().all()
+        job_cols = (await session.execute(text("PRAGMA table_info(scheduled_jobs)"))).mappings().all()
+
+        assert "id" in _columns(agent_profile_cols)
+        assert "agent_profile_id" in _columns(task_cols)
+        assert "agent_profile_id" in _columns(job_cols)
+
+    async def test_toolset_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        toolset_cols = (await session.execute(text("PRAGMA table_info(toolsets)"))).mappings().all()
+        member_cols = (await session.execute(text("PRAGMA table_info(toolset_members)"))).mappings().all()
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+
+        assert "id" in _columns(toolset_cols)
+        assert "toolset_id" in _columns(member_cols)
+        assert "toolset_id" in _columns(agent_profile_cols)
+
+    async def test_job_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        job_cols = (await session.execute(text("PRAGMA table_info(scheduled_jobs)"))).mappings().all()
+        job_run_cols = (await session.execute(text("PRAGMA table_info(job_runs)"))).mappings().all()
+
+        assert "id" in _columns(job_cols)
+        assert "job_id" in _columns(job_run_cols)
+
     async def test_v1_logs_db_upgrades_via_squashed_migration(self, tmp_path: Path) -> None:
         db_path = tmp_path / "legacy-v1.db"
         init_sql = (Path("chariot/database/migrations/001_init.sql")).read_text(encoding="utf-8")
@@ -240,6 +274,9 @@ class TestPlatformRepos:
     async def test_task_repo_create_profile_task_run_and_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
         mock = await ProviderRepo(session).get_entry("mock")
+        from chariot.repos.toolset_repo import ToolsetRepo
+
+        toolset = await ToolsetRepo(session).create(name="default", members=["read_file"])
         profile = await repo.create_agent_profile(
             name="planner",
             role="planner",
@@ -248,6 +285,9 @@ class TestPlatformRepos:
             budget={"max_steps": 3},
         )
         assert mock is not None
+        assert len(toolset.id) == 26
+        assert len(profile.id) == 26
+        assert profile.toolset_id == toolset.id
         assert profile.provider_id == mock.id
         task = await repo.create_task(
             TaskCreate(
@@ -262,16 +302,49 @@ class TestPlatformRepos:
         job_run = await repo.create_job_run(job_name=job.name, task_id=task.id, status="queued")
 
         assert (await repo.get_agent_profile(profile.name)) is not None
+        by_id = await repo.get_agent_profile(profile.id)
+        assert by_id is not None
+        assert by_id.name == profile.name
+        assert by_id.toolset_id == toolset.id
         stored_task = await repo.get_task(task.id)
         assert stored_task is not None
         assert stored_task.agent_profile == "planner"
         assert stored_task.status.value == "queued"
+        task_row = (
+            (
+                await session.execute(
+                    text("SELECT agent_profile, agent_profile_id FROM tasks WHERE id = :id"), {"id": task.id}
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert task_row["agent_profile"] == "planner"
+        assert task_row["agent_profile_id"] == profile.id
         runs = await repo.list_runs(task.id)
         assert runs[0].id == run.id
         jobs = await repo.list_jobs()
         assert jobs[0].name == job.name
+        assert len(jobs[0].id) == 26
+        updated_job = await repo.update_job(name=job.name, agent_profile=profile.id)
+        assert updated_job.agent_profile == "planner"
+        job_row = (
+            (
+                await session.execute(
+                    text("SELECT id, agent_profile, agent_profile_id FROM scheduled_jobs WHERE name = :name"),
+                    {"name": job.name},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert len(str(job_row["id"])) == 26
+        assert job_row["agent_profile"] == "planner"
+        assert job_row["agent_profile_id"] == profile.id
         job_runs = await repo.list_job_runs(job.name)
         assert job_runs[0].id == job_run.id
+        assert job_runs[0].job_id == jobs[0].id
+        assert (await repo.list_job_runs(jobs[0].id))[0].id == job_run.id
 
     async def test_task_repo_update_delete_agent_and_delete_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
@@ -295,6 +368,9 @@ class TestPlatformRepos:
     async def test_task_repo_clear_agent_binding_fields(self, session: AsyncSession) -> None:
         """显式传 None 应清空 binding;未传(UNSET 默认)保持原值。"""
         repo = TaskRepo(session)
+        from chariot.repos.toolset_repo import ToolsetRepo
+
+        toolset = await ToolsetRepo(session).create(name="fs_safe")
         await repo.create_agent_profile(
             name="a1",
             role="r",
@@ -306,6 +382,7 @@ class TestPlatformRepos:
         u1 = await repo.update_agent_profile(name="a1", role="executor")
         assert u1.prompt_bundle == "research"
         assert u1.tool_profile == "fs_safe"
+        assert u1.toolset_id == toolset.id
         assert u1.provider_id == "claude"
         # 2) 显式 None → 清空 provider,其它仍保留
         u2 = await repo.update_agent_profile(name="a1", provider_id=None)
@@ -316,6 +393,7 @@ class TestPlatformRepos:
         u3 = await repo.update_agent_profile(name="a1", prompt_bundle=None, tool_profile=None)
         assert u3.prompt_bundle is None
         assert u3.tool_profile is None
+        assert u3.toolset_id is None
         # 4) 重新 set
         u4 = await repo.update_agent_profile(name="a1", provider_id="ollama")
         assert u4.provider_id == "ollama"

@@ -85,6 +85,8 @@ async def test_show_returns_entry(server: JsonRpcServer, agent: AIAgent) -> None
     aux = resp["result"]["auxiliary_client"]
     assert mock is not None
     assert aux["provider_id"] == mock.id
+    resp_by_id = await _call(server, "show_auxiliary_client", {"name": aux["id"]})
+    assert resp_by_id["result"]["auxiliary_client"]["name"] == "summarizer"
 
 
 async def test_show_unknown_returns_not_found(server: JsonRpcServer) -> None:

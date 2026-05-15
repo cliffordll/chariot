@@ -35,6 +35,7 @@ class ToolEntry:
     type: str
     enabled: bool
     options: dict[str, Any]
+    id: int = 0
     source: Literal["builtin", "custom"] = "builtin"
     description: str = ""
     custom_type: str | None = None

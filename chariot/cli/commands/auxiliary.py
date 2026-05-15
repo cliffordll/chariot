@@ -74,8 +74,10 @@ async def _list() -> None:
     if not entries:
         Renderer.out("(没有 auxiliary client)")
         return
-    rows = [(e.name, e.provider_id, e.model or "-", json.dumps(e.params, ensure_ascii=False)) for e in entries]
-    Renderer.table(["name", "provider_id", "model", "params"], rows, title="auxiliary clients")
+    rows = [
+        (e.id or "-", e.name, e.provider_id, e.model or "-", json.dumps(e.params, ensure_ascii=False)) for e in entries
+    ]
+    Renderer.table(["id", "name", "provider_id", "model", "params"], rows, title="auxiliary clients")
 
 
 # ---------- show ----------
@@ -83,7 +85,7 @@ async def _list() -> None:
 
 @auxiliary_app.command("show", help="详情")
 def show_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
 ) -> None:
     asyncio.run(_show(name))
 
@@ -92,8 +94,9 @@ async def _show(name: str) -> None:
     async with installed_runtime() as agent:
         entry = await AuxiliaryService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"未知 auxiliary client name: {name!r}")
+        Renderer.die(f"未知 auxiliary client ref: {name!r}")
         return
+    Renderer.out(f"id:             {entry.id or '-'}")
     Renderer.out(f"name:           {entry.name}")
     Renderer.out(f"provider_id:    {entry.provider_id}")
     Renderer.out(f"model:          {entry.model or '(继承 provider)'}")
@@ -147,7 +150,7 @@ async def _add(
 
 @auxiliary_app.command("update", help="改 provider 绑定 / model / params")
 def update_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
     provider: Annotated[
         str,
         typer.Option("--provider", help="新 provider 引用(优先 slug / id,兼容 legacy name)"),
@@ -196,7 +199,7 @@ async def _update(name: str, provider: str, model_arg: str, params_raw: list[str
 @auxiliary_app.command("delete", help="删除 auxiliary client")
 @auxiliary_app.command("rm", help="`delete` 的兼容别名")
 def delete_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
 ) -> None:
     asyncio.run(_delete(name))
 

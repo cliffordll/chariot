@@ -16,6 +16,7 @@ class ScheduledJob:
     name: str
     goal: str
     cron: str
+    id: str = ""
     enabled: bool = True
     agent_profile: str | None = None
     last_run_status: str | None = None
@@ -30,6 +31,7 @@ class ScheduledJob:
 class JobRunRecord:
     id: str
     job_name: str
+    job_id: str | None = None
     task_id: str | None = None
     status: str = "queued"
     error: str | None = None

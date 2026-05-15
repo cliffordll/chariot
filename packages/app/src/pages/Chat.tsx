@@ -56,7 +56,6 @@ function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
   };
 }
 
-const ENTRY_STORAGE_KEY = "chariot.chat.selected_entry";
 const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
 const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
 
@@ -109,9 +108,6 @@ type ProvidersState =
 
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
-  const [selectedEntry, setSelectedEntryState] = useState<string | null>(() =>
-    lsGet(ENTRY_STORAGE_KEY),
-  );
   // 0.7.2-tool+ agent picker:选中 agent 后,本轮 chat RPC 带 agent_profile,
   // sidecar 由 AIAgent._resolve_binding 解析三件套(provider/prompt/tool);
   // 选 "(none)" 走 0.7.0 行为(全局 active bundle + 全量 enabled tools)。
@@ -134,11 +130,6 @@ export default function Chat() {
   const [inFlight, setInFlight] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const setSelectedEntry = useCallback((name: string | null) => {
-    setSelectedEntryState(name);
-    lsSet(ENTRY_STORAGE_KEY, name);
-  }, []);
 
   const setSelectedAgent = useCallback((name: string | null) => {
     setSelectedAgentState(name);
@@ -238,7 +229,7 @@ export default function Chat() {
     el.scrollTop = el.scrollHeight;
   }, [pane, pending]);
 
-  // C1: 切换/恢复对话时自动恢复 provider + agent
+  // C1: 切换/恢复对话时自动恢复 agent
   // 用 seenPaneId 追踪 pane 身份变化:当 pane id 改变时(切换对话/draft)
   // 清空 restoredForConvId,确保重新恢复。同对话的 loadConvDetail reload
   // 不会改变 pane id,因此不会触发重复恢复。
@@ -262,13 +253,10 @@ export default function Chat() {
     // 恢复 agent;provider 由 agent 绑定自动推导
     if (convo.agent_profile) {
       setSelectedAgent(convo.agent_profile);
-      const agent = agents.find((a) => a.name === convo.agent_profile);
-      setSelectedEntry(agent?.provider_profile ?? null);
     } else {
       setSelectedAgent(null);
-      setSelectedEntry(null);
     }
-  }, [pane, setSelectedEntry, setSelectedAgent, agents]);
+  }, [pane, setSelectedAgent, agents]);
 
   // 双向同步:页面重新可见时从 DB 拉最新 agent(应对 CLI 修改)
   // provider 由 agent 自动推导,不再单独同步
@@ -294,7 +282,6 @@ export default function Chat() {
   const startNewChat = useCallback(async () => {
     abortRef.current?.abort();
     setPending(null);
-    setSelectedEntry(null);
     setSelectedAgent(null);
     try {
       const conv = await api.createConversation({});
@@ -310,7 +297,7 @@ export default function Chat() {
       alert(`创建会话失败: ${msg}`);
       setActivePane({ kind: "draft" });
     }
-  }, [setActivePane, setSelectedEntry, setSelectedAgent, loadConvs]);
+  }, [setActivePane, setSelectedAgent, loadConvs]);
 
   const selectConv = useCallback(
     (id: string) => {
@@ -370,14 +357,11 @@ export default function Chat() {
   const handleSelectAgent = useCallback(
     (name: string | null) => {
       setSelectedAgent(name);
-      const agent = agents.find((a) => a.name === name);
-      const derivedProvider = agent?.provider_profile ?? null;
-      setSelectedEntry(derivedProvider);
       if (pane.kind === "loaded") {
         api.updateConversationConfig(pane.id, { agent_profile: name }).catch(() => {});
       }
     },
-    [setSelectedAgent, setSelectedEntry, agents, pane],
+    [setSelectedAgent, pane],
   );
 
   const canSend =
@@ -615,7 +599,6 @@ export default function Chat() {
 
         <EntryRow
           providersState={providersState}
-          selectedEntry={selectedEntry}
           agents={agents}
           selectedAgent={selectedAgent}
           onSelectAgent={handleSelectAgent}
@@ -663,13 +646,11 @@ const AGENT_NONE = "__none__";
 
 function EntryRow({
   providersState,
-  selectedEntry,
   agents,
   selectedAgent,
   onSelectAgent,
 }: {
   providersState: ProvidersState;
-  selectedEntry: string | null;
   agents: AgentProfile[];
   selectedAgent: string | null;
   onSelectAgent: (name: string | null) => void;
@@ -686,7 +667,9 @@ function EntryRow({
   }
 
   const agent = agents.find((a) => a.name === selectedAgent);
-  const providerName = selectedEntry ?? agent?.provider_profile ?? null;
+  const providerName = agent?.provider_profile ?? null;
+  const promptName = agent?.prompt_bundle ?? null;
+  const toolsetName = agent?.tool_profile ?? null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">
@@ -709,16 +692,8 @@ function EntryRow({
           ))}
         </SelectContent>
       </Select>
-      <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
-        provider
-      </span>
-      <span className="h-8 min-w-[8rem] rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
-        {providerName ?? "-"}
-      </span>
-      <span className="ml-auto text-xs text-muted-foreground">
-        {selectedAgent
-          ? `agent: ${selectedAgent} 覆盖 provider / prompt / tools`
-          : "请先选择 agent"}
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        {`provider: ${providerName ?? "(none)"} | prompt: ${promptName ?? "(none)"} | toolset: ${toolsetName ?? "(none)"}`}
       </span>
     </div>
   );

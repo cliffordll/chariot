@@ -114,6 +114,7 @@ class JobApi:
     @staticmethod
     def _job_to_dict(entry: ScheduledJob) -> dict[str, Any]:
         return {
+            "id": entry.id,
             "name": entry.name,
             "goal": entry.goal,
             "cron": entry.cron,
@@ -132,6 +133,7 @@ class JobApi:
         return {
             "id": entry.id,
             "job_name": entry.job_name,
+            "job_id": entry.job_id,
             "task_id": entry.task_id,
             "status": entry.status,
             "error": entry.error,

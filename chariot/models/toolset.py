@@ -19,6 +19,7 @@ class Toolset:
 
     name: str
     description: str | None
+    id: str = ""
     members: tuple[str, ...] = ()
     meta: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
@@ -31,3 +32,4 @@ class ToolsetMember:
 
     toolset_name: str
     tool_name: str
+    toolset_id: str | None = None

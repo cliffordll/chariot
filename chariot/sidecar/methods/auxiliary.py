@@ -70,6 +70,7 @@ class AuxiliaryMethods(MethodBase):
     @staticmethod
     def _serialize(entry: AuxiliaryClientEntry) -> dict[str, Any]:
         return {
+            "id": entry.id,
             "name": entry.name,
             "provider_id": entry.provider_id,
             "model": entry.model,

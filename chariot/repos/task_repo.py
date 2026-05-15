@@ -11,7 +11,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
-from chariot.database.models import AgentProfileRow, JobRunRow, ProviderRow, ScheduledJobRow, TaskRow, TaskRunRow
+from chariot.database.models import (
+    AgentProfileRow,
+    JobRunRow,
+    ProviderRow,
+    ScheduledJobRow,
+    TaskRow,
+    TaskRunRow,
+    ToolsetRow,
+)
 from chariot.models.agent import UNSET, AgentProfile, ClearableStr, _UnsetType
 from chariot.models.job import JobRunRecord, ScheduledJob
 from chariot.models.task import Task, TaskCreate, TaskRun, TaskRunCreate
@@ -34,7 +42,7 @@ class TaskRepo:
         return [self._row_to_agent_profile(row) for row in rows]
 
     async def get_agent_profile(self, name: str) -> AgentProfile | None:
-        row = await self.session.get(AgentProfileRow, name)
+        row = await self._find_agent_profile_row(name)
         return self._row_to_agent_profile(row) if row is not None else None
 
     async def create_agent_profile(
@@ -55,11 +63,13 @@ class TaskRepo:
         self._require_non_empty(role, "agent profile role")
         if reflection_max_retries < 0:
             raise ConfigError(f"reflection_max_retries 必须 >= 0,got {reflection_max_retries}")
+        toolset_id, tool_profile_name = await self._resolve_toolset_ref(tool_profile)
         row = AgentProfileRow(
             name=name,
             role=role,
             prompt_bundle=prompt_bundle,
-            tool_profile=tool_profile,
+            tool_profile=tool_profile_name,
+            toolset_id=toolset_id,
             provider_id=await self._resolve_provider_ref(provider_id),
             budget=self._serialize_object("budget", budget or {}),
             meta=self._serialize_object("meta", meta or {}),
@@ -105,7 +115,7 @@ class TaskRepo:
         if not isinstance(prompt_bundle, _UnsetType):
             row.prompt_bundle = prompt_bundle
         if not isinstance(tool_profile, _UnsetType):
-            row.tool_profile = tool_profile
+            row.toolset_id, row.tool_profile = await self._resolve_toolset_ref(tool_profile)
         if not isinstance(provider_id, _UnsetType):
             row.provider_id = await self._resolve_provider_ref(provider_id)
         if budget is not None:
@@ -135,11 +145,13 @@ class TaskRepo:
 
     async def create_task(self, spec: TaskCreate) -> Task:
         self._require_non_empty(spec.goal, "task goal")
+        agent_profile_id, agent_profile_name = await self._resolve_agent_profile_ref(spec.agent_profile)
         row = TaskRow(
             goal=spec.goal,
             kind=spec.kind.value,
             status="queued",
-            agent_profile=spec.agent_profile,
+            agent_profile=agent_profile_name,
+            agent_profile_id=agent_profile_id,
             parent_task_id=spec.parent_task_id,
             owner=spec.owner,
             meta=self._serialize_object("meta", spec.meta),
@@ -152,10 +164,12 @@ class TaskRepo:
 
     async def update_task(self, task: Task) -> Task:
         row = await self._require_task_row(task.id)
+        agent_profile_id, agent_profile_name = await self._resolve_agent_profile_ref(task.agent_profile)
         row.goal = task.goal
         row.kind = task.kind.value
         row.status = task.status.value
-        row.agent_profile = task.agent_profile
+        row.agent_profile = agent_profile_name
+        row.agent_profile_id = agent_profile_id
         row.parent_task_id = task.parent_task_id
         row.owner = task.owner
         row.meta = self._serialize_object("meta", task.meta)
@@ -206,7 +220,7 @@ class TaskRepo:
         return [self._row_to_job(row) for row in rows]
 
     async def get_job(self, name: str) -> ScheduledJob | None:
-        row = await self.session.get(ScheduledJobRow, name)
+        row = await self._find_job_row(name)
         return self._row_to_job(row) if row is not None else None
 
     async def create_job(
@@ -222,12 +236,14 @@ class TaskRepo:
         self._require_non_empty(name, "job name")
         self._require_non_empty(goal, "job goal")
         self._require_non_empty(cron, "job cron")
+        agent_profile_id, agent_profile_name = await self._resolve_agent_profile_ref(agent_profile)
         row = ScheduledJobRow(
             name=name,
             goal=goal,
             cron=cron,
             enabled=1 if enabled else 0,
-            agent_profile=agent_profile,
+            agent_profile=agent_profile_name,
+            agent_profile_id=agent_profile_id,
             meta=self._serialize_object("meta", meta or {}),
         )
         self.session.add(row)
@@ -249,6 +265,8 @@ class TaskRepo:
         meta: dict[str, Any] | None = None,
     ) -> ScheduledJob:
         row = await self._require_job_row(name)
+        resolved_agent_profile_id: str | None = row.agent_profile_id
+        resolved_agent_profile_name: str | None = row.agent_profile
         if goal is not None:
             self._require_non_empty(goal, "job goal")
             row.goal = goal
@@ -256,7 +274,11 @@ class TaskRepo:
             self._require_non_empty(cron, "job cron")
             row.cron = cron
         if agent_profile is not None:
-            row.agent_profile = agent_profile
+            resolved_agent_profile_id, resolved_agent_profile_name = await self._resolve_agent_profile_ref(
+                agent_profile
+            )
+        row.agent_profile = resolved_agent_profile_name
+        row.agent_profile_id = resolved_agent_profile_id
         if meta is not None:
             row.meta = self._serialize_object("meta", meta)
         await self.session.commit()
@@ -276,7 +298,12 @@ class TaskRepo:
         await self.session.commit()
 
     async def list_job_runs(self, job_name: str) -> list[JobRunRecord]:
-        stmt = select(JobRunRow).where(JobRunRow.job_name == job_name).order_by(JobRunRow.started_at.desc())
+        job = await self._require_job_row(job_name)
+        stmt = (
+            select(JobRunRow)
+            .where((JobRunRow.job_name == job.name) | (JobRunRow.job_id == job.id))
+            .order_by(JobRunRow.started_at.desc())
+        )
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self._row_to_job_run(row) for row in rows]
 
@@ -289,15 +316,17 @@ class TaskRepo:
         error: str | None = None,
         finished_at: datetime | None = None,
     ) -> JobRunRecord:
+        job = await self._require_job_row(job_name)
         row = JobRunRow(
-            job_name=job_name,
+            job_name=job.name,
+            job_id=job.id,
             task_id=task_id,
             status=status,
             error=error,
             finished_at=finished_at,
         )
         self.session.add(row)
-        await self._touch_job_status(job_name, status=status)
+        await self._touch_job_status(job.name, status=status)
         await self.session.commit()
         await self.session.refresh(row)
         return self._row_to_job_run(row)
@@ -309,10 +338,53 @@ class TaskRepo:
         return row
 
     async def _require_agent_profile_row(self, name: str) -> AgentProfileRow:
-        row = await self.session.get(AgentProfileRow, name)
+        row = await self._find_agent_profile_row(name)
         if row is None:
             raise ConfigError(f"agent profile {name!r} not found")
         return row
+
+    async def _find_agent_profile_row(self, ref: str) -> AgentProfileRow | None:
+        rows = await self._find_agent_profile_rows(ref)
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0]
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0]
+        raise ConfigError(f"agent profile 引用 {ref!r} 不唯一,请改用 id")
+
+    async def _find_agent_profile_rows(self, ref: str) -> list[AgentProfileRow]:
+        stmt = select(AgentProfileRow).where((AgentProfileRow.name == ref) | (AgentProfileRow.id == ref))
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def _resolve_agent_profile_ref(self, ref: str | None) -> tuple[str | None, str | None]:
+        if ref is None:
+            return None, None
+        row = await self._find_agent_profile_row(ref)
+        if row is None:
+            return None, ref
+        return row.id, row.name
+
+    async def _resolve_toolset_ref(self, ref: str | None) -> tuple[str | None, str | None]:
+        if ref is None:
+            return None, None
+        stmt = select(ToolsetRow).where((ToolsetRow.name == ref) | (ToolsetRow.id == ref))
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return None, ref
+        if len(rows) == 1:
+            return rows[0].id, rows[0].name
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0].id, exact_id[0].name
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0].id, exact_name[0].name
+        raise ConfigError(f"toolset 引用 {ref!r} 不唯一,请改用 id")
 
     async def _require_run_row(self, run_id: str) -> TaskRunRow:
         row = await self.session.get(TaskRunRow, run_id)
@@ -321,10 +393,25 @@ class TaskRepo:
         return row
 
     async def _require_job_row(self, name: str) -> ScheduledJobRow:
-        row = await self.session.get(ScheduledJobRow, name)
+        row = await self._find_job_row(name)
         if row is None:
             raise ConfigError(f"job {name!r} not found")
         return row
+
+    async def _find_job_row(self, ref: str) -> ScheduledJobRow | None:
+        stmt = select(ScheduledJobRow).where((ScheduledJobRow.name == ref) | (ScheduledJobRow.id == ref))
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0]
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0]
+        raise ConfigError(f"job 引用 {ref!r} 不唯一,请改用 id")
 
     async def _touch_job_status(self, job_name: str, *, status: str) -> None:
         row = await self.session.get(ScheduledJobRow, job_name)
@@ -395,12 +482,14 @@ class TaskRepo:
             role=row.role,
             prompt_bundle=row.prompt_bundle,
             tool_profile=row.tool_profile,
+            toolset_id=row.toolset_id,
             provider_id=row.provider_id,
             budget=cls._deserialize_object("budget", row.budget),
             meta=cls._deserialize_object("meta", row.meta),
             reflection_enabled=bool(row.reflection_enabled),
             reflection_max_retries=row.reflection_max_retries,
             default_skill=row.default_skill,
+            id=row.id,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -444,6 +533,7 @@ class TaskRepo:
     def _row_to_job(cls, row: ScheduledJobRow) -> ScheduledJob:
         return ScheduledJob(
             name=row.name,
+            id=row.id,
             goal=row.goal,
             cron=row.cron,
             enabled=bool(row.enabled),
@@ -461,6 +551,7 @@ class TaskRepo:
         return JobRunRecord(
             id=row.id,
             job_name=row.job_name,
+            job_id=row.job_id,
             task_id=row.task_id,
             status=row.status,
             error=row.error,

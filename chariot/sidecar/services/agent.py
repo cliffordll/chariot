@@ -97,10 +97,12 @@ class AgentApi:
     @staticmethod
     def _agent_to_dict(entry: AgentProfile) -> dict[str, Any]:
         return {
+            "id": entry.id,
             "name": entry.name,
             "role": entry.role,
             "prompt_bundle": entry.prompt_bundle,
             "tool_profile": entry.tool_profile,
+            "toolset_id": entry.toolset_id,
             "provider_id": entry.provider_id,
             "budget": entry.budget,
             "meta": entry.meta,

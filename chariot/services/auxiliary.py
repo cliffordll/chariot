@@ -17,8 +17,8 @@ class AuxiliaryService:
     async def list_entries(self) -> list[AuxiliaryClientEntry]:
         return await self._repo.list_entries()
 
-    async def get_entry(self, name: str) -> AuxiliaryClientEntry | None:
-        return await self._repo.get_entry(name)
+    async def get_entry(self, ref: str) -> AuxiliaryClientEntry | None:
+        return await self._repo.get_entry(ref)
 
     async def create(
         self,

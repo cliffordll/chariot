@@ -78,6 +78,7 @@ class ToolsetApi:
     @staticmethod
     def serialize(entry: Toolset) -> dict[str, Any]:
         return {
+            "id": entry.id,
             "name": entry.name,
             "description": entry.description,
             "members": list(entry.members),

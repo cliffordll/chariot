@@ -144,11 +144,23 @@ class AuxiliaryRepo:
             provider_id=row.provider_id,
             model=row.model,
             params=cls._deserialize_params(row.params),
+            id=row.id,
         )
 
-    async def _find_row(self, name: str) -> AuxiliaryClientRow | None:
-        stmt = select(AuxiliaryClientRow).where(AuxiliaryClientRow.name == name)
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+    async def _find_row(self, ref: str) -> AuxiliaryClientRow | None:
+        stmt = select(AuxiliaryClientRow).where((AuxiliaryClientRow.name == ref) | (AuxiliaryClientRow.id == ref))
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0]
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0]
+        raise ConfigError(f"auxiliary client 引用 {ref!r} 不唯一,请改用 id")
 
     async def _resolve_provider_ref(self, ref: str) -> str:
         stmt = select(ProviderRow).where(

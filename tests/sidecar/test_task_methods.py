@@ -110,6 +110,8 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
 
     detail = await _call(server, "get_agent", {"name": "planner"})
     assert detail["result"]["agent"]["role"] == "planner"
+    detail_by_id = await _call(server, "get_agent", {"name": agent["id"]})
+    assert detail_by_id["result"]["agent"]["name"] == "planner"
 
 
 @pytest.mark.asyncio
@@ -218,6 +220,7 @@ async def test_list_jobs_returns_created_jobs(server: JsonRpcServer, agent: AIAg
     line = await _call(server, "list_jobs")
     jobs = line["result"]["jobs"]
     assert jobs[0]["name"] == "cleanup"
+    assert jobs[0]["id"]
     assert jobs[0]["enabled"] is True
 
 
@@ -232,6 +235,7 @@ async def test_show_job_and_run_job_now(server: JsonRpcServer, agent: AIAgent) -
     line = await _call(server, "run_job_now", {"name": "cleanup"})
     assert line["result"]["task"]["kind"] == "scheduled"
     assert line["result"]["job_run"]["job_name"] == "cleanup"
+    assert line["result"]["job_run"]["job_id"]
     assert line["result"]["job_run"]["status"] == "queued"
 
     detail = await _call(server, "show_job", {"name": "cleanup"})
@@ -239,6 +243,8 @@ async def test_show_job_and_run_job_now(server: JsonRpcServer, agent: AIAgent) -
     assert job["name"] == "cleanup"
     assert job["last_run_status"] == "queued"
     assert job["runs"][0]["job_name"] == "cleanup"
+    detail_by_id = await _call(server, "show_job", {"name": job["id"]})
+    assert detail_by_id["result"]["job"]["name"] == "cleanup"
 
 
 @pytest.mark.asyncio

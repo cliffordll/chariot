@@ -33,12 +33,17 @@ class TestToolsetRepo:
             members=["read_file", "list_dir"],
         )
         assert toolset.name == "fs_safe"
+        assert len(toolset.id) == 26
         assert toolset.description == "只读文件操作"
         assert toolset.members == ("list_dir", "read_file")  # 排序后的
 
         loaded = await repo.get_entry("fs_safe")
         assert loaded is not None
+        assert loaded.id == toolset.id
         assert loaded.members == ("list_dir", "read_file")
+        loaded_by_id = await repo.get_entry(toolset.id)
+        assert loaded_by_id is not None
+        assert loaded_by_id.name == "fs_safe"
 
         await repo.delete("fs_safe")
         assert await repo.get_entry("fs_safe") is None

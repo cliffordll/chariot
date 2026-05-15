@@ -103,6 +103,7 @@ class ToolApi:
         except (ConfigError, ValueError, TypeError):
             schema = None
         return {
+            "id": entry.id,
             "name": entry.name,
             "type": entry.type,
             "enabled": entry.enabled,

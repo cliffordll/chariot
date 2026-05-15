@@ -221,6 +221,7 @@ class ToolRepo:
     @classmethod
     def _row_to_entry(cls, row: ToolRow) -> ToolEntry:
         return ToolEntry(
+            id=row.id,
             name=row.name,
             type=row.type,
             enabled=bool(row.enabled),
@@ -230,6 +231,11 @@ class ToolRepo:
             custom_type=row.custom_type,
         )
 
-    async def _find_row(self, name: str) -> ToolRow | None:
-        stmt = select(ToolRow).where(ToolRow.name == name)
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+    async def _find_row(self, ref: str) -> ToolRow | None:
+        stmt = select(ToolRow).where(ToolRow.name == ref)
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        if row is not None:
+            return row
+        if ref.isdigit():
+            return await self.session.get(ToolRow, int(ref))
+        return None

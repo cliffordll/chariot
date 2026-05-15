@@ -43,10 +43,12 @@ async def test_list_show_probe_tool_methods(
     monkeypatch.setattr(ToolService, "get_entry", fake_get_entry)
 
     listed = await service.list_entries()
+    assert listed[0]["id"] == entry.id
     assert listed[0]["name"] == "http_get"
     assert listed[0]["schema_"] is not None
 
     shown = await service.get_entry(name="http_get")
+    assert shown["id"] == entry.id
     assert shown["name"] == "http_get"
     assert shown["schema_"] is not None
 

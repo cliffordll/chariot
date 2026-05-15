@@ -33,6 +33,7 @@ async def test_seed_summarizer_present(session: AsyncSession) -> None:
     entry = await AuxiliaryRepo(session).get_entry("summarizer")
     assert entry is not None
     assert mock is not None
+    assert len(entry.id) == 26
     assert entry.provider_id == mock.id
     assert entry.params.get("max_tokens") == 512
 
@@ -45,10 +46,13 @@ async def test_create_and_get(session: AsyncSession) -> None:
     )
     assert entry.name == "critic_aux"
     assert mock is not None
+    assert len(entry.id) == 26
     assert entry.provider_id == mock.id
     assert entry.model == "mock-critic"
     fetched = await repo.get_entry("critic_aux")
     assert fetched == entry
+    fetched_by_id = await repo.get_entry(entry.id)
+    assert fetched_by_id == entry
 
 
 async def test_create_duplicate_raises(session: AsyncSession) -> None:

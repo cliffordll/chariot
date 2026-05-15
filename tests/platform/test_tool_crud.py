@@ -37,6 +37,7 @@ class TestToolRepoCrud:
             description="Test API",
             custom_type="http_custom",
         )
+        assert tool.id > 0
         assert tool.name == "my_api"
         assert tool.custom_type == "http_custom"
         assert tool.source == "custom"
@@ -44,8 +45,12 @@ class TestToolRepoCrud:
 
         loaded = await repo.get_entry("my_api")
         assert loaded is not None
+        assert loaded.id == tool.id
         assert loaded.name == "my_api"
         assert loaded.custom_type == "http_custom"
+        loaded_by_id = await repo.get_entry(str(tool.id))
+        assert loaded_by_id is not None
+        assert loaded_by_id.name == "my_api"
 
     async def test_delete_custom_ok(self, session: AsyncSession) -> None:
         repo = ToolRepo(session)

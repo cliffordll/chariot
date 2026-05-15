@@ -46,14 +46,14 @@ def agent_list_cmd() -> None:
 
 @agent_app.command("show", help="查看单个 agent profile")
 def agent_show_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
 ) -> None:
     asyncio.run(_agent_show(name))
 
 
 @agent_app.command("add", help="创建 agent profile")
 def agent_add_cmd(
-    name: Annotated[str, typer.Option("--name", help="agent profile name")] = "",
+    name: Annotated[str, typer.Option("--name", help="agent profile name (stable id auto-generated)")] = "",
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
     tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
@@ -96,7 +96,7 @@ def agent_add_cmd(
 
 @agent_app.command("update", help="update agent profile")
 def agent_update_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[
         str | None,
@@ -170,7 +170,7 @@ def _to_clearable(value: str | None) -> ClearableStr:
 
 @agent_app.command("remove", help="remove agent profile")
 def agent_remove_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
 ) -> None:
     asyncio.run(_agent_remove(name))
 
@@ -183,6 +183,7 @@ async def _agent_list() -> None:
         return
     rows = [
         (
+            entry.id or "-",
             entry.name,
             entry.role,
             entry.prompt_bundle or "-",
@@ -191,7 +192,7 @@ async def _agent_list() -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["name", "role", "prompt_bundle", "tool_profile", "provider_id"], rows, title="agents")
+    Renderer.table(["id", "name", "role", "prompt_bundle", "tool_profile", "provider_id"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -202,10 +203,12 @@ async def _agent_show(name: str) -> None:
             return
     Renderer.kv(
         {
+            "id": entry.id or "-",
             "name": entry.name,
             "role": entry.role,
             "prompt_bundle": entry.prompt_bundle or "-",
             "tool_profile": entry.tool_profile or "-",
+            "toolset_id": entry.toolset_id or "-",
             "provider_id": entry.provider_id or "-",
             "reflection_enabled": str(entry.reflection_enabled).lower(),
             "reflection_max_retries": str(entry.reflection_max_retries),

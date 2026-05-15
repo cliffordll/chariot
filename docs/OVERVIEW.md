@@ -376,7 +376,29 @@ docs/
 
 ### 6.2 Migrations(`chariot/database/migrations/`)
 
-22 条 SQL 顺序迁移(`PRAGMA user_version`),最新 v22:`agent_profiles.default_skill`。
+当前迁移目录采用“基线 + 增量”结构：
+
+- `001_init.sql`
+- `002_squashed_current.sql`
+- `003_agent_profile_identity.sql`
+- `004_auxiliary_identity.sql`
+- `005_toolset_identity.sql`
+- `006_job_identity.sql`
+
+当前 `PRAGMA user_version = 6`。
+
+其中 `003` 到 `006` 已完成这轮实体身份治理的核心落地：
+
+- `agent_profiles.id`
+- `tasks.agent_profile_id`
+- `scheduled_jobs.agent_profile_id`
+- `auxiliary_clients.id`
+- `toolsets.id`
+- `toolset_members.toolset_id`
+- `agent_profiles.toolset_id`
+- `scheduled_jobs.id`
+- `job_runs.job_id`
+
 B7 wave 1 加 `EVENT_RL_EXPORT` 事件类型但**未**改 schema(纯字符串)。
 
 ### 6.3 Disk(`~/.chariot/`)

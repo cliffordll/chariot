@@ -46,6 +46,7 @@ class AgentProfile:
     role: str
     prompt_bundle: str | None = None
     tool_profile: str | None = None
+    toolset_id: str | None = None
     provider_id: str | None = None
     budget: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
@@ -55,6 +56,7 @@ class AgentProfile:
     # B6 wave 2:agent_profile 预绑 skill;chat 不显式 --skill 时透传给
     # ChatRequest.skill;dangling reference(skill 不存在 / disabled)走 fallback。
     default_skill: str | None = None
+    id: str = ""
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 
@@ -67,11 +69,13 @@ class AgentProfile:
         provider_id: str | None = None,
         prompt_bundle: str | None = None,
         tool_profile: str | None = None,
+        toolset_id: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         reflection_enabled: bool = False,
         reflection_max_retries: int = 2,
         default_skill: str | None = None,
+        id: str = "",
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ) -> AgentProfile:
@@ -80,12 +84,14 @@ class AgentProfile:
             role=role,
             prompt_bundle=prompt_bundle,
             tool_profile=tool_profile,
+            toolset_id=toolset_id,
             provider_id=provider_id,
             budget=budget or {},
             meta=meta or {},
             reflection_enabled=reflection_enabled,
             reflection_max_retries=reflection_max_retries,
             default_skill=default_skill,
+            id=id,
             created_at=created_at or _utcnow(),
             updated_at=updated_at or _utcnow(),
         )

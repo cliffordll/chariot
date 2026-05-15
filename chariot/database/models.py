@@ -26,6 +26,12 @@
 - v17(0.8.0-evolution):`trace_turns / trace_provider_calls / trace_tool_calls / trace_checkpoints`(Phase B1 trace 平台)
 - v26(0.8.9-provider-identity):`providers` 切到 `id + slug + name`,`settings`
   单行表承载 `default_provider_id`;provider 真实关系统一转 `provider_id`
+- v27(0.8.10-agent-profile-identity):`agent_profiles.id` + `tasks` /
+  `scheduled_jobs`.`agent_profile_id`
+- v28(0.8.11-auxiliary-identity):`auxiliary_clients.id`
+- v29(0.8.12-toolset-identity):`toolsets.id` + `toolset_members.toolset_id` +
+  `agent_profiles.toolset_id`
+- v30(0.8.13-job-identity):`scheduled_jobs.id` + `job_runs.job_id`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
 - `ToolRow.id` 是自增 int(name 才是用户面 ID)
@@ -409,9 +415,11 @@ class AgentProfileRow(Base):
     __tablename__ = "agent_profiles"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     role: Mapped[str] = mapped_column(index=True)
     prompt_bundle: Mapped[str | None] = mapped_column(default=None)
     tool_profile: Mapped[str | None] = mapped_column(default=None)
+    toolset_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None)
     budget: Mapped[str] = mapped_column(default="{}")
     meta: Mapped[str] = mapped_column(default="{}")
@@ -432,6 +440,7 @@ class TaskRow(Base):
     kind: Mapped[str] = mapped_column(index=True)
     status: Mapped[str] = mapped_column(index=True)
     agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    agent_profile_id: Mapped[str | None] = mapped_column(default=None, index=True)
     parent_task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     owner: Mapped[str | None] = mapped_column(default=None)
     meta: Mapped[str] = mapped_column(default="{}")
@@ -459,10 +468,12 @@ class ScheduledJobRow(Base):
     __tablename__ = "scheduled_jobs"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     goal: Mapped[str]
     cron: Mapped[str]
     enabled: Mapped[int] = mapped_column(default=1)
     agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    agent_profile_id: Mapped[str | None] = mapped_column(default=None, index=True)
     last_run_status: Mapped[str | None] = mapped_column(default=None)
     last_run_at: Mapped[datetime | None] = mapped_column(default=None)
     next_run_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -476,6 +487,7 @@ class JobRunRow(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     job_name: Mapped[str] = mapped_column(index=True)
+    job_id: Mapped[str | None] = mapped_column(default=None, index=True)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     status: Mapped[str] = mapped_column(index=True)
     error: Mapped[str | None] = mapped_column(default=None)
@@ -487,6 +499,7 @@ class ToolsetRow(Base):
     __tablename__ = "toolsets"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     description: Mapped[str | None] = mapped_column(default=None)
     meta: Mapped[str] = mapped_column(default="{}")
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
@@ -495,9 +508,13 @@ class ToolsetRow(Base):
 
 class ToolsetMemberRow(Base):
     __tablename__ = "toolset_members"
-    __table_args__ = (Index("idx_toolset_members_tool_name", "tool_name"),)
+    __table_args__ = (
+        Index("idx_toolset_members_tool_name", "tool_name"),
+        Index("idx_toolset_members_toolset_id", "toolset_id"),
+    )
 
     toolset_name: Mapped[str] = mapped_column(primary_key=True)
+    toolset_id: Mapped[str | None] = mapped_column(default=None)
     tool_name: Mapped[str] = mapped_column(primary_key=True)
 
 
@@ -591,6 +608,7 @@ class AuxiliaryClientRow(Base):
     __tablename__ = "auxiliary_clients"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     provider_id: Mapped[str]
     model: Mapped[str | None] = mapped_column(default=None)
     params: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
