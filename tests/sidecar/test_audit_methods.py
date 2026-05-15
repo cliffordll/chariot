@@ -15,8 +15,8 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.audit.hooks import AuditHookManager
 from chariot.database.session import dispose_db
-from chariot.repos.audit_repo import AuditRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.audit import AuditService
 from chariot.sidecar.methods import register_methods
 
 
@@ -122,8 +122,7 @@ async def test_get_audit_event_returns_payload(
 ) -> None:
     await _call(server, "create_memory", {"kind": "preference", "text": "y"})
     # 拿最新一条 audit event
-    async with agent.session_maker() as session:
-        events = await AuditRepo(session).list_events(limit=10)
+    events = await AuditService(agent).list_events(limit=10)
     assert events
     event_id = events[0].id
 

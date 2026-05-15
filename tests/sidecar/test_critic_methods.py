@@ -13,8 +13,8 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.auxiliary_repo import AuxiliaryRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.auxiliary import AuxiliaryService
 from chariot.sidecar.methods import register_methods
 
 
@@ -63,8 +63,7 @@ async def agent_with_critic(tmp_path: Path):
     """先插入 critic auxiliary entry,再 bootstrap,装载 critic。"""
     # 第一次 bootstrap 跑 migrations + seed
     a = await AIAgent.bootstrap(tmp_path / "test.db")
-    async with a.session_maker() as session:
-        await AuxiliaryRepo(session).create(name="critic", provider_entry="mock")
+    await AuxiliaryService(a).create(name="critic", provider_entry="mock")
     # 第二次 bootstrap 把 critic 装上(同一 sm 复用,但 dispose 后重建 agent)
     AgentRegistry._agents.clear()
     await dispose_db()

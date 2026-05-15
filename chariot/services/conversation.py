@@ -12,12 +12,40 @@ CLI / Sidecar / Gateway 等 surface 层不直接调 Repo,统一走
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
+from chariot.agent.chat_request import Message
 from chariot.repos.conversation_repo import Conversation, ConversationRepo
 from chariot.services._session_proxy import SessionRepoProxy
 
-__all__ = ["ConversationService"]
+__all__ = ["ConversationHistoryStore", "ConversationMessageStore", "ConversationService"]
+
+
+class ConversationMessageStore(Protocol):
+    async def append_assistant_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+        *,
+        provider_name: str | None = None,
+        agent_profile: str | None = None,
+    ) -> Any: ...
+
+    async def append_tool_result_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+    ) -> Any: ...
+
+
+class ConversationHistoryStore(Protocol):
+    async def append_user_message(
+        self,
+        conversation_id: str,
+        content: str | list[dict[str, Any]],
+    ) -> Any: ...
+
+    async def load_history_as_messages(self, conversation_id: str) -> list[Message]: ...
 
 
 class ConversationService:
@@ -49,6 +77,48 @@ class ConversationService:
 
     async def ensure_exists(self, conversation_id: str) -> Conversation:
         return await self._repo.ensure_exists(conversation_id)
+
+    async def append_assistant_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+        *,
+        provider_name: str | None = None,
+        agent_profile: str | None = None,
+    ) -> Any:
+        return await self._repo.append_message(
+            conversation_id,
+            role="assistant",
+            content=content,
+            provider_name=provider_name,
+            agent_profile=agent_profile,
+        )
+
+    async def append_tool_result_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+    ) -> Any:
+        return await self._repo.append_message(
+            conversation_id,
+            role="user",
+            content=content,
+        )
+
+    async def append_user_message(
+        self,
+        conversation_id: str,
+        content: str | list[dict[str, Any]],
+    ) -> Any:
+        return await self._repo.append_message(
+            conversation_id,
+            role="user",
+            content=content,
+        )
+
+    async def load_history_as_messages(self, conversation_id: str) -> list[Message]:
+        rows = await self._repo.load_messages_as_anthropic(conversation_id)
+        return [Message(role=row["role"], content=row["content"]) for row in rows]
 
     async def delete(self, conversation_id: str) -> None:
         return await self._repo.delete(conversation_id)

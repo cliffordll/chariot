@@ -110,7 +110,7 @@ class SkillMethods(MethodBase):
             return {"stale": [], "underused": [], "failing": [], "overlapping": []}
         from chariot.skills import SkillCurator
 
-        curator = SkillCurator(sessionmaker=self.agent.session_maker, skill_registry=registry)
+        curator = SkillCurator(runtime=self.agent, skill_registry=registry)
         result = await curator.curate()
         return {
             "stale": list(result.stale),

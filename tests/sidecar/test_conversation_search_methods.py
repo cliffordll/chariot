@@ -13,8 +13,8 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.conversation import ConversationService
 from chariot.sidecar.methods import register_methods
 
 
@@ -73,10 +73,9 @@ async def _call(server: JsonRpcServer, method: str, params: dict[str, Any]) -> d
 @pytest.mark.asyncio
 async def test_search_conversation_returns_hits(server: JsonRpcServer, agent: AIAgent) -> None:
     """RPC happy path:写一条 message,search 命中。"""
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV_A")
-        await repo.append_message("01CONV_A", "user", "fts5 search demo")
+    service = ConversationService(agent)
+    await service.create("01CONV_A")
+    await service.append_user_message("01CONV_A", "fts5 search demo")
 
     resp = await _call(server, "search_conversation", {"query": "fts5"})
     assert "result" in resp
@@ -89,12 +88,11 @@ async def test_search_conversation_returns_hits(server: JsonRpcServer, agent: AI
 
 @pytest.mark.asyncio
 async def test_search_conversation_filter_by_conversation(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV_A")
-        await repo.create("01CONV_B")
-        await repo.append_message("01CONV_A", "user", "alpha keyword")
-        await repo.append_message("01CONV_B", "user", "alpha keyword")
+    service = ConversationService(agent)
+    await service.create("01CONV_A")
+    await service.create("01CONV_B")
+    await service.append_user_message("01CONV_A", "alpha keyword")
+    await service.append_user_message("01CONV_B", "alpha keyword")
 
     all_resp = await _call(server, "search_conversation", {"query": "alpha"})
     a_resp = await _call(server, "search_conversation", {"query": "alpha", "conversation_id": "01CONV_A"})
@@ -111,11 +109,14 @@ async def test_search_conversation_missing_query_errors(server: JsonRpcServer) -
 
 @pytest.mark.asyncio
 async def test_rebuild_conversation_fts_returns_count(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
-        await repo.append_message("01CONV", "user", "one")
-        await repo.append_message("01CONV", "assistant", "two", provider_name="mock")
+    service = ConversationService(agent)
+    await service.create("01CONV")
+    await service.append_user_message("01CONV", "one")
+    await service.append_assistant_message(
+        "01CONV",
+        [{"type": "text", "text": "two"}],
+        provider_name="mock",
+    )
 
     resp = await _call(server, "rebuild_conversation_fts", {})
     assert resp["result"]["rebuilt"] == 2
@@ -123,11 +124,10 @@ async def test_rebuild_conversation_fts_returns_count(server: JsonRpcServer, age
 
 @pytest.mark.asyncio
 async def test_search_conversation_limit(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
-        for i in range(5):
-            await repo.append_message("01CONV", "user", f"target_{i} match")
+    service = ConversationService(agent)
+    await service.create("01CONV")
+    for i in range(5):
+        await service.append_user_message("01CONV", f"target_{i} match")
 
     resp = await _call(server, "search_conversation", {"query": "match", "limit": 2})
     assert len(resp["result"]["hits"]) == 2

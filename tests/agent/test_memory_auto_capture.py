@@ -10,7 +10,7 @@ from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.memory_repo import MemoryRepo
+from chariot.services.memory import MemoryService
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -37,7 +37,6 @@ async def test_memory_is_auto_captured_after_turn(agent: AIAgent) -> None:
     async for _event in agent.run_chat(req):
         pass
 
-    async with agent.session_maker() as session:
-        entries = await MemoryRepo(session).list_entries(kind="preference")
+    entries = await MemoryService(agent).list_entries(kind="preference")
 
     assert any(entry.text == "默认用中文输出但保留关键 English terms" for entry in entries)

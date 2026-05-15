@@ -15,6 +15,7 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.task_repo import TaskRepo
+from chariot.services.agent import AgentService
 
 
 @pytest_asyncio.fixture
@@ -102,13 +103,12 @@ async def test_apply_profile_reflection_no_agent_profile_keeps_req(agent: AIAgen
 
 
 async def test_apply_profile_reflection_with_enabled_profile(agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="alpha",
-            role="dev",
-            reflection_enabled=True,
-            reflection_max_retries=5,
-        )
+    await AgentService(agent).create_agent(
+        name="alpha",
+        role="dev",
+        reflection_enabled=True,
+        reflection_max_retries=5,
+    )
     req = ChatRequest(
         provider_name="mock",
         messages=[Message(role="user", content="x")],
@@ -120,12 +120,11 @@ async def test_apply_profile_reflection_with_enabled_profile(agent: AIAgent) -> 
 
 
 async def test_apply_profile_reflection_disabled_profile_no_op(agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="beta",
-            role="dev",
-            reflection_enabled=False,
-        )
+    await AgentService(agent).create_agent(
+        name="beta",
+        role="dev",
+        reflection_enabled=False,
+    )
     req = ChatRequest(
         provider_name="mock",
         messages=[Message(role="user", content="x")],
@@ -137,12 +136,11 @@ async def test_apply_profile_reflection_disabled_profile_no_op(agent: AIAgent) -
 
 async def test_apply_profile_reflection_req_explicit_overrides_profile(agent: AIAgent) -> None:
     """req.reflection_enabled=True 已显式 → 不被 profile 覆盖(尊重显式 flag)。"""
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="gamma",
-            role="dev",
-            reflection_enabled=False,  # profile 关
-        )
+    await AgentService(agent).create_agent(
+        name="gamma",
+        role="dev",
+        reflection_enabled=False,  # profile 关
+    )
     req = ChatRequest(
         provider_name="mock",
         messages=[Message(role="user", content="x")],

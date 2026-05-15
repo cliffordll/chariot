@@ -22,6 +22,7 @@ from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
 from chariot.agent.run import AIAgent
 from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
+from chariot.services.provider import ProviderService
 from chariot.tools.base import BaseTool
 
 # ---------------------------------------------------------------------------
@@ -259,23 +260,21 @@ class TestBootstrapProviderOverrides:
     async def _seed_anthropic_entry(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Path]:
         """tmp DB 装一个 anthropic entry,yield db_path。"""
         from chariot.database.session import dispose_db
-        from chariot.repos.provider_repo import ProviderRepo
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
         db_path = tmp_path / "chariot.db"
         agent = await AIAgent.bootstrap(db_path)
-        async with agent.session_maker() as session:
-            await ProviderRepo(session).create(
-                name="claude",
-                type="anthropic",
-                options={
-                    "model": "claude-old",
-                    "api_key": "key-old",
-                    "base_url": "https://old.api",
-                },
-            )
+        await ProviderService(agent).create(
+            name="claude",
+            type="anthropic",
+            options={
+                "model": "claude-old",
+                "api_key": "key-old",
+                "base_url": "https://old.api",
+            },
+        )
         await dispose_db()
         try:
             yield db_path

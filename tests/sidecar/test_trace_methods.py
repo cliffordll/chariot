@@ -15,8 +15,8 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
 from chariot.models.trace import ToolCallStatus, TurnStatus
-from chariot.repos.trace_repo import TraceRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.trace import TraceService
 from chariot.sidecar.methods import register_methods
 
 
@@ -83,18 +83,17 @@ class TestTraceMethods:
         assert line["result"] == {"turns": []}
 
     async def test_list_show_view(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = TraceRepo(session)
-            turn = await repo.create_turn(provider_name="mock", conversation_id="C1")
-            await repo.record_provider_call(turn.id, provider_name="mock", latency_ms=120)
-            await repo.record_tool_call(turn.id, tool_name="read_file", status=ToolCallStatus.OK)
-            await repo.finalize_turn(
-                turn.id,
-                status=TurnStatus.COMPLETED,
-                stop_reason="end_turn",
-                input_tokens=20,
-                output_tokens=10,
-            )
+        service = TraceService(agent)
+        turn = await service.create_turn(provider_name="mock", conversation_id="C1")
+        await service.record_provider_call(turn.id, provider_name="mock", latency_ms=120)
+        await service.record_tool_call(turn.id, tool_name="read_file", status=ToolCallStatus.OK)
+        await service.finalize_turn(
+            turn.id,
+            status=TurnStatus.COMPLETED,
+            stop_reason="end_turn",
+            input_tokens=20,
+            output_tokens=10,
+        )
 
         listed = await _call(server, "list_traces")
         assert len(listed["result"]["turns"]) == 1
@@ -118,10 +117,9 @@ class TestTraceMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_list_filter_by_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = TraceRepo(session)
-            await repo.create_turn(provider_name="mock", conversation_id="A")
-            await repo.create_turn(provider_name="mock", conversation_id="B")
+        service = TraceService(agent)
+        await service.create_turn(provider_name="mock", conversation_id="A")
+        await service.create_turn(provider_name="mock", conversation_id="B")
 
         line = await _call(server, "list_traces", {"conversation_id": "A"})
         turns = line["result"]["turns"]

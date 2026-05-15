@@ -31,6 +31,17 @@ class PromptService:
     async def get_active_bundle(self) -> PromptBundleEntry | None:
         return await self._repo.get_active_bundle()
 
+    async def resolve_bundle(
+        self,
+        *,
+        bundle_name: str | None = None,
+    ) -> PromptBundleEntry | None:
+        if bundle_name is not None:
+            bundle = await self._repo.get_bundle(bundle_name)
+            if bundle is not None:
+                return bundle
+        return await self._repo.get_active_bundle()
+
     async def get_active_version(self, bundle_name: str | None = None) -> PromptVersionEntry | None:
         return await self._repo.get_active_version(bundle_name)
 

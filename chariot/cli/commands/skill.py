@@ -270,7 +270,7 @@ async def _curate() -> None:
         if registry is None:
             Renderer.die("skill registry not loaded")
             return
-        curator = SkillCurator(sessionmaker=agent.session_maker, skill_registry=registry)
+        curator = SkillCurator(runtime=agent, skill_registry=registry)
         result = await curator.curate()
     Renderer.out(f"stale ({len(result.stale)}):")
     Renderer.out(", ".join(result.stale) or "  (空)")

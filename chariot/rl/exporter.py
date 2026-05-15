@@ -2,7 +2,7 @@
 
 封装策略(CLAUDE.md ⭐):
 - 单类编排;模块级零自由函数
-- 接 `sessionmaker` + `scrubber`(默认 `SecretScrubber`,可注入 `NullScrubber` 走 raw)
+- 接 `runtime` + `scrubber`(默认 `SecretScrubber`,可注入 `NullScrubber` 走 raw)
 - 一条 conversation → 多条 `ExportEntry`(每个 trace_turn 一条)
 - 落 disk **不** 进 sqlite(JSONL 文件,路径由 caller 决定)
 
@@ -34,7 +34,7 @@ class TrajectoryExporter:
 
     用法::
 
-        exporter = TrajectoryExporter(sessionmaker=sm, scrubber=SecretScrubber())
+        exporter = TrajectoryExporter(runtime=sm, scrubber=SecretScrubber())
         entries = await exporter.export("cv-abc")
         # 或直接落盘
         rows = await exporter.export_to_jsonl("cv-abc", Path("/tmp/out.jsonl"))
@@ -43,54 +43,52 @@ class TrajectoryExporter:
     def __init__(
         self,
         *,
-        sessionmaker: async_sessionmaker[AsyncSession],
+        runtime: object | None = None,
+        sessionmaker: async_sessionmaker[AsyncSession] | None = None,
         scrubber: SecretScrubber | None = None,
         audit_hooks: AuditHookManager | None = None,
     ) -> None:
-        self._sessionmaker = sessionmaker
+        self._runtime = runtime or sessionmaker
+        if self._runtime is None:
+            raise ValueError("runtime or sessionmaker is required")
         self._scrubber = scrubber or SecretScrubber()
         self._audit_hooks = audit_hooks or AuditHookManager(None)
 
     async def export(self, conversation_id: str) -> list[ExportEntry]:
         """主入口。读 DB 拼 entries,按 turn started_at 升序返。"""
         from chariot.models.trace import TurnStatus  # noqa: F401 — 类型对齐用
-        from chariot.repos.audit_repo import AuditRepo
-        from chariot.repos.conversation_repo import ConversationRepo
-        from chariot.repos.trace_repo import TraceRepo
+        from chariot.services.audit import AuditService
+        from chariot.services.conversation import ConversationService
+        from chariot.services.trace import TraceService
 
-        async with self._sessionmaker() as session:
-            turns = await TraceRepo(session).list_turns(
-                conversation_id=conversation_id,
-                limit=10000,  # conversation 极少超过 10k turn;到这量级再说
+        trace_service = TraceService(self._runtime)
+        turns = await trace_service.list_turns(
+            conversation_id=conversation_id,
+            limit=10000,  # conversation 极少超过 10k turn;到这量级再说
+        )
+        turns_asc = sorted(turns, key=lambda t: (t.started_at, t.id))
+        if not turns_asc:
+            return []
+        messages = await ConversationService(self._runtime).list_message_rows(conversation_id)
+        audit_events_raw = await AuditService(self._runtime).list_events(limit=10000)
+        audit_events = [ev for ev in audit_events_raw if self._audit_belongs_to_conv(ev, conversation_id, turns_asc)]
+        entries: list[ExportEntry] = []
+        for idx, turn in enumerate(turns_asc):
+            provider_calls = await trace_service.list_provider_calls(turn.id)
+            tool_calls = await trace_service.list_tool_calls(turn.id)
+            window_start = turn.started_at
+            window_end = turn.finished_at or self._next_turn_started(turns_asc, idx)
+            entry = self._build_entry(
+                turn=turn,
+                sequence=idx,
+                messages_rows=messages,
+                provider_calls=provider_calls,
+                tool_calls=tool_calls,
+                audit_events=audit_events,
+                window_start=window_start,
+                window_end=window_end,
             )
-            # list_turns 默认 started_at desc + id desc;reverse 成 asc
-            turns_asc = sorted(turns, key=lambda t: (t.started_at, t.id))
-            if not turns_asc:
-                return []
-            # 一次性把同 conversation 的 messages / audit 读出来(避免 N+1)
-            messages = await ConversationRepo(session).list_messages(conversation_id)
-            audit_events_raw = await AuditRepo(session).list_events(limit=10000)
-            audit_events = [
-                ev for ev in audit_events_raw if self._audit_belongs_to_conv(ev, conversation_id, turns_asc)
-            ]
-            # 每个 turn 也单独读 provider_calls / tool_calls
-            entries: list[ExportEntry] = []
-            for idx, turn in enumerate(turns_asc):
-                provider_calls = await TraceRepo(session).list_provider_calls(turn.id)
-                tool_calls = await TraceRepo(session).list_tool_calls(turn.id)
-                window_start = turn.started_at
-                window_end = turn.finished_at or self._next_turn_started(turns_asc, idx)
-                entry = self._build_entry(
-                    turn=turn,
-                    sequence=idx,
-                    messages_rows=messages,
-                    provider_calls=provider_calls,
-                    tool_calls=tool_calls,
-                    audit_events=audit_events,
-                    window_start=window_start,
-                    window_end=window_end,
-                )
-                entries.append(entry)
+            entries.append(entry)
         return entries
 
     async def export_to_jsonl(self, conversation_id: str, out: Path) -> int:

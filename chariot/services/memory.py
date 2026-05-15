@@ -8,16 +8,29 @@ depend on a stable domain-layer entry point.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from chariot.agent.chat_event import ChatEvent
+from chariot.agent.chat_request import ChatRequest
+from chariot.memory.capture import MemoryCaptureService
 from chariot.memory.policy import MemoryPolicy
 from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
 from chariot.repos.memory_repo import MemoryRepo
 from chariot.services._session_proxy import SessionRepoProxy
 
+if TYPE_CHECKING:
+    from chariot.audit import AuditHookManager
+
+
+class _SessionRuntime(Protocol):
+    async def execute(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def commit(self) -> Any: ...
+
 
 class MemoryService:
     def __init__(self, session_maker: object) -> None:
+        self._runtime = session_maker
         self._repo = SessionRepoProxy(session_maker, MemoryRepo)
 
     async def list_entries(
@@ -142,3 +155,78 @@ class MemoryService:
             limit=limit,
             policy=policy,
         )
+
+    async def list_relevant_entry_payloads(
+        self,
+        *,
+        conversation_id: str | None = None,
+        provider_name: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 8,
+        policy: MemoryPolicy | None = None,
+    ) -> list[dict[str, Any]] | None:
+        entries = await self.list_relevant_entries(
+            conversation_id=conversation_id,
+            provider_name=provider_name,
+            tags=tags,
+            limit=limit,
+            policy=policy,
+        )
+        payloads = [
+            {
+                "id": entry.id,
+                "kind": entry.kind,
+                "text": entry.text,
+                "meta": entry.meta,
+                "pinned": entry.pinned,
+                "archived": entry.archived,
+            }
+            for entry in entries
+        ]
+        return payloads or None
+
+    async def capture_turn(
+        self,
+        *,
+        req: ChatRequest,
+        provider_name: str,
+        policy: MemoryPolicy,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+        audit_hooks: AuditHookManager | None = None,
+    ) -> list[MemoryEntry]:
+        capture = MemoryCaptureService(self._concrete_repo(), audit_hooks=audit_hooks)
+        return await capture.capture_turn(
+            req=req,
+            provider_name=provider_name,
+            policy=policy,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
+        )
+
+    async def capture_error(
+        self,
+        *,
+        conversation_id: str | None,
+        provider_name: str,
+        error_event: ChatEvent,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+        audit_hooks: AuditHookManager | None = None,
+    ) -> list[MemoryEntry]:
+        if error_event.error_type is None or error_event.error_message is None:
+            return []
+        capture = MemoryCaptureService(self._concrete_repo(), audit_hooks=audit_hooks)
+        return await capture.capture_error(
+            conversation_id=conversation_id,
+            provider_name=provider_name,
+            error_type=error_event.error_type,
+            error_message=error_event.error_message,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
+        )
+
+    def _concrete_repo(self) -> MemoryRepo:
+        if hasattr(self._runtime, "execute") and hasattr(self._runtime, "commit"):
+            return MemoryRepo(cast(Any, self._runtime))
+        raise TypeError("MemoryService capture operations require a concrete session runtime")

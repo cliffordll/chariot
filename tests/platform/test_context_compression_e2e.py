@@ -64,7 +64,8 @@ async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], ag
 async def test_stateful_run_with_long_history_triggers_compression(
     agent: AIAgent,
 ) -> None:
-    sm = agent.session_maker
+    sm = agent._sessionmaker
+    assert sm is not None
     conv_id = "01CONVLONG"
     await _seed_long_conversation(sm, conv_id)
     await _tighten_summarizer_threshold(sm, agent)
@@ -93,7 +94,8 @@ async def test_stateful_run_with_long_history_triggers_compression(
 
 async def test_stateful_run_short_history_no_compression(agent: AIAgent) -> None:
     """短对话 → 不触发压缩,trace meta 不含 context_compressed。"""
-    sm = agent.session_maker
+    sm = agent._sessionmaker
+    assert sm is not None
     conv_id = "01CONVSHORT"
     async with sm() as session:
         await ConversationRepo(session).create(conv_id)

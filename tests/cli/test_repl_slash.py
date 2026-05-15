@@ -24,9 +24,9 @@ from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
 from chariot.cli.repl import ChatRepl
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.task_repo import TaskRepo
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.agent import AgentService
+from chariot.services.conversation import ConversationService
+from chariot.services.tool import ToolService
 
 # ============================================================
 # fixtures
@@ -114,13 +114,10 @@ async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
 
 async def test_slash_agents_lists_entries_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/agents` 走 AgentService,带 ← current 标记。"""
-    async with agent.session_maker() as session:
-        from chariot.services.agent import AgentService
-
-        await AgentService(TaskRepo(session)).create_agent(
-            name="dev-helper",
-            role="developer",
-        )
+    await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
 
     ctx = _make_ctx(agent)
     ctx.agent_profile = "dev-helper"
@@ -178,10 +175,9 @@ async def test_slash_convo_no_arg_stateless_shows_off(agent: AIAgent, _capture_r
 async def test_slash_convos_lists_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/convos` 走 ConversationRepo,当前会话行带 ← current。"""
     other_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create(CONVO, title="t1")
-        await repo.create(other_id, title="t2")
+    service = ConversationService(agent)
+    await service.create(CONVO, title="t1")
+    await service.create(other_id, title="t2")
 
     ctx = _make_ctx(agent, conversation_id=CONVO)
     await ChatRepl(ctx=ctx)._handle_slash("/conversations")
@@ -274,8 +270,7 @@ async def test_slash_tool_shows_only_enabled(agent: AIAgent, _capture_renderer_o
 
     fresh DB seed 4 条全 disabled 的 fixture,先开 read_file 再断。
     """
-    async with agent.session_maker() as session:
-        await ToolRepo(session).update("read_file", enabled=True)
+    await ToolService(agent).update("read_file", enabled=True)
 
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/tool")
@@ -299,8 +294,7 @@ async def test_slash_tool_no_enabled_shows_hint(agent: AIAgent, _capture_rendere
 
 async def test_slash_tools_lists_all_with_marks(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/tools` 列全部工具,enabled / disabled 都展示并带 ON/off 标记。"""
-    async with agent.session_maker() as session:
-        await ToolRepo(session).update("read_file", enabled=True)
+    await ToolService(agent).update("read_file", enabled=True)
 
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/tools")

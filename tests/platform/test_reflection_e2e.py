@@ -102,7 +102,9 @@ async def test_reflection_disabled_runs_single_turn(agent: AIAgent) -> None:
     text_chunks = [ev.delta["text"] for ev in events if ev.kind == "content_block_delta" and ev.delta]
     assert any("FAILED" in t for t in text_chunks)
     # trace_turns 只有 1 条
-    async with agent.session_maker() as session:
+    sm = agent._sessionmaker
+    assert sm is not None
+    async with sm() as session:
         rows = (await session.execute(select(TraceTurnRow))).scalars().all()
     assert len(rows) == 1
     assert json.loads(rows[0].meta) == {}
@@ -131,7 +133,9 @@ async def test_reflection_enabled_triggers_retry_on_self_report_fail(agent: AIAg
     assert agent._providers["mock"]._call_count == 2
 
     # trace_turns 两条
-    async with agent.session_maker() as session:
+    sm = agent._sessionmaker
+    assert sm is not None
+    async with sm() as session:
         rows = (await session.execute(select(TraceTurnRow).order_by(TraceTurnRow.started_at.asc()))).scalars().all()
     assert len(rows) == 2
     first_meta = json.loads(rows[0].meta)

@@ -16,8 +16,8 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.context.composer import ContextComposer
 from chariot.database.session import dispose_db
-from chariot.repos.context_repo import ContextRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.context import ContextService
 from chariot.sidecar.methods import register_methods
 
 
@@ -82,17 +82,16 @@ async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AI
         conversation_id=conversation_id,
     )
 
-    async with agent.session_maker() as session:
-        repo = ContextRepo(session)
-        snapshot = ContextComposer.build_snapshot(
-            req,
-            provider_name="mock",
-            model="mock-1",
-            history=[{"role": "user", "content": "hello"}],
-            provider_capabilities={"supports_system": False},
-        )
-        recorded = await repo.record_snapshot(snapshot)
-        await repo.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
+    service = ContextService(agent)
+    snapshot = ContextComposer.build_snapshot(
+        req,
+        provider_name="mock",
+        model="mock-1",
+        history=[{"role": "user", "content": "hello"}],
+        provider_capabilities={"supports_system": False},
+    )
+    recorded = await service.record_snapshot(snapshot)
+    await service.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
 
     listed = await _call(server, "list_context_snapshots")
     assert listed["result"]["snapshots"][0]["id"] == recorded.id

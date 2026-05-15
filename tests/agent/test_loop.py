@@ -122,6 +122,41 @@ class _StubTool(BaseTool):
         }
 
 
+class _StubMessageStore:
+    def __init__(self) -> None:
+        self.assistant_messages: list[dict[str, Any]] = []
+        self.tool_result_messages: list[dict[str, Any]] = []
+
+    async def append_assistant_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+        *,
+        provider_name: str | None = None,
+        agent_profile: str | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "conversation_id": conversation_id,
+            "content": content,
+            "provider_name": provider_name,
+            "agent_profile": agent_profile,
+        }
+        self.assistant_messages.append(row)
+        return row
+
+    async def append_tool_result_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        row = {
+            "conversation_id": conversation_id,
+            "content": content,
+        }
+        self.tool_result_messages.append(row)
+        return row
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -139,13 +174,17 @@ def _make_loop(
     turns: list[list[ChatEvent]],
     tools: dict[str, BaseTool] | None = None,
     *,
+    message_store: _StubMessageStore | None = None,
+    conversation_id: str | None = None,
+    provider_name: str | None = None,
     max_iter: int = 10,
 ) -> AgentLoop:
     return AgentLoop(
         provider=_ScriptedProvider(turns),
         tools=tools or {},
-        repo=None,
-        conversation_id=None,
+        message_store=message_store,
+        conversation_id=conversation_id,
+        provider_name=provider_name,
         max_iter=max_iter,
     )
 
@@ -328,7 +367,7 @@ class TestProviderError:
         loop = AgentLoop(
             provider=_RaisingProvider(),
             tools={},
-            repo=None,
+            message_store=None,
             conversation_id=None,
         )
         events = [ev async for ev in loop.stream_chat(req)]
@@ -357,3 +396,27 @@ class TestProviderContractValidation:
         assert events[-1].error_type == "invalid_provider_event"
         assert events[-1].error_message is not None
         assert "content_block_delta" in events[-1].error_message
+
+
+class TestMessagePersistenceBoundary:
+    async def test_persists_via_message_store(self, req: ChatRequest) -> None:
+        store = _StubMessageStore()
+        turns = [
+            _tool_use_turn("toolu_1", "stub", ["{}"]),
+            _text_turn(),
+        ]
+        loop = _make_loop(
+            turns,
+            {"stub": _StubTool("stub")},
+            message_store=store,
+            conversation_id="conv_1",
+            provider_name="scripted",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 2
+        assert store.assistant_messages[0]["conversation_id"] == "conv_1"
+        assert store.assistant_messages[0]["provider_name"] == "scripted"
+        assert len(store.tool_result_messages) == 1
+        assert store.tool_result_messages[0]["content"][0]["type"] == "tool_result"

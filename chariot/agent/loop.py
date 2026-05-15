@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from chariot.guardrails import GuardrailEngine
     from chariot.guardrails.approval import ApprovalPolicy
     from chariot.providers.base import BaseProvider
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.services.conversation import ConversationMessageStore
     from chariot.tools.base import BaseTool
     from chariot.trace import TurnHandle
 
@@ -34,7 +34,7 @@ class AgentLoop:
         *,
         provider: BaseProvider,
         tools: dict[str, BaseTool],
-        repo: ConversationRepo | None,
+        message_store: ConversationMessageStore | None,
         conversation_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
         turn: TurnHandle | None = None,
@@ -54,7 +54,7 @@ class AgentLoop:
             audit_hooks=audit_hooks,
             todo_store=todo_store,
         )
-        self._repo = repo
+        self._message_store = message_store
         self._conversation_id = conversation_id
         self._max_iter = max_iter
         self._turn = turn
@@ -197,28 +197,26 @@ class AgentLoop:
         return sr if isinstance(sr, str) else None
 
     async def _persist_assistant(self, assistant_blocks: list[dict[str, Any]]) -> None:
-        if self._repo is None or self._conversation_id is None:
+        if self._message_store is None or self._conversation_id is None:
             return
         if not assistant_blocks:
             return
         content = [entry["block"] for entry in assistant_blocks]
-        await self._repo.append_message(
+        await self._message_store.append_assistant_message(
             self._conversation_id,
-            role="assistant",
             content=content,
             provider_name=self._provider_name,
             agent_profile=self._agent_profile,
         )
 
     async def _persist_tool_results(self, tool_results: list[ChatEvent]) -> None:
-        if self._repo is None or self._conversation_id is None:
+        if self._message_store is None or self._conversation_id is None:
             return
         if not tool_results:
             return
         content = [self._tool_result_event_to_block(ev) for ev in tool_results]
-        await self._repo.append_message(
+        await self._message_store.append_tool_result_message(
             self._conversation_id,
-            role="user",
             content=content,
         )
 

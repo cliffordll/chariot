@@ -15,9 +15,9 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
 from chariot.models.trace import TurnStatus
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.trace_repo import TraceRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.conversation import ConversationService
+from chariot.services.trace import TraceService
 from chariot.sidecar.methods import register_methods
 
 
@@ -55,20 +55,23 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
     AgentRegistry._agents.clear()
     try:
         # 落一条 conversation 给 export 用
-        async with a.session_maker() as session:
-            repo = ConversationRepo(session)
-            await repo.ensure_exists("cv-rl")
-            await repo.append_message("cv-rl", role="user", content=[{"type": "text", "text": "hello"}])
-            turn = await TraceRepo(session).create_turn(
-                conversation_id="cv-rl",
-                provider_name="mock",
-            )
-            await repo.append_message("cv-rl", role="assistant", content=[{"type": "text", "text": "hi"}])
-            await TraceRepo(session).finalize_turn(
-                turn.id,
-                status=TurnStatus.COMPLETED,
-                stop_reason="end_turn",
-            )
+        conversation_service = ConversationService(a)
+        trace_service = TraceService(a)
+        await conversation_service.ensure_exists("cv-rl")
+        await conversation_service.append_user_message("cv-rl", [{"type": "text", "text": "hello"}])
+        turn = await trace_service.create_turn(
+            conversation_id="cv-rl",
+            provider_name="mock",
+        )
+        await conversation_service.append_assistant_message(
+            "cv-rl",
+            [{"type": "text", "text": "hi"}],
+        )
+        await trace_service.finalize_turn(
+            turn.id,
+            status=TurnStatus.COMPLETED,
+            stop_reason="end_turn",
+        )
         yield a
     finally:
         AgentRegistry._agents.clear()

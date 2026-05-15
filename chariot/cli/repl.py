@@ -41,7 +41,7 @@ prompt_toolkit:
 状态持有
 --------
 会话状态(model / max_tokens / messages / conversation_id)全部在 `ChatContext`
-实例里;repo 调用走 `ctx.agent.session_maker`。本类只负责"输入分派 + 打印"。
+实例里;持久化访问统一走 `services/*`。本类只负责"输入分派 + 打印"。
 """
 
 from __future__ import annotations

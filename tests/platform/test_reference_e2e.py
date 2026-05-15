@@ -40,7 +40,7 @@ async def test_file_reference_expanded_into_user_message(tmp_path: Path, agent: 
     agent._reference_expander = ReferenceExpander(
         cwd=tmp_path,
         allowed_domains=frozenset(),
-        sessionmaker=agent.session_maker,
+        sessionmaker=agent._sessionmaker,
     )
 
     req = ChatRequest(
@@ -81,7 +81,7 @@ async def test_file_not_found_yields_error_block(tmp_path: Path, agent: AIAgent)
     agent._reference_expander = ReferenceExpander(
         cwd=tmp_path,
         allowed_domains=frozenset(),
-        sessionmaker=agent.session_maker,
+        sessionmaker=agent._sessionmaker,
     )
     req = ChatRequest(
         provider_name="mock",

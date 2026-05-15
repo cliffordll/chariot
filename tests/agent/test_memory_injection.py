@@ -10,9 +10,9 @@ from chariot.agent.chat_request import ChatRequest, Message
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.context_repo import ContextRepo
-from chariot.repos.memory_repo import MemoryRepo
-from chariot.repos.prompt_repo import PromptRepo
+from chariot.services.context import ContextService
+from chariot.services.memory import MemoryService
+from chariot.services.prompt import PromptService
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -38,22 +38,20 @@ async def test_memory_is_injected_into_context_and_prompt(agent: AIAgent) -> Non
         conversation_id=conversation_id,
     )
 
-    async with agent.session_maker() as session:
-        await MemoryRepo(session).create(
-            kind="preference",
-            text="Reply in Chinese.",
-            meta={"scope": "user"},
-            links=[{"link_type": "conversation", "link_value": conversation_id}],
-        )
+    await MemoryService(agent).create(
+        kind="preference",
+        text="Reply in Chinese.",
+        meta={"scope": "user"},
+        links=[{"link_type": "conversation", "link_value": conversation_id}],
+    )
 
     async for _event in agent.run_chat(req):
         pass
 
-    async with agent.session_maker() as session:
-        context_repo = ContextRepo(session)
-        snapshots = await context_repo.list_snapshots(conversation_id=conversation_id)
-        traces = await context_repo.list_traces(conversation_id=conversation_id)
-        prompt_trace = await PromptRepo(session).get_trace(traces[0].prompt_trace_id)
+    context_service = ContextService(agent)
+    snapshots = await context_service.list_snapshots(conversation_id=conversation_id)
+    traces = await context_service.list_traces(conversation_id=conversation_id)
+    prompt_trace = await PromptService(agent).get_trace(traces[0].prompt_trace_id)
 
     memory_state = snapshots[0].slices[2]["content"]
     assert memory_state["entries"][0]["text"] == "Reply in Chinese."

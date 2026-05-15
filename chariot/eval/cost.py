@@ -7,14 +7,16 @@ Runner 只需要拿到 turn_id 就能调 populate,关注点分离。
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from chariot.models.eval import RunRecord
-from chariot.repos.trace_repo import TraceRepo
+from chariot.models.trace import TraceProviderCall, TraceToolCall, TraceTurn
 
 
 class TraceCostExtractor:
     """从 trace_turns + trace_provider_calls + trace_tool_calls 拼 RunRecord 的 cost/tools 字段。"""
 
-    def __init__(self, repo: TraceRepo) -> None:
+    def __init__(self, repo: _TraceCostStore) -> None:
         self._repo = repo
 
     async def populate(self, record: RunRecord, turn_id: str) -> None:
@@ -48,3 +50,11 @@ class TraceCostExtractor:
             }
             for tc in tool_call_rows
         ]
+
+
+class _TraceCostStore(Protocol):
+    async def get_turn(self, turn_id: str) -> TraceTurn | None: ...
+
+    async def list_provider_calls(self, turn_id: str) -> list[TraceProviderCall]: ...
+
+    async def list_tool_calls(self, turn_id: str) -> list[TraceToolCall]: ...

@@ -82,6 +82,9 @@ class ProviderService:
     async def delete(self, name: str) -> None:
         await self._repo.delete(name)
 
+    async def seed_if_empty(self) -> None:
+        await self._repo.seed_if_empty()
+
     async def set_default(self, name: str) -> None:
         await self._repo.set_default(name)
 

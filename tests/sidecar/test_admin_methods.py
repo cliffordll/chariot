@@ -28,9 +28,9 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.conversation import ConversationService
+from chariot.services.log import LogService
 from chariot.sidecar.methods import register_methods
 
 # ---------------------------------------------------------------------------
@@ -120,20 +120,18 @@ class TestConversationMethods:
 
     async def test_list_conversations_returns_seeded(self, server: JsonRpcServer, agent: AIAgent) -> None:
         """_________?repo ___________________?2 _?conversation,_________?RPC list _____________?"""
-        async with agent.session_maker() as session:
-            repo = ConversationRepo(session)
-            await repo.create("01H_TEST_A", title="first")
-            await repo.create("01H_TEST_B", title="second")
+        service = ConversationService(agent)
+        await service.create("01H_TEST_A", title="first")
+        await service.create("01H_TEST_B", title="second")
 
         line = await _call(server, "list_conversations")
         ids = sorted(c["id"] for c in line["result"]["conversations"])
         assert ids == ["01H_TEST_A", "01H_TEST_B"]
 
     async def test_get_conversation_returns_messages(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = ConversationRepo(session)
-            await repo.create("01H_C", title="t")
-            await repo.append_message("01H_C", role="user", content="hi")
+        service = ConversationService(agent)
+        await service.create("01H_C", title="t")
+        await service.append_user_message("01H_C", "hi")
 
         line = await _call(server, "get_conversation", {"conversation_id": "01H_C"})
         result = line["result"]
@@ -146,8 +144,7 @@ class TestConversationMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_rename_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            await ConversationRepo(session).create("01H_R", title="old")
+        await ConversationService(agent).create("01H_R", title="old")
 
         line = await _call(server, "rename_conversation", {"conversation_id": "01H_R", "title": "new"})
         assert line["result"]["conversation"]["title"] == "new"
@@ -157,8 +154,7 @@ class TestConversationMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_delete_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            await ConversationRepo(session).create("01H_D", title="t")
+        await ConversationService(agent).create("01H_D", title="t")
 
         line = await _call(server, "delete_conversation", {"conversation_id": "01H_D"})
         assert line["result"] == {"deleted": "01H_D"}
@@ -310,10 +306,9 @@ class TestLogMethods:
         assert line["result"] == {"logs": []}
 
     async def test_list_logs_returns_inserted(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            await repo.create(provider="mock", status="ok", latency_ms=42)
-            await repo.create(provider="mock", status="error", error="boom")
+        service = LogService(agent)
+        await service.create(provider="mock", status="ok", latency_ms=42)
+        await service.create(provider="mock", status="error", error="boom")
 
         line = await _call(server, "list_logs")
         logs = line["result"]["logs"]
@@ -322,10 +317,9 @@ class TestLogMethods:
         assert statuses == ["error", "ok"]
 
     async def test_list_logs_limit(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            for _ in range(5):
-                await repo.create(provider="mock", status="ok")
+        service = LogService(agent)
+        for _ in range(5):
+            await service.create(provider="mock", status="ok")
 
         line = await _call(server, "list_logs", {"limit": 2})
         assert len(line["result"]["logs"]) == 2
@@ -336,9 +330,7 @@ class TestLogMethods:
 
     async def test_list_logs_since_filter(self, server: JsonRpcServer, agent: AIAgent) -> None:
         """since _________?_?_________?created_at > since ______________?"""
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            await repo.create(provider="mock", status="ok")
+        await LogService(agent).create(provider="mock", status="ok")
 
         # __________________________________________________?created_at _?since,_____________?
         future_str = "2099-01-01T00:00:00"

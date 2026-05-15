@@ -39,8 +39,8 @@ class SidecarRuntime:
         return self._db_path
 
     @property
-    def session_maker(self):  # type: ignore[no-untyped-def]
-        return self._agent.session_maker
+    def _sessionmaker(self):  # type: ignore[no-untyped-def]
+        return self._agent._sessionmaker
 
     async def reserve_chat_agent(
         self,

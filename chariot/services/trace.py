@@ -162,6 +162,15 @@ class TraceService:
     async def get_turn(self, turn_id: str) -> TraceTurn | None:
         return await self._repo.get_turn(turn_id)
 
+    async def list_provider_calls(self, turn_id: str) -> list[TraceProviderCall]:
+        return await self._repo.list_provider_calls(turn_id)
+
+    async def list_tool_calls(self, turn_id: str) -> list[TraceToolCall]:
+        return await self._repo.list_tool_calls(turn_id)
+
+    async def list_checkpoints(self, turn_id: str) -> list[TraceCheckpoint]:
+        return await self._repo.list_checkpoints(turn_id)
+
     async def list_turns(
         self,
         *,
