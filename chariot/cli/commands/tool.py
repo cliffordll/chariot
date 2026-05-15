@@ -24,7 +24,7 @@ import yaml
 from chariot.agent.exceptions import ConfigError, ToolNotFound
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.tool import ToolService
 from chariot.tools.registry import ToolRegistry
 
 tool_app = typer.Typer(
@@ -40,8 +40,8 @@ def list_cmd() -> None:
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ToolRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await ToolService(agent).list_entries()
 
     rows = [
         (
@@ -64,8 +64,8 @@ def show_cmd(
 
 
 async def _show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"未知工具: {name!r}")
         return
@@ -96,8 +96,8 @@ def probe_cmd(
 
 
 async def _probe(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"未知工具: {name!r}")
         return
@@ -132,8 +132,7 @@ def disable_cmd(
 async def _set_enabled(name: str, enabled: bool) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update(name, enabled=enabled)
+            tool = await ToolService(agent).update(name, enabled=enabled)
         except ToolNotFound as e:
             Renderer.die(f"更新失败: {e}")
             return
@@ -228,8 +227,7 @@ async def _config(name: str, options: list[str]) -> None:
     opts = _parse_kv(options)
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update(name, options=opts)
+            tool = await ToolService(agent).update(name, options=opts)
         except ToolNotFound as e:
             Renderer.die(f"update failed: {e}")
             return
@@ -338,16 +336,15 @@ async def _create(
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).create(
-                    name=name,
-                    type=type_,
-                    enabled=True,
-                    options=options,
-                    source="custom",
-                    description=desc,
-                    custom_type=type_,
-                )
+            tool = await ToolService(agent).create(
+                name=name,
+                type=type_,
+                enabled=True,
+                options=options,
+                source="custom",
+                description=desc,
+                custom_type=type_,
+            )
         except ConfigError as e:
             Renderer.die(f"create failed: {e}")
             return
@@ -382,8 +379,8 @@ async def _update(
     from_file: str | None,
     option_items: list[str],
 ) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"未知工具: {name!r}")
         return
@@ -422,12 +419,11 @@ async def _update(
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                tool = await ToolRepo(session).update_full(
-                    name,
-                    options=new_options,
-                    description=new_description,
-                )
+            tool = await ToolService(agent).update_full(
+                name,
+                options=new_options,
+                description=new_description,
+            )
         except ToolNotFound as e:
             Renderer.die(f"更新失败: {e}")
             return
@@ -452,8 +448,8 @@ def delete_cmd(
 
 
 async def _delete(name: str, yes: bool) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"未知工具: {name!r}")
         return
@@ -473,8 +469,7 @@ async def _delete(name: str, yes: bool) -> None:
 
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await ToolRepo(session).delete(name)
+            await ToolService(agent).delete(name)
         except ToolNotFound as e:
             Renderer.die(f"删除失败: {e}")
             return

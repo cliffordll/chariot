@@ -22,10 +22,10 @@ import typer
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.database.models import LogEntry
-from chariot.repos.log_repo import LogRepo
+from chariot.services.log import LogService
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    pass
 
 _POLL_INTERVAL_SEC = 1.0
 _POLL_BATCH_LIMIT = 200
@@ -45,17 +45,15 @@ def logs_cmd(
 async def _run(*, n: int, follow: bool) -> None:
     async with installed_runtime() as agent:
         if not follow:
-            async with agent.session_maker() as session:
-                items = list(await LogRepo(session).list_logs(limit=n, offset=0))
+            items = list(await LogService(agent).list_logs(limit=n, offset=0))
             _print_batch(items, header=True)
             return
-        await _follow_loop(agent.session_maker, tail=n)
+        await _follow_loop(agent, tail=n)
 
 
-async def _follow_loop(session_maker: async_sessionmaker[AsyncSession], *, tail: int) -> None:
+async def _follow_loop(agent, *, tail: int) -> None:  # type: ignore[no-untyped-def]
     """先打 tail 批,再无限 polling since=last_created_at。"""
-    async with session_maker() as session:
-        initial = list(await LogRepo(session).list_logs(limit=tail, offset=0))
+    initial = list(await LogService(agent).list_logs(limit=tail, offset=0))
     # repo 返回时间降序;follow 语义希望时间升序(新日志追加在下面)
     initial_asc = list(reversed(initial))
     _print_batch(initial_asc, header=True, follow=True)
@@ -63,8 +61,13 @@ async def _follow_loop(session_maker: async_sessionmaker[AsyncSession], *, tail:
     last_seen: datetime | None = initial_asc[-1].created_at if initial_asc else None
     while True:
         await asyncio.sleep(_POLL_INTERVAL_SEC)
-        async with session_maker() as session:
-            batch = list(await LogRepo(session).list_logs(limit=_POLL_BATCH_LIMIT, offset=0, since=last_seen))
+        batch = list(
+            await LogService(agent).list_logs(
+                limit=_POLL_BATCH_LIMIT,
+                offset=0,
+                since=last_seen,
+            )
+        )
         if not batch:
             continue
         batch_asc = list(reversed(batch))

@@ -19,8 +19,8 @@ from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.repos.prompt_repo import (
     DEFAULT_BUNDLE_LAYERS,
-    PromptRepo,
 )
+from chariot.services.prompt import PromptService
 
 _MISSING = object()
 
@@ -200,8 +200,8 @@ def _layers_or_default(values: list[str] | None) -> list[dict[str, Any]]:
     return parsed
 
 
-def _prompt_repo(session: Any) -> PromptRepo:
-    return PromptRepo(session)
+def _prompt_repo(runtime: Any) -> PromptService:
+    return PromptService(runtime)
 
 
 # -------------------- 查看 --------------------
@@ -213,8 +213,8 @@ def list_cmd() -> None:
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        bundles = await _prompt_repo(session).list_bundles()
+    async with installed_runtime() as agent:
+        bundles = await _prompt_repo(agent).list_bundles()
     _render_bundle_rows(bundles)
 
 
@@ -226,8 +226,8 @@ def show_cmd(
 
 
 async def _versions(name: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = _prompt_repo(session)
+    async with installed_runtime() as agent:
+        repo = _prompt_repo(agent)
         if name is None:
             _render_bundle_rows(await repo.list_bundles())
             Renderer.out("提示：使用 `chariot prompt versions <bundle>` 查看某个 bundle 的版本。")
@@ -267,8 +267,8 @@ def version_cmd(
 
 
 async def _version(bundle_name: str, version: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = _prompt_repo(session)
+    async with installed_runtime() as agent:
+        repo = _prompt_repo(agent)
         entry = await repo.get_version(bundle_name, version)
         if entry is None:
             Renderer.die(f"未找到 prompt version: {bundle_name!r}:{version!r}")
@@ -304,12 +304,12 @@ def traces_cmd(
 
 
 async def _traces(bundle: str | None, *, limit: int, offset: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        repo = _prompt_repo(session)
+    async with installed_runtime() as agent:
+        repo = _prompt_repo(agent)
         if bundle is None:
             entries = await repo.list_traces(limit=limit, offset=offset)
         else:
-            entries = await repo.list_traces_by_bundle(bundle, limit=limit, offset=offset)
+            entries = await repo.list_traces(bundle_name=bundle, limit=limit, offset=offset)
             if not entries:
                 found = await repo.get_bundle(bundle)
                 if found is None:
@@ -326,8 +326,8 @@ def inspect_cmd(
 
 
 async def _inspect(trace_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        trace = await _prompt_repo(session).get_trace(trace_id)
+    async with installed_runtime() as agent:
+        trace = await _prompt_repo(agent).get_trace(trace_id)
         if trace is None:
             Renderer.die(f"未找到 prompt trace: {trace_id!r}")
             return
@@ -383,12 +383,11 @@ async def _add(name: str, *, description: str, layers: list[str]) -> None:
     bundle_description = description or None
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await _prompt_repo(session).create_bundle(
-                    name,
-                    description=bundle_description,
-                    layers=bundle_layers,
-                )
+            entry = await _prompt_repo(agent).create_bundle(
+                name,
+                description=bundle_description,
+                layers=bundle_layers,
+            )
         except ConfigError as exc:
             Renderer.die(f"创建失败: {exc}")
             return
@@ -426,8 +425,7 @@ async def _update(name: str, *, description: str | object, layers: list[str]) ->
         kwargs["layers"] = parsed_layers
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await _prompt_repo(session).update_bundle(name, **kwargs)
+            entry = await _prompt_repo(agent).update_bundle(name, **kwargs)
         except ConfigError as exc:
             Renderer.die(f"更新失败: {exc}")
             return
@@ -445,13 +443,12 @@ def activate_cmd(
 async def _activate(name: str, version: str | None) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                repo = _prompt_repo(session)
-                if version is None:
-                    entry = await repo.activate_bundle(name)
-                    Renderer.out(f"* {entry.name} 已激活")
-                    return
-                entry = await repo.activate_version(name, version)
+            repo = _prompt_repo(agent)
+            if version is None:
+                entry = await repo.activate_bundle(name)
+                Renderer.out(f"* {entry.name} 已激活")
+                return
+            entry = await repo.activate_version(name, version)
         except ConfigError as exc:
             Renderer.die(f"激活失败: {exc}")
             return

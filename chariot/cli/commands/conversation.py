@@ -26,7 +26,6 @@ import typer
 from chariot.agent.exceptions import ConversationNotFound
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.conversation_repo import ConversationRepo
 from chariot.services.conversation import ConversationService
 
 conversation_app = typer.Typer(
@@ -54,10 +53,8 @@ def list_cmd(
 
 
 async def _list(limit: int, offset: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        conversations = await ConversationService(ConversationRepo(session)).list_conversations(
-            limit=limit, offset=offset
-        )
+    async with installed_runtime() as agent:
+        conversations = await ConversationService(agent).list_conversations(limit=limit, offset=offset)
 
     if not conversations:
         Renderer.out("(没有会话 — 用 `chariot chat --conversation new` 开始一个)")
@@ -87,8 +84,8 @@ def show_cmd(
 
 
 async def _show(conversation_id: str, tail: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = ConversationService(ConversationRepo(session))
+    async with installed_runtime() as agent:
+        service = ConversationService(agent)
         conversation = await service.get(conversation_id)
         if conversation is None:
             Renderer.die(f"未知 conversation id: {conversation_id!r}")
@@ -135,8 +132,7 @@ def rm_cmd(
 async def _rm(conversation_id: str) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await ConversationService(ConversationRepo(session)).delete(conversation_id)
+            await ConversationService(agent).delete(conversation_id)
         except ConversationNotFound as e:
             Renderer.die(f"删除失败: {e}")
             return
@@ -158,8 +154,7 @@ async def _rename(conversation_id: str, title: str) -> None:
     new_title: str | None = title if title else None
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                conversation = await ConversationService(ConversationRepo(session)).rename(conversation_id, new_title)
+            conversation = await ConversationService(agent).rename(conversation_id, new_title)
         except ConversationNotFound as e:
             Renderer.die(f"重命名失败: {e}")
             return
@@ -179,10 +174,8 @@ def search_cmd(
 
 
 async def _search(query: str, limit: int, conversation_id: str | None) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        hits = await ConversationService(ConversationRepo(session)).search(
-            query, limit=limit, conversation_id=conversation_id
-        )
+    async with installed_runtime() as agent:
+        hits = await ConversationService(agent).search(query, limit=limit, conversation_id=conversation_id)
     if not hits:
         Renderer.out("(无命中)")
         return
@@ -200,8 +193,8 @@ def rebuild_fts_cmd() -> None:
 
 
 async def _rebuild_fts() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        n = await ConversationService(ConversationRepo(session)).rebuild_fts()
+    async with installed_runtime() as agent:
+        n = await ConversationService(agent).rebuild_fts()
     Renderer.out(f"rebuilt FTS index for {n} message(s)")
 
 

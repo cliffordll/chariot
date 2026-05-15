@@ -21,7 +21,7 @@ from chariot.agent.exceptions import (
 )
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.auxiliary_repo import AuxiliaryRepo
+from chariot.services.auxiliary import AuxiliaryService
 
 auxiliary_app = typer.Typer(
     name="auxiliary",
@@ -69,8 +69,8 @@ def list_cmd() -> None:
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await AuxiliaryRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await AuxiliaryService(agent).list_entries()
     if not entries:
         Renderer.out("(没有 auxiliary client)")
         return
@@ -89,8 +89,8 @@ def show_cmd(
 
 
 async def _show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await AuxiliaryRepo(session).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await AuxiliaryService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"未知 auxiliary client name: {name!r}")
         return
@@ -127,13 +127,12 @@ async def _add(
 ) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await AuxiliaryRepo(session).create(
-                    name=name,
-                    provider_entry=provider,
-                    model=model,
-                    params=params,
-                )
+            entry = await AuxiliaryService(agent).create(
+                name=name,
+                provider_entry=provider,
+                model=model,
+                params=params,
+            )
         except DuplicateAuxiliaryClientName as e:
             Renderer.die(str(e))
             return
@@ -176,13 +175,12 @@ async def _update(name: str, provider: str, model_arg: str, params_raw: list[str
     params = _parse_params(params_raw) if params_raw else None
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await AuxiliaryRepo(session).update(
-                    name,
-                    provider_entry=provider or None,
-                    model=model,
-                    params=params,
-                )
+            entry = await AuxiliaryService(agent).update(
+                name,
+                provider_entry=provider or None,
+                model=model,
+                params=params,
+            )
         except AuxiliaryClientNotFound as e:
             Renderer.die(str(e))
             return
@@ -206,8 +204,7 @@ def delete_cmd(
 async def _delete(name: str) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                await AuxiliaryRepo(session).delete(name)
+            await AuxiliaryService(agent).delete(name)
         except AuxiliaryClientNotFound as e:
             Renderer.die(str(e))
             return

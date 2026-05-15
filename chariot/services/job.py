@@ -6,6 +6,8 @@ from typing import Protocol
 
 from chariot.models.job import JobRunRecord, ScheduledJob
 from chariot.models.task import Task, TaskCreate, TaskKind
+from chariot.repos.task_repo import TaskRepo
+from chariot.services._session_proxy import SessionRepoProxy
 from chariot.services.task import TaskService
 
 
@@ -52,9 +54,9 @@ class JobStore(Protocol):
 
 
 class JobService:
-    def __init__(self, store: JobStore, task_service: TaskService) -> None:
-        self._store = store
-        self._tasks = task_service
+    def __init__(self, session_maker: object) -> None:
+        self._store = SessionRepoProxy(session_maker, TaskRepo)
+        self._tasks = TaskService(session_maker)
 
     async def list_jobs(self) -> list[ScheduledJob]:
         return await self._store.list_jobs()

@@ -16,7 +16,8 @@ import typer
 
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.audit_repo import AuditEvent, AuditRepo
+from chariot.repos.audit_repo import AuditEvent
+from chariot.services.audit import AuditService
 
 audit_app = typer.Typer(
     name="audit",
@@ -47,8 +48,8 @@ def show_cmd(
 
 
 async def _list(limit: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        events = await AuditRepo(session).list_events(limit=limit)
+    async with installed_runtime() as agent:
+        events = await AuditService(agent).list_events(limit=limit)
     if not events:
         Renderer.out("(没有 audit events)")
         return
@@ -66,8 +67,8 @@ async def _list(limit: int) -> None:
 
 
 async def _show(event_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        event = await AuditRepo(session).get_event(event_id)
+    async with installed_runtime() as agent:
+        event = await AuditService(agent).get_event(event_id)
     if event is None:
         Renderer.die(f"audit event not found: {event_id!r}")
         return

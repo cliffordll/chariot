@@ -17,15 +17,15 @@ class JobMethods(MethodBase):
 
     async def list_jobs(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            jobs = await self._api.list_jobs(session)
+        async with self._rpc_errors():
+            jobs = await self._api.list_jobs()
         return {"jobs": jobs}
 
     async def show_job(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            job = await self._api.get_job(session, name=name)
+        async with self._rpc_errors():
+            job = await self._api.get_job(name=name)
         return {"job": job}
 
     async def create_job(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -38,9 +38,8 @@ class JobMethods(MethodBase):
         enabled = params.get("enabled", True)
         if not isinstance(enabled, bool):
             raise TypeError("'enabled' must be a boolean")
-        async with self._session() as session:
+        async with self._rpc_errors():
             job = await self._api.create_job(
-                session,
                 name=name,
                 goal=goal,
                 cron=cron,
@@ -57,9 +56,8 @@ class JobMethods(MethodBase):
         cron = self._optional_str(params, "cron")
         agent_profile = self._optional_str(params, "agent_profile")
         meta = self._optional_dict(params, "meta")
-        async with self._session() as session:
+        async with self._rpc_errors():
             job = await self._api.update_job(
-                session,
                 name=name,
                 goal=goal,
                 cron=cron,
@@ -71,27 +69,27 @@ class JobMethods(MethodBase):
     async def enable_job(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            job = await self._api.enable_job(session, name=name)
+        async with self._rpc_errors():
+            job = await self._api.enable_job(name=name)
         return {"job": job}
 
     async def disable_job(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            job = await self._api.disable_job(session, name=name)
+        async with self._rpc_errors():
+            job = await self._api.disable_job(name=name)
         return {"job": job}
 
     async def delete_job(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            result = await self._api.delete_job(session, name=name)
+        async with self._rpc_errors():
+            result = await self._api.delete_job(name=name)
         return result
 
     async def run_job_now(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            result = await self._api.run_job_now(session, name=name)
+        async with self._rpc_errors():
+            result = await self._api.run_job_now(name=name)
         return result

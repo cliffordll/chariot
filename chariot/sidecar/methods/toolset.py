@@ -17,15 +17,15 @@ class ToolsetMethods(MethodBase):
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            entries = await self._service.list_entries(session)
+        async with self._rpc_errors():
+            entries = await self._service.list_entries()
         return {"toolsets": entries}
 
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            entry = await self._service.get_entry(session, name=name)
+        async with self._rpc_errors():
+            entry = await self._service.get_entry(name=name)
         return {"toolset": entry}
 
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -34,9 +34,8 @@ class ToolsetMethods(MethodBase):
         description = self._optional_str(params, "description")
         members = self._optional_str_list(params, "members")
         meta = self._optional_dict(params, "meta")
-        async with self._session() as session:
+        async with self._rpc_errors():
             entry = await self._service.create(
-                session,
                 name=name,
                 description=description,
                 members=members,
@@ -50,9 +49,8 @@ class ToolsetMethods(MethodBase):
         description = self._optional_str(params, "description")
         members = self._optional_str_list(params, "members")
         meta = self._optional_dict(params, "meta")
-        async with self._session() as session:
+        async with self._rpc_errors():
             entry = await self._service.update(
-                session,
                 name=name,
                 description=description,
                 members=members,
@@ -63,24 +61,24 @@ class ToolsetMethods(MethodBase):
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            deleted = await self._service.delete(session, name=name)
+        async with self._rpc_errors():
+            deleted = await self._service.delete(name=name)
         return {"deleted": deleted}
 
     async def add_member(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
         tool_name = self._require_str(params, "tool_name")
-        async with self._session() as session:
-            entry = await self._service.add_member(session, name=name, tool_name=tool_name)
+        async with self._rpc_errors():
+            entry = await self._service.add_member(name=name, tool_name=tool_name)
         return {"toolset": entry}
 
     async def remove_member(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
         tool_name = self._require_str(params, "tool_name")
-        async with self._session() as session:
-            entry = await self._service.remove_member(session, name=name, tool_name=tool_name)
+        async with self._rpc_errors():
+            entry = await self._service.remove_member(name=name, tool_name=tool_name)
         return {"toolset": entry}
 
     @staticmethod

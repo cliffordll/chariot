@@ -14,7 +14,6 @@ import typer
 from chariot.agent.exceptions import ConfigError
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.toolset_repo import ToolsetRepo
 from chariot.services.toolset import ToolsetService
 
 toolset_app = typer.Typer(name="toolset", help="管理 toolset(命名一组 tool 给 agent 引用)", no_args_is_help=True)
@@ -121,8 +120,8 @@ def members_delete_cmd(
 
 
 async def _toolset_list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await ToolsetService(ToolsetRepo(session)).list_entries()
+    async with installed_runtime() as agent:
+        entries = await ToolsetService(agent).list_entries()
     if not entries:
         Renderer.out("(没有 toolset)")
         return
@@ -138,8 +137,8 @@ async def _toolset_list() -> None:
 
 
 async def _toolset_show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await ToolsetService(ToolsetRepo(session)).get_entry(name)
+    async with installed_runtime() as agent:
+        entry = await ToolsetService(agent).get_entry(name)
     if entry is None:
         Renderer.die(f"toolset not found: {name!r}")
         return
@@ -168,9 +167,9 @@ async def _toolset_add(
         Renderer.die("--name is required")
         return
     parsed_meta = _parse_meta(meta) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            entry = await ToolsetService(ToolsetRepo(session)).create(
+            entry = await ToolsetService(agent).create(
                 name=name.strip(),
                 description=description,
                 members=members,
@@ -190,9 +189,9 @@ async def _toolset_update(
     meta: str,
 ) -> None:
     parsed_meta = _parse_meta(meta) if meta.strip() else None
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            entry = await ToolsetService(ToolsetRepo(session)).update(
+            entry = await ToolsetService(agent).update(
                 name,
                 description=description,
                 members=members,
@@ -205,9 +204,9 @@ async def _toolset_update(
 
 
 async def _toolset_delete(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            await ToolsetService(ToolsetRepo(session)).delete(name)
+            await ToolsetService(agent).delete(name)
         except ConfigError as exc:
             Renderer.die(str(exc))
             return
@@ -215,9 +214,9 @@ async def _toolset_delete(name: str) -> None:
 
 
 async def _members_add(name: str, tool_name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            entry = await ToolsetService(ToolsetRepo(session)).add_member(name, tool_name)
+            entry = await ToolsetService(agent).add_member(name, tool_name)
         except ConfigError as exc:
             Renderer.die(str(exc))
             return
@@ -225,9 +224,9 @@ async def _members_add(name: str, tool_name: str) -> None:
 
 
 async def _members_delete(name: str, tool_name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
+    async with installed_runtime() as agent:
         try:
-            entry = await ToolsetService(ToolsetRepo(session)).remove_member(name, tool_name)
+            entry = await ToolsetService(agent).remove_member(name, tool_name)
         except ConfigError as exc:
             Renderer.die(str(exc))
             return

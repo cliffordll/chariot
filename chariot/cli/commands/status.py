@@ -21,7 +21,7 @@ from chariot import __version__
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.database.session import DEFAULT_DB_PATH
-from chariot.repos.provider_repo import ProviderRepo
+from chariot.services.provider import ProviderService
 
 
 def status_cmd() -> None:
@@ -31,8 +31,7 @@ def status_cmd() -> None:
 
 async def _run() -> None:
     async with installed_runtime() as agent:
-        async with agent.session_maker() as session:
-            default = await ProviderRepo(session).get_default()
+        default = await ProviderService(agent).get_default()
         provider_names = ", ".join(sorted(agent.providers))
         tool_names = ", ".join(sorted(agent.tools)) or "(无 enabled)"
         if default is None:

@@ -13,11 +13,12 @@ from typing import Any
 from chariot.memory.policy import MemoryPolicy
 from chariot.models.memory import MemoryEntry, MemoryEventEntry, MemoryLinkEntry
 from chariot.repos.memory_repo import MemoryRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 
 class MemoryService:
-    def __init__(self, repo: MemoryRepo) -> None:
-        self._repo = repo
+    def __init__(self, session_maker: object) -> None:
+        self._repo = SessionRepoProxy(session_maker, MemoryRepo)
 
     async def list_entries(
         self,

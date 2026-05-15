@@ -26,9 +26,8 @@ class MemoryMethods(MethodBase):
         archived = self._optional_bool(params, "archived")
         limit = int(params.get("limit", 50))
         offset = int(params.get("offset", 0))
-        async with self._session() as session:
+        async with self._rpc_errors():
             entries = await self._service.list_entries(
-                session,
                 kind=kind,
                 pinned=pinned,
                 archived=archived,
@@ -44,8 +43,8 @@ class MemoryMethods(MethodBase):
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         memory_id = self._require_str(params, "memory_id")
-        async with self._session() as session:
-            entry = await self._service.get_entry(session, memory_id=memory_id)
+        async with self._rpc_errors():
+            entry = await self._service.get_entry(memory_id=memory_id)
         return {"memory": entry}
 
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -56,9 +55,8 @@ class MemoryMethods(MethodBase):
         pinned = bool(params.get("pinned", False))
         archived = bool(params.get("archived", False))
         links = self._optional_list_of_dicts(params, "links")
-        async with self._session() as session:
+        async with self._rpc_errors():
             entry = await self._service.create_entry(
-                session,
                 kind=kind,
                 text=text,
                 meta=meta,
@@ -87,9 +85,8 @@ class MemoryMethods(MethodBase):
         if archived is not None and not isinstance(archived, bool):
             raise TypeError("archived must be a boolean or null")
         links = self._optional_list_of_dicts(params, "links")
-        async with self._session() as session:
+        async with self._rpc_errors():
             entry = await self._service.update_entry(
-                session,
                 memory_id=memory_id,
                 kind=kind,
                 text=text,
@@ -109,8 +106,8 @@ class MemoryMethods(MethodBase):
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         memory_id = self._require_str(params, "memory_id")
-        async with self._session() as session:
-            result = await self._service.delete_entry(session, memory_id=memory_id)
+        async with self._rpc_errors():
+            result = await self._service.delete_entry(memory_id=memory_id)
         await self.agent.audit_hooks.record_memory_store(
             memory_id=memory_id,
             action="delete",
@@ -121,8 +118,8 @@ class MemoryMethods(MethodBase):
         del ctx
         memory_id = self._require_str(params, "memory_id")
         pinned = bool(params.get("pinned", True))
-        async with self._session() as session:
-            entry = await self._service.pin_entry(session, memory_id=memory_id, pinned=pinned)
+        async with self._rpc_errors():
+            entry = await self._service.pin_entry(memory_id=memory_id, pinned=pinned)
         await self.agent.audit_hooks.record_memory_store(
             memory_id=entry["id"],
             action="pin" if pinned else "unpin",
@@ -135,8 +132,8 @@ class MemoryMethods(MethodBase):
         del ctx
         memory_id = self._require_str(params, "memory_id")
         archived = bool(params.get("archived", True))
-        async with self._session() as session:
-            entry = await self._service.archive_entry(session, memory_id=memory_id, archived=archived)
+        async with self._rpc_errors():
+            entry = await self._service.archive_entry(memory_id=memory_id, archived=archived)
         await self.agent.audit_hooks.record_memory_store(
             memory_id=entry["id"],
             action="archive" if archived else "restore",
@@ -148,8 +145,8 @@ class MemoryMethods(MethodBase):
     async def events(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         memory_id = self._optional_str(params, "memory_id")
-        async with self._session() as session:
-            entries = await self._service.list_events(session, memory_id=memory_id)
+        async with self._rpc_errors():
+            entries = await self._service.list_events(memory_id=memory_id)
         return {"events": entries}
 
     async def links(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -157,9 +154,8 @@ class MemoryMethods(MethodBase):
         memory_id = self._optional_str(params, "memory_id")
         link_type = self._optional_str(params, "link_type")
         link_value = self._optional_str(params, "link_value")
-        async with self._session() as session:
+        async with self._rpc_errors():
             entries = await self._service.list_links(
-                session,
                 memory_id=memory_id,
                 link_type=link_type,
                 link_value=link_value,
@@ -169,8 +165,8 @@ class MemoryMethods(MethodBase):
     async def search(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         query = self._require_str(params, "query")
-        async with self._session() as session:
-            entries = await self._service.search_entries(session, query=query)
+        async with self._rpc_errors():
+            entries = await self._service.search_entries(query=query)
         return {"entries": entries}
 
     @staticmethod

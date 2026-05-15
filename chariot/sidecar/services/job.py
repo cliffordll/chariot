@@ -5,10 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.models.job import JobRunRecord, ScheduledJob
-from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.job import JobService
-from chariot.services.task import TaskService
 from chariot.sidecar.runtime import SidecarRuntime
 from chariot.sidecar.services.task import TaskApi
 
@@ -17,14 +15,12 @@ class JobApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
-    async def list_jobs(self, session: Any) -> list[dict[str, Any]]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async def list_jobs(self) -> list[dict[str, Any]]:
+        service = JobService(self._runtime)
         return [self._job_to_dict(entry) for entry in await service.list_jobs()]
 
-    async def get_job(self, session: Any, *, name: str) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async def get_job(self, *, name: str) -> dict[str, Any]:
+        service = JobService(self._runtime)
         job = await service.get_job(name)
         if job is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"job {name!r} not found")
@@ -34,7 +30,6 @@ class JobApi:
 
     async def create_job(
         self,
-        session: Any,
         *,
         name: str,
         goal: str,
@@ -43,8 +38,7 @@ class JobApi:
         agent_profile: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+        service = JobService(self._runtime)
         try:
             job = await service.create_job(
                 name=name,
@@ -60,7 +54,6 @@ class JobApi:
 
     async def update_job(
         self,
-        session: Any,
         *,
         name: str,
         goal: str | None = None,
@@ -68,8 +61,7 @@ class JobApi:
         agent_profile: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+        service = JobService(self._runtime)
         try:
             job = await service.update_job(
                 name=name,
@@ -82,33 +74,30 @@ class JobApi:
             self._raise_rpc_error(e)
         return self._job_to_dict(job)
 
-    async def enable_job(self, session: Any, *, name: str) -> dict[str, Any]:
-        return await self._set_enabled(session, name=name, enabled=True)
+    async def enable_job(self, *, name: str) -> dict[str, Any]:
+        return await self._set_enabled(name=name, enabled=True)
 
-    async def disable_job(self, session: Any, *, name: str) -> dict[str, Any]:
-        return await self._set_enabled(session, name=name, enabled=False)
+    async def disable_job(self, *, name: str) -> dict[str, Any]:
+        return await self._set_enabled(name=name, enabled=False)
 
-    async def delete_job(self, session: Any, *, name: str) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async def delete_job(self, *, name: str) -> dict[str, Any]:
+        service = JobService(self._runtime)
         try:
             await service.delete_job(name)
         except ValueError as e:
             self._raise_rpc_error(e)
         return {"deleted": name}
 
-    async def run_job_now(self, session: Any, *, name: str) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async def run_job_now(self, *, name: str) -> dict[str, Any]:
+        service = JobService(self._runtime)
         try:
             task, run = await service.run_job_now(name)
         except ValueError as e:
             self._raise_rpc_error(e)
         return {"task": TaskApi._task_to_dict(task), "job_run": self._job_run_to_dict(run)}
 
-    async def _set_enabled(self, session: Any, *, name: str, enabled: bool) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        service = JobService(repo, TaskService(repo))
+    async def _set_enabled(self, *, name: str, enabled: bool) -> dict[str, Any]:
+        service = JobService(self._runtime)
         try:
             job = await (service.enable_job(name) if enabled else service.disable_job(name))
         except ValueError as e:

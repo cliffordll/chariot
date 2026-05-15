@@ -16,6 +16,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from chariot.models.agent import UNSET, AgentProfile, ClearableStr, _UnsetType
+from chariot.repos.task_repo import TaskRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 __all__ = ["UNSET", "AgentProfile", "AgentProfileStore", "AgentService", "ClearableStr"]
 
@@ -57,8 +59,8 @@ class AgentProfileStore(Protocol):
 
 
 class AgentService:
-    def __init__(self, store: AgentProfileStore) -> None:
-        self._store = store
+    def __init__(self, session_maker: object) -> None:
+        self._store = SessionRepoProxy(session_maker, TaskRepo)
 
     async def list_agents(self) -> list[AgentProfile]:
         return await self._store.list_profiles()

@@ -24,8 +24,6 @@ from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.sidecar.runtime import SidecarRuntime
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from chariot.agent.config import Capabilities
@@ -71,25 +69,24 @@ class MethodBase:
         self.agent = runtime.agent
 
     @asynccontextmanager
-    async def _session(self) -> AsyncGenerator[AsyncSession, None]:
-        async with self.runtime.session_maker() as session:
-            try:
-                yield session
-            except (
-                ConversationNotFound,
-                ProviderNotFound,
-                ToolNotFound,
-                AuxiliaryClientNotFound,
-            ) as e:
-                raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
-            except (
-                DuplicateConversationId,
-                DuplicateProviderName,
-                DuplicateAuxiliaryClientName,
-            ) as e:
-                raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
-            except ConfigError as e:
-                raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
+    async def _rpc_errors(self):
+        try:
+            yield
+        except (
+            ConversationNotFound,
+            ProviderNotFound,
+            ToolNotFound,
+            AuxiliaryClientNotFound,
+        ) as e:
+            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, str(e)) from e
+        except (
+            DuplicateConversationId,
+            DuplicateProviderName,
+            DuplicateAuxiliaryClientName,
+        ) as e:
+            raise RpcError(JsonRpcServer.ERR_DUPLICATE, str(e)) from e
+        except ConfigError as e:
+            raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
 
     @staticmethod
     def _require_str(params: dict[str, Any], key: str) -> str:

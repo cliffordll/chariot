@@ -17,15 +17,15 @@ class AgentMethods(MethodBase):
 
     async def list_agents(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            agents = await self._api.list_agents(session)
+        async with self._rpc_errors():
+            agents = await self._api.list_agents()
         return {"agents": agents}
 
     async def get_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            agent = await self._api.get_agent(session, name=name)
+        async with self._rpc_errors():
+            agent = await self._api.get_agent(name=name)
         return {"agent": agent}
 
     async def create_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -39,9 +39,8 @@ class AgentMethods(MethodBase):
         meta = self._optional_dict(params, "meta")
         reflection_enabled = bool(params.get("reflection_enabled", False))
         reflection_max_retries = self._optional_int(params, "reflection_max_retries", default=2) or 2
-        async with self._session() as session:
+        async with self._rpc_errors():
             agent = await self._api.create_agent(
-                session,
                 name=name,
                 role=role,
                 prompt_bundle=prompt_bundle,
@@ -66,9 +65,8 @@ class AgentMethods(MethodBase):
         meta = self._optional_dict(params, "meta")
         reflection_enabled = bool(params["reflection_enabled"]) if "reflection_enabled" in params else None
         reflection_max_retries = self._optional_int(params, "reflection_max_retries", default=None)
-        async with self._session() as session:
+        async with self._rpc_errors():
             agent = await self._api.update_agent(
-                session,
                 name=name,
                 role=role,
                 prompt_bundle=prompt_bundle,
@@ -97,6 +95,6 @@ class AgentMethods(MethodBase):
     async def delete_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            result = await self._api.delete_agent(session, name=name)
+        async with self._rpc_errors():
+            result = await self._api.delete_agent(name=name)
         return result

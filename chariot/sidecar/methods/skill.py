@@ -2,7 +2,7 @@
 
 读路径(`list_skills` / `get_skill`)走 `SkillRegistry`(builtin + DB union 视图);
 写路径(`install_skill` / `enable_skill` / `disable_skill` / `delete_skill`)走
-`SkillRepo` + `audit_hooks.record_skill_store`。
+`SkillService` + `audit_hooks.record_skill_store`。
 
 注意:install_skill **不**热重载 registry —— 跟 CLI 同语义,需要 sidecar 进程
 重启才反映到 chat path(避免运行时多个 chat 看到不一致的 skill 集合)。
@@ -13,9 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.agent.config import ConfigError
-from chariot.repos.skill_repo import SkillEntry, SkillRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
 from chariot.sidecar.methods import MethodBase
+from chariot.sidecar.services import SkillApi
 from chariot.skills import BaseSkill, SkillLoader, SkillManifestError
 
 
@@ -77,16 +77,15 @@ class SkillMethods(MethodBase):
             yaml_text = content or ""
             skill_name = manifest.name
 
-        async with self._session() as session:
-            try:
-                entry = await SkillRepo(session).create(
-                    name=skill_name,
-                    description=None,
-                    content=yaml_text,
-                    enabled=enabled,
-                )
-            except ConfigError as exc:
-                raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(exc)) from exc
+        try:
+            entry = await SkillApi(self.runtime).create(
+                name=skill_name,
+                description=None,
+                content=yaml_text,
+                enabled=enabled,
+            )
+        except ConfigError as exc:
+            raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(exc)) from exc
         await self.agent.audit_hooks.record_skill_store(
             skill_id=entry.id,
             name=entry.name,
@@ -123,12 +122,11 @@ class SkillMethods(MethodBase):
     async def delete(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            repo = SkillRepo(session)
-            entry = await repo.get_by_name(name)
-            if entry is None:
-                raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"no DB skill named {name!r}")
-            await repo.delete(entry.id)
+        service = SkillApi(self.runtime)
+        entry = await service.get_by_name(name)
+        if entry is None:
+            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"no DB skill named {name!r}")
+        await service.delete(entry.id)
         await self.agent.audit_hooks.record_skill_store(
             skill_id=entry.id,
             name=entry.name,
@@ -147,15 +145,14 @@ class SkillMethods(MethodBase):
     ) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            repo = SkillRepo(session)
-            entry = await repo.get_by_name(name)
-            if entry is None:
-                raise RpcError(
-                    JsonRpcServer.ERR_NOT_FOUND,
-                    f"no DB skill named {name!r}(builtin 永远 enabled)",
-                )
-            updated = await repo.set_enabled(entry.id, enabled)
+        service = SkillApi(self.runtime)
+        entry = await service.get_by_name(name)
+        if entry is None:
+            raise RpcError(
+                JsonRpcServer.ERR_NOT_FOUND,
+                f"no DB skill named {name!r}(builtin 永远 enabled)",
+            )
+        updated = await service.set_enabled(entry.id, enabled)
         await self.agent.audit_hooks.record_skill_store(
             skill_id=updated.id,
             name=updated.name,
@@ -181,7 +178,7 @@ class SkillMethods(MethodBase):
         return out
 
     @staticmethod
-    def _entry_to_dict(entry: SkillEntry) -> dict[str, Any]:
+    def _entry_to_dict(entry: Any) -> dict[str, Any]:
         return {
             "id": entry.id,
             "name": entry.name,

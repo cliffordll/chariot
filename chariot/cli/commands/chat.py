@@ -25,7 +25,6 @@ from chariot.cli._runtime import installed_runtime
 from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
 from chariot.database.session import DEFAULT_DB_PATH
-from chariot.repos.conversation_repo import ConversationRepo
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符。偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
@@ -135,13 +134,11 @@ async def _run(
     # Phase 0:若 --conversation <id>,先查 DB 恢复 agent 配置
     restored_agent = await _restore_conversation_config(conversation_id)
 
-    # Phase 1:开 DB 查默认 provider
-    provider_name = provider or _resolve_provider_name(None)
-    resolved_agent = agent_profile or restored_agent
-
-    # Phase 2:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
+    # Phase 1:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
     try:
         async with installed_runtime() as agent:
+            provider_name = provider or await _resolve_provider_name(agent)
+            resolved_agent = agent_profile or restored_agent
             ctx = ChatContext(
                 agent=agent,
                 provider_name=provider_name,
@@ -175,18 +172,19 @@ async def _restore_conversation_config(conversation_id: str | None) -> str | Non
     from chariot.services.conversation import ConversationService
 
     sm = await init_db(DEFAULT_DB_PATH)
-    async with sm() as session:
-        conv = await ConversationService(ConversationRepo(session)).get(conversation_id)
+    async with sm():
+        conv = await ConversationService(sm).get(conversation_id)
     if conv is None:
         return None
     return conv.agent_profile
 
 
-def _resolve_provider_name(override: str | None) -> str | None:
-    """CLI flag --provider 显式指定时返回它,否则 None(不自动查 DB 默认)。"""
-    if override is not None and override.strip():
-        return override.strip()
-    return None
+async def _resolve_provider_name(agent: object) -> str | None:
+    """返回 CLI 默认 provider;没有默认时保持 None。"""
+    from chariot.services.provider import ProviderService
+
+    default = await ProviderService(agent).get_default()
+    return default.name if default is not None else None
 
 
 def register(app: typer.Typer) -> None:

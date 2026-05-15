@@ -9,9 +9,9 @@ from datetime import datetime
 from typing import Any
 
 from chariot.database.models import LogEntry
-from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
 from chariot.sidecar.methods import MethodBase
+from chariot.sidecar.services import LogApi
 
 
 class LogMethods(MethodBase):
@@ -34,8 +34,7 @@ class LogMethods(MethodBase):
         offset = self._parse_offset(params.get("offset"))
         since = self._parse_datetime(params, key="since")
         until = self._parse_datetime(params, key="until")
-        async with self._session() as session:
-            entries = await LogRepo(session).list_logs(limit=limit, offset=offset, since=since, until=until)
+        entries = await LogApi(self.runtime).list_logs(limit=limit, offset=offset, since=since, until=until)
         return {"logs": [self._serialize(e) for e in entries]}
 
     @classmethod

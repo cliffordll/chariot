@@ -28,8 +28,8 @@ class ConversationMethods(MethodBase):
         updated_at, message_count}, ...]}`
         """
         del params, ctx
-        async with self._session() as session:
-            entries = await self._api.list_conversations(session)
+        async with self._rpc_errors():
+            entries = await self._api.list_conversations()
         return {"conversations": entries}
 
     async def get(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -40,25 +40,24 @@ class ConversationMethods(MethodBase):
         """
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
-        async with self._session() as session:
-            return await self._api.get_conversation(session, conversation_id=conversation_id)
+        async with self._rpc_errors():
+            return await self._api.get_conversation(conversation_id=conversation_id)
 
     async def rename(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`rename_conversation`:改 conversation title。title=None 清空。"""
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
         title = self._optional_str(params, "title")
-        async with self._session() as session:
-            return await self._api.rename_conversation(session, conversation_id=conversation_id, title=title)
+        async with self._rpc_errors():
+            return await self._api.rename_conversation(conversation_id=conversation_id, title=title)
 
     async def update_config(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`update_conversation_config`:更新 agent_profile。"""
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
         agent_profile = self._optional_str(params, "agent_profile")
-        async with self._session() as session:
+        async with self._rpc_errors():
             return await self._api.update_config(
-                session,
                 conversation_id=conversation_id,
                 agent_profile=agent_profile,
             )
@@ -67,8 +66,8 @@ class ConversationMethods(MethodBase):
         """`delete_conversation`:删 conversation + cascade 删 messages。"""
         del ctx
         conversation_id = self._require_str(params, "conversation_id")
-        async with self._session() as session:
-            return await self._api.delete_conversation(session, conversation_id=conversation_id)
+        async with self._rpc_errors():
+            return await self._api.delete_conversation(conversation_id=conversation_id)
 
     async def search(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`search_conversation`(B3 wave 1):FTS5 全文搜索 messages。
@@ -81,9 +80,8 @@ class ConversationMethods(MethodBase):
         limit_raw = params.get("limit")
         limit = int(limit_raw) if isinstance(limit_raw, int) and not isinstance(limit_raw, bool) else 20
         conversation_id = self._optional_str(params, "conversation_id")
-        async with self._session() as session:
+        async with self._rpc_errors():
             return await self._api.search_conversation(
-                session,
                 query=query,
                 limit=limit,
                 conversation_id=conversation_id,
@@ -92,5 +90,5 @@ class ConversationMethods(MethodBase):
     async def rebuild_fts(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         """`rebuild_conversation_fts`(B3 wave 1):灾备清空 + 全量回填 messages_fts。"""
         del params, ctx
-        async with self._session() as session:
-            return await self._api.rebuild_conversation_fts(session)
+        async with self._rpc_errors():
+            return await self._api.rebuild_conversation_fts()

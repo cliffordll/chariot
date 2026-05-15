@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.repos.conversation_repo import Conversation, ConversationRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 __all__ = ["ConversationService"]
 
@@ -22,8 +23,8 @@ __all__ = ["ConversationService"]
 class ConversationService:
     """Conversation 领域服务。持有一个 ConversationRepo,提供高层业务方法。"""
 
-    def __init__(self, repo: ConversationRepo) -> None:
-        self._repo = repo
+    def __init__(self, session_maker: object) -> None:
+        self._repo = SessionRepoProxy(session_maker, ConversationRepo)
 
     # ---- 读 ----
 

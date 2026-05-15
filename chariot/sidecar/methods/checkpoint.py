@@ -1,30 +1,28 @@
 """sidecar checkpoint RPC adapters(B5 wave 3)。
 
 写路径(create / rollback / delete)走 `agent.checkpoint_manager`(三件套 + audit);
-读路径(list / show)直接走 `CheckpointRepo`。
+读路径(list / show)走 `CheckpointApi`。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from chariot.repos.checkpoint_repo import CheckpointEntry, CheckpointRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcContext, RpcError
 from chariot.sidecar.methods import MethodBase
+from chariot.sidecar.services import CheckpointApi
 
 
 class CheckpointMethods(MethodBase):
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx, params
-        async with self._session() as session:
-            entries = await CheckpointRepo(session).list_entries()
+        entries = await CheckpointApi(self.runtime).list_entries()
         return {"checkpoints": [self._entry_to_dict(e) for e in entries]}
 
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         checkpoint_id = self._require_str(params, "checkpoint_id")
-        async with self._session() as session:
-            entry = await CheckpointRepo(session).get_entry(checkpoint_id)
+        entry = await CheckpointApi(self.runtime).get_entry(checkpoint_id)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"checkpoint {checkpoint_id!r} not found")
         return {"checkpoint": self._entry_to_dict(entry)}
@@ -65,7 +63,7 @@ class CheckpointMethods(MethodBase):
         return {"deleted": checkpoint_id}
 
     @staticmethod
-    def _entry_to_dict(entry: CheckpointEntry) -> dict[str, Any]:
+    def _entry_to_dict(entry: Any) -> dict[str, Any]:
         return {
             "id": entry.id,
             "name": entry.name,

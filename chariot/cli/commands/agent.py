@@ -11,7 +11,6 @@ import typer
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.models.agent import UNSET, ClearableStr
-from chariot.repos.task_repo import TaskRepo
 from chariot.services.agent import AgentService
 
 agent_app = typer.Typer(name="agent", help="管理 agent profiles", no_args_is_help=True)
@@ -166,8 +165,8 @@ def agent_remove_cmd(
 
 
 async def _agent_list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await AgentService(TaskRepo(session)).list_agents()
+    async with installed_runtime() as agent:
+        entries = await AgentService(agent).list_agents()
     if not entries:
         Renderer.out("(没有 agent profiles)")
         return
@@ -185,8 +184,8 @@ async def _agent_list() -> None:
 
 
 async def _agent_show(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await AgentService(TaskRepo(session)).get_agent(name)
+    async with installed_runtime() as agent:
+        entry = await AgentService(agent).get_agent(name)
         if entry is None:
             Renderer.die(f"agent profile not found: {name!r}")
             return
@@ -228,8 +227,8 @@ async def _agent_add(
         return
     parsed_budget = _parse_meta(budget) or {}
     parsed_meta = _parse_meta(meta) or {}
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entry = await TaskRepo(session).create_agent_profile(
+    async with installed_runtime() as agent:
+        entry = await AgentService(agent).create_agent(
             name=name.strip(),
             role=role.strip(),
             prompt_bundle=prompt_bundle,
@@ -257,8 +256,8 @@ async def _agent_update(
 ) -> None:
     parsed_budget = _parse_meta(budget) if budget.strip() else None
     parsed_meta = _parse_meta(meta) if meta.strip() else None
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = AgentService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = AgentService(agent)
         try:
             entry = await service.update_agent(
                 name=name,
@@ -278,8 +277,8 @@ async def _agent_update(
 
 
 async def _agent_remove(name: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        service = AgentService(TaskRepo(session))
+    async with installed_runtime() as agent:
+        service = AgentService(agent)
         try:
             await service.delete_agent(name)
         except ValueError as exc:

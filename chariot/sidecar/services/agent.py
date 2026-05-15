@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from chariot.models.agent import UNSET, AgentProfile, ClearableStr
-from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.agent import AgentService
 from chariot.sidecar.runtime import SidecarRuntime
@@ -15,12 +14,12 @@ class AgentApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
-    async def list_agents(self, session: Any) -> list[dict[str, Any]]:
-        service = AgentService(TaskRepo(session))
+    async def list_agents(self) -> list[dict[str, Any]]:
+        service = AgentService(self._runtime)
         return [self._agent_to_dict(entry) for entry in await service.list_agents()]
 
-    async def get_agent(self, session: Any, *, name: str) -> dict[str, Any]:
-        service = AgentService(TaskRepo(session))
+    async def get_agent(self, *, name: str) -> dict[str, Any]:
+        service = AgentService(self._runtime)
         entry = await service.get_agent(name)
         if entry is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"agent profile {name!r} not found")
@@ -28,7 +27,6 @@ class AgentApi:
 
     async def create_agent(
         self,
-        session: Any,
         *,
         name: str,
         role: str,
@@ -40,7 +38,7 @@ class AgentApi:
         reflection_enabled: bool = False,
         reflection_max_retries: int = 2,
     ) -> dict[str, Any]:
-        entry = await AgentService(TaskRepo(session)).create_agent(
+        entry = await AgentService(self._runtime).create_agent(
             name=name,
             role=role,
             prompt_bundle=prompt_bundle,
@@ -55,7 +53,6 @@ class AgentApi:
 
     async def update_agent(
         self,
-        session: Any,
         *,
         name: str,
         role: str | None = None,
@@ -68,7 +65,7 @@ class AgentApi:
         reflection_max_retries: int | None = None,
     ) -> dict[str, Any]:
         try:
-            entry = await AgentService(TaskRepo(session)).update_agent(
+            entry = await AgentService(self._runtime).update_agent(
                 name=name,
                 role=role,
                 prompt_bundle=prompt_bundle,
@@ -83,9 +80,9 @@ class AgentApi:
             self._raise_rpc_error(e)
         return self._agent_to_dict(entry)
 
-    async def delete_agent(self, session: Any, *, name: str) -> dict[str, Any]:
+    async def delete_agent(self, *, name: str) -> dict[str, Any]:
         try:
-            await AgentService(TaskRepo(session)).delete_agent(name)
+            await AgentService(self._runtime).delete_agent(name)
         except ValueError as e:
             self._raise_rpc_error(e)
         return {"deleted": name}

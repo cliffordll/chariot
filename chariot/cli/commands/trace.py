@@ -19,7 +19,6 @@ import typer
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
 from chariot.models.trace import TurnStatus
-from chariot.repos.trace_repo import TraceRepo
 from chariot.services.trace import TraceService
 
 trace_app = typer.Typer(name="trace", help="Inspect trace turns (Phase B1)", no_args_is_help=True)
@@ -102,8 +101,8 @@ async def _trace_list(
     limit: int,
     offset: int,
 ) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        turns = await TraceService(TraceRepo(session)).list_turns(
+    async with installed_runtime() as agent:
+        turns = await TraceService(agent).list_turns(
             conversation_id=conversation,
             task_id=task,
             provider_name=provider,
@@ -134,8 +133,8 @@ async def _trace_list(
 
 
 async def _trace_show(turn_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        turn = await TraceService(TraceRepo(session)).get_turn(turn_id)
+    async with installed_runtime() as agent:
+        turn = await TraceService(agent).get_turn(turn_id)
     if turn is None:
         Renderer.die(f"trace turn not found: {turn_id!r}")
         return
@@ -173,8 +172,8 @@ async def _trace_show(turn_id: str) -> None:
 
 
 async def _trace_view(turn_id: str) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        tree = await TraceService(TraceRepo(session)).get_tree(turn_id)
+    async with installed_runtime() as agent:
+        tree = await TraceService(agent).get_tree(turn_id)
     if tree is None:
         Renderer.die(f"trace turn not found: {turn_id!r}")
         return
@@ -218,8 +217,8 @@ async def _trace_view(turn_id: str) -> None:
 
 
 async def _trace_reconcile(older_than_seconds: int) -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        cleaned = await TraceService(TraceRepo(session)).reconcile_stale(older_than_seconds=older_than_seconds)
+    async with installed_runtime() as agent:
+        cleaned = await TraceService(agent).reconcile_stale(older_than_seconds=older_than_seconds)
     Renderer.out(f"reconciled {cleaned} stale running turn(s)")
 
 

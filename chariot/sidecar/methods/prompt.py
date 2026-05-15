@@ -18,30 +18,30 @@ class PromptMethods(MethodBase):
 
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del params, ctx
-        async with self._session() as session:
-            bundles = await self._service.list_bundles(session)
+        async with self._rpc_errors():
+            bundles = await self._service.list_bundles()
         return {"bundles": bundles}
 
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
-        async with self._session() as session:
-            bundle = await self._service.get_bundle(session, name=name)
+        async with self._rpc_errors():
+            bundle = await self._service.get_bundle(name=name)
         return {"bundle": bundle}
 
     async def versions(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         bundle_name = self._require_str(params, "bundle_name")
-        async with self._session() as session:
-            versions = await self._service.list_versions(session, bundle_name=bundle_name)
+        async with self._rpc_errors():
+            versions = await self._service.list_versions(bundle_name=bundle_name)
         return {"versions": versions}
 
     async def version(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         bundle_name = self._require_str(params, "bundle_name")
         version = self._require_str(params, "version")
-        async with self._session() as session:
-            entry = await self._service.get_version(session, bundle_name=bundle_name, version=version)
+        async with self._rpc_errors():
+            entry = await self._service.get_version(bundle_name=bundle_name, version=version)
         return {"version": entry}
 
     async def traces(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -51,9 +51,8 @@ class PromptMethods(MethodBase):
             raise TypeError("bundle_name must be a string")
         limit = int(params.get("limit", 50))
         offset = int(params.get("offset", 0))
-        async with self._session() as session:
+        async with self._rpc_errors():
             traces = await self._service.list_traces(
-                session,
                 bundle_name=bundle_name,
                 limit=limit,
                 offset=offset,
@@ -63,8 +62,8 @@ class PromptMethods(MethodBase):
     async def inspect(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         trace_id = self._require_str(params, "trace_id")
-        async with self._session() as session:
-            trace = await self._service.inspect_trace(session, trace_id=trace_id)
+        async with self._rpc_errors():
+            trace = await self._service.inspect_trace(trace_id=trace_id)
         return {"trace": trace}
 
     async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
@@ -72,9 +71,8 @@ class PromptMethods(MethodBase):
         name = self._require_str(params, "name")
         description = self._optional_str(params, "description")
         layers = self._optional_list_of_dicts(params, "layers")
-        async with self._session() as session:
+        async with self._rpc_errors():
             result = await self._service.add_bundle(
-                session,
                 name=name,
                 description=description,
                 layers=layers,
@@ -88,9 +86,8 @@ class PromptMethods(MethodBase):
         if description is not _MISSING and description is not None and not isinstance(description, str):
             raise TypeError("description must be a string or null")
         layers = self._optional_list_of_dicts(params, "layers")
-        async with self._session() as session:
+        async with self._rpc_errors():
             result = await self._service.update_bundle(
-                session,
                 name=name,
                 description=description,
                 description_set=description is not _MISSING,
@@ -104,8 +101,8 @@ class PromptMethods(MethodBase):
         version = params.get("version")
         if version is not None and not isinstance(version, str):
             raise TypeError("version must be a string or null")
-        async with self._session() as session:
-            result = await self._service.activate_bundle(session, name=name, version=version)
+        async with self._rpc_errors():
+            result = await self._service.activate_bundle(name=name, version=version)
         return result
 
     @staticmethod

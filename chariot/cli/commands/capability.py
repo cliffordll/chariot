@@ -19,7 +19,7 @@ import typer
 from chariot.agent.config import ConfigError
 from chariot.cli._runtime import installed_runtime
 from chariot.cli.render import Renderer
-from chariot.repos.capability_repo import CapabilityRepo
+from chariot.services.capability import CapabilityService
 
 capability_app = typer.Typer(
     name="capability",
@@ -48,8 +48,8 @@ def disable_cmd(
 
 
 async def _list() -> None:
-    async with installed_runtime() as agent, agent.session_maker() as session:
-        entries = await CapabilityRepo(session).list_entries()
+    async with installed_runtime() as agent:
+        entries = await CapabilityService(agent).list_entries()
     if not entries:
         Renderer.out("(no capability rows)")
         return
@@ -63,8 +63,7 @@ async def _list() -> None:
 async def _set(name: str, enabled: bool) -> None:
     async with installed_runtime() as agent:
         try:
-            async with agent.session_maker() as session:
-                entry = await CapabilityRepo(session).set_enabled(name, enabled)
+            entry = await CapabilityService(agent).set_enabled(name, enabled)
         except ConfigError as exc:
             Renderer.die(str(exc))
             return

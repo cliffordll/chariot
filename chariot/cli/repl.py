@@ -59,8 +59,8 @@ from ulid import ULID
 
 from chariot.cli.context import ChatContext, ChatError
 from chariot.cli.render import Renderer
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.conversation import ConversationService
+from chariot.services.tool import ToolService
 
 _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符;偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
@@ -127,7 +127,6 @@ class ChatRepl:
         provider 由 agent_profile 绑定自动推导,不再单独存储。
         """
         from chariot.database.session import DEFAULT_DB_PATH, init_db
-        from chariot.repos.conversation_repo import ConversationRepo
         from chariot.services.conversation import ConversationService
 
         conv_id = self.ctx.conversation_id
@@ -135,8 +134,8 @@ class ChatRepl:
             return
         assert isinstance(conv_id, str)
         sm = await init_db(DEFAULT_DB_PATH)
-        async with sm() as session:
-            conv = await ConversationService(ConversationRepo(session)).get(conv_id)
+        async with sm():
+            conv = await ConversationService(sm).get(conv_id)
         if conv is None:
             return
         # DB 是 canonical 真源:恢复 agent;provider 由 agent 推导
@@ -244,7 +243,7 @@ class ChatRepl:
             await self._slash_agent(arg)
             return False
         if cmd == "/agents":
-            await self._slash_agents_list()
+            await self._slash_agents_list(arg)
             return False
         if cmd in ("/conversation", "/convo"):
             await self._slash_conversation(arg)
@@ -332,23 +331,25 @@ class ChatRepl:
 
         if self.ctx.conversation_id is not None:
             try:
-                async with self.ctx.agent.session_maker() as session:
-                    from chariot.services.conversation import ConversationService
+                from chariot.services.conversation import ConversationService
 
-                    await ConversationService(ConversationRepo(session)).update_config(
-                        self.ctx.conversation_id,
-                        agent_profile=self.ctx.agent_profile,
-                    )
+                await ConversationService(self.ctx.agent).update_config(
+                    self.ctx.conversation_id,
+                    agent_profile=self.ctx.agent_profile,
+                )
             except Exception:
                 pass  # 同步失败不阻断
 
-    async def _slash_agents_list(self) -> None:
+    async def _slash_agents_list(self, arg: str) -> None:
         """`/agents` — 列已注册的 agent profiles。"""
-        async with self.ctx.agent.session_maker() as session:
-            from chariot.repos.task_repo import TaskRepo
-            from chariot.services.agent import AgentService
+        if arg:
+            Renderer.error_bubble(
+                "/agents 不接受参数;切换 agent 用 `/agent <name>`",
+            )
+            return
+        from chariot.services.agent import AgentService
 
-            entries = await AgentService(TaskRepo(session)).list_agents()
+        entries = await AgentService(self.ctx.agent).list_agents()
         if not entries:
             Renderer.out("(没有 agent profile — `chariot agent add` 加一个)")
             return
@@ -404,18 +405,16 @@ class ChatRepl:
 
         # 切到已有会话:先查 DB 恢复 agent 配置;provider 由 agent 绑定自动推导
         try:
-            async with self.ctx.agent.session_maker() as session:
-                from chariot.services.conversation import ConversationService
+            from chariot.services.conversation import ConversationService
 
-                conv = await ConversationService(ConversationRepo(session)).get(arg)
-                if conv is not None and conv.agent_profile:
-                    self.ctx.agent_profile = conv.agent_profile
-                    from chariot.repos.task_repo import TaskRepo
-                    from chariot.services.agent import AgentService
+            conv = await ConversationService(self.ctx.agent).get(arg)
+            if conv is not None and conv.agent_profile:
+                self.ctx.agent_profile = conv.agent_profile
+                from chariot.services.agent import AgentService
 
-                    agent = await AgentService(TaskRepo(session)).get_agent(conv.agent_profile)
-                    if agent is not None and agent.provider_profile:
-                        self.ctx.set_provider(agent.provider_profile)
+                agent = await AgentService(self.ctx.agent).get_agent(conv.agent_profile)
+                if agent is not None and agent.provider_profile:
+                    self.ctx.set_provider(agent.provider_profile)
         except Exception:
             pass
 
@@ -440,8 +439,7 @@ class ChatRepl:
                 "/conversations 不接受参数;切会话用 `/conversation <ULID|new|off>`",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            conversations = await ConversationRepo(session).list_entries(limit=20)
+        conversations = await ConversationService(self.ctx.agent).list_conversations(limit=20)
         if not conversations:
             Renderer.out("(没有会话 — `/conversation new` 开一个)")
             return
@@ -473,8 +471,7 @@ class ChatRepl:
                 "/tool 不接受参数;改启用 / options 用 `chariot tool enable|disable|config <name>` 或 GUI Tools 页",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            entries = await ToolRepo(session).list_enabled()
+        entries = await ToolService(self.ctx.agent).list_enabled()
         if not entries:
             Renderer.out("(没有已启用的工具 — `chariot tool enable <name>` 启用一个)")
             return
@@ -495,8 +492,7 @@ class ChatRepl:
                 "/tools 不接受参数;启用 / 关闭工具用 `chariot tool enable|disable <name>`",
             )
             return
-        async with self.ctx.agent.session_maker() as session:
-            entries = await ToolRepo(session).list_entries()
+        entries = await ToolService(self.ctx.agent).list_entries()
         if not entries:
             Renderer.out("(没有注册工具)")
             return

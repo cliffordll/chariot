@@ -13,7 +13,6 @@ from chariot.models.task import (
     TaskRun,
     TaskRunCreate,
 )
-from chariot.repos.task_repo import TaskRepo
 from chariot.rpc.jsonrpc import JsonRpcServer, RpcError
 from chariot.services.task import TaskService
 from chariot.sidecar.runtime import SidecarRuntime
@@ -23,30 +22,34 @@ class TaskApi:
     def __init__(self, runtime: SidecarRuntime) -> None:
         self._runtime = runtime
 
-    async def list_tasks(self, session: Any, *, parent_task_id: str | None = None) -> list[dict[str, Any]]:
-        service = TaskService(TaskRepo(session))
+    async def list_tasks(
+        self,
+        *,
+        parent_task_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        service = TaskService(self._runtime)
         return [self._task_to_dict(entry) for entry in await service.list_tasks(parent_task_id=parent_task_id)]
 
-    async def get_task(self, session: Any, *, task_id: str) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+    async def get_task(self, *, task_id: str) -> dict[str, Any]:
+        service = TaskService(self._runtime)
         task = await service.get_task(task_id)
         if task is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"task {task_id!r} not found")
         child_summary = await service.summarize_child_statuses(task.id)
-        runs = await TaskRepo(session).list_runs(task.id)
+        runs = await service.list_task_runs(task.id)
         payload = self._task_to_dict(task)
         payload["child_status_summary"] = child_summary
         payload["runs"] = [self._run_to_dict(run) for run in runs]
         return payload
 
-    async def get_task_run(self, session: Any, *, run_id: str) -> dict[str, Any]:
-        run = await TaskService(TaskRepo(session)).get_task_run(run_id)
+    async def get_task_run(self, *, run_id: str) -> dict[str, Any]:
+        run = await TaskService(self._runtime).get_task_run(run_id)
         if run is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"task run {run_id!r} not found")
         return self._run_to_dict(run)
 
-    async def list_task_runs(self, session: Any, *, task_id: str) -> list[dict[str, Any]]:
-        service = TaskService(TaskRepo(session))
+    async def list_task_runs(self, *, task_id: str) -> list[dict[str, Any]]:
+        service = TaskService(self._runtime)
         try:
             runs = await service.list_task_runs(task_id)
         except ValueError as e:
@@ -55,7 +58,6 @@ class TaskApi:
 
     async def create_task(
         self,
-        session: Any,
         *,
         goal: str,
         kind: str = "interactive",
@@ -63,7 +65,7 @@ class TaskApi:
         owner: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+        service = TaskService(self._runtime)
         try:
             task = await service.create_task(
                 TaskCreate(
@@ -78,25 +80,24 @@ class TaskApi:
             raise RpcError(JsonRpcServer.ERR_INVALID_PARAMS, str(e)) from e
         return self._task_to_dict(task)
 
-    async def pause_task(self, session: Any, *, task_id: str) -> dict[str, Any]:
-        return self._task_to_dict(await self._perform_transition(session, "pause", task_id))
+    async def pause_task(self, *, task_id: str) -> dict[str, Any]:
+        return self._task_to_dict(await self._perform_transition("pause", task_id))
 
-    async def resume_task(self, session: Any, *, task_id: str) -> dict[str, Any]:
-        return self._task_to_dict(await self._perform_transition(session, "resume", task_id))
+    async def resume_task(self, *, task_id: str) -> dict[str, Any]:
+        return self._task_to_dict(await self._perform_transition("resume", task_id))
 
-    async def cancel_task(self, session: Any, *, task_id: str) -> dict[str, Any]:
-        return self._task_to_dict(await self._perform_transition(session, "cancel", task_id))
+    async def cancel_task(self, *, task_id: str) -> dict[str, Any]:
+        return self._task_to_dict(await self._perform_transition("cancel", task_id))
 
     async def start_task_run(
         self,
-        session: Any,
         *,
         task_id: str,
         trigger: str = "manual",
         resume_from_run_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+        service = TaskService(self._runtime)
         try:
             run = await service.start_task_run(
                 TaskRunCreate(
@@ -112,13 +113,12 @@ class TaskApi:
 
     async def complete_task_run(
         self,
-        session: Any,
         *,
         run_id: str,
         result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+        service = TaskService(self._runtime)
         try:
             run = await service.complete_task_run(run_id, result=result, error=error)
         except ValueError as e:
@@ -127,13 +127,12 @@ class TaskApi:
 
     async def fail_task_run(
         self,
-        session: Any,
         *,
         run_id: str,
         error: str,
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+        service = TaskService(self._runtime)
         try:
             run = await service.fail_task_run(run_id, error=error, result=result)
         except ValueError as e:
@@ -142,13 +141,12 @@ class TaskApi:
 
     async def cancel_task_run(
         self,
-        session: Any,
         *,
         run_id: str,
         error: str | None = None,
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        service = TaskService(TaskRepo(session))
+        service = TaskService(self._runtime)
         try:
             run = await service.cancel_task_run(run_id, error=error, result=result)
         except ValueError as e:
@@ -157,15 +155,13 @@ class TaskApi:
 
     async def delegate_task(
         self,
-        session: Any,
         *,
         parent_task_id: str,
         tasks: list[dict[str, Any]],
         reason: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        repo = TaskRepo(session)
-        task_service = TaskService(repo)
+        task_service = TaskService(self._runtime)
         specs = [
             DelegatedTaskSpec(
                 goal=str(item["goal"]),
@@ -193,8 +189,8 @@ class TaskApi:
             "created": result.created,
         }
 
-    async def _perform_transition(self, session: Any, action: str, task_id: str):  # type: ignore[no-untyped-def]
-        service = TaskService(TaskRepo(session))
+    async def _perform_transition(self, action: str, task_id: str):  # type: ignore[no-untyped-def]
+        service = TaskService(self._runtime)
         try:
             if action == "pause":
                 return await service.pause_task(task_id)

@@ -23,9 +23,8 @@ class TraceMethods(MethodBase):
         status = self._optional_str(params, "status")
         limit = self._optional_int(params, "limit", default=50)
         offset = self._optional_int(params, "offset", default=0)
-        async with self._session() as session:
+        async with self._rpc_errors():
             turns = await self._service.list_turns(
-                session,
                 conversation_id=conversation_id,
                 task_id=task_id,
                 provider_name=provider_name,
@@ -38,22 +37,22 @@ class TraceMethods(MethodBase):
     async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         turn_id = self._require_str(params, "turn_id")
-        async with self._session() as session:
-            turn = await self._service.get_turn(session, turn_id=turn_id)
+        async with self._rpc_errors():
+            turn = await self._service.get_turn(turn_id=turn_id)
         return {"turn": turn}
 
     async def view(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         turn_id = self._require_str(params, "turn_id")
-        async with self._session() as session:
-            tree = await self._service.get_tree(session, turn_id=turn_id)
+        async with self._rpc_errors():
+            tree = await self._service.get_tree(turn_id=turn_id)
         return tree
 
     async def reconcile(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         older_than_seconds = self._optional_int(params, "older_than_seconds", default=3600)
-        async with self._session() as session:
-            return await self._service.reconcile_stale(session, older_than_seconds=older_than_seconds)
+        async with self._rpc_errors():
+            return await self._service.reconcile_stale(older_than_seconds=older_than_seconds)
 
     @staticmethod
     def _optional_int(params: dict[str, Any], key: str, *, default: int) -> int:

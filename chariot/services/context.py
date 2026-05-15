@@ -12,11 +12,12 @@ from typing import Any
 
 from chariot.models.context import ContextSnapshot, ContextSnapshotEntry, ContextTraceEntry
 from chariot.repos.context_repo import ContextRepo
+from chariot.services._session_proxy import SessionRepoProxy
 
 
 class ContextService:
-    def __init__(self, repo: ContextRepo) -> None:
-        self._repo = repo
+    def __init__(self, session_maker: object) -> None:
+        self._repo = SessionRepoProxy(session_maker, ContextRepo)
 
     async def list_snapshots(
         self,
