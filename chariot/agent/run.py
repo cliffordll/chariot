@@ -63,7 +63,7 @@ class _AgentBinding:
       的 tool name(空集 = 关闭工具调用)
     """
 
-    profile: AgentProfile | None = None
+    agent_profile: AgentProfile | None = None
     allowed_tools: frozenset[str] | None = None
 
 
@@ -463,7 +463,7 @@ class AIAgent:
         if req.agent_profile is None or req.reflection_enabled:
             return req  # 已显式开,不覆盖
         binding = await self._resolve_binding(req)
-        profile = binding.profile
+        profile = binding.agent_profile
         if profile is None or not profile.reflection_enabled:
             return req
         return dataclasses.replace(
@@ -483,8 +483,15 @@ class AIAgent:
         from chariot.models.trace import TurnStatus
 
         binding = await self._resolve_binding(req)
-        if binding.profile is not None and binding.profile.provider_profile is not None:
-            req = dataclasses.replace(req, provider_name=binding.profile.provider_profile)
+        if binding.agent_profile is not None and binding.agent_profile.provider_profile is not None:
+            req = dataclasses.replace(req, provider_name=binding.agent_profile.provider_profile)
+
+        if req.provider_name is None:
+            yield ChatEvent.error_event(
+                error_type="unknown_provider",
+                error_message="provider 未指定:选择 agent 或显式指定 provider",
+            )
+            return
 
         provider = self._providers.get(req.provider_name)
         if provider is None:
@@ -500,7 +507,7 @@ class AIAgent:
         turn = await self._trace.begin_turn(
             provider_name=provider.config.name,
             conversation_id=req.conversation_id,
-            agent_profile=binding.profile.name if binding.profile is not None else None,
+            agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
             model=provider.config.model,
             meta=turn_meta,
         )
@@ -591,12 +598,12 @@ class AIAgent:
             if profile is None:
                 return _NO_BINDING
             if profile.tool_profile is None:
-                return _AgentBinding(profile=profile, allowed_tools=None)
+                return _AgentBinding(agent_profile=profile, allowed_tools=None)
             toolset = await ToolsetRepo(session).get_entry(profile.tool_profile)
             if toolset is None:
                 # toolset 名引用不存在 → fallback 到空工具(不挂载)
-                return _AgentBinding(profile=profile, allowed_tools=None)
-            return _AgentBinding(profile=profile, allowed_tools=frozenset(toolset.members))
+                return _AgentBinding(agent_profile=profile, allowed_tools=None)
+            return _AgentBinding(agent_profile=profile, allowed_tools=frozenset(toolset.members))
 
     async def _run_stateless_chat(
         self,
@@ -752,7 +759,8 @@ class AIAgent:
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
             todo_store=self._todo_store_for(conversation_id),
-            agent_profile=binding.profile.name if binding.profile is not None else None,
+            agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
+            provider_name=req.provider_name,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -920,7 +928,7 @@ class AIAgent:
     ) -> ChatRequest:
         """Compose prompt bundle into `system`, then normalize request fields.
 
-        binding.profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
+        binding.agent_profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
         active bundle);profile 缺失 / 字段空 → 走 active bundle 兜底。
 
         B6 wave 2:normalize 之后跑 SkillActivator —— 在 `_inject_default_tools`
@@ -935,8 +943,8 @@ class AIAgent:
             async with self._sessionmaker() as session:
                 repo = PromptRepo(session)
                 bundle = None
-                if binding.profile is not None and binding.profile.prompt_bundle is not None:
-                    bundle = await repo.get_bundle(binding.profile.prompt_bundle)
+                if binding.agent_profile is not None and binding.agent_profile.prompt_bundle is not None:
+                    bundle = await repo.get_bundle(binding.agent_profile.prompt_bundle)
                 if bundle is None:
                     bundle = await repo.get_active_bundle()
                 if bundle is not None:
@@ -968,8 +976,8 @@ class AIAgent:
         if req.skill is not None and req.skill == "":
             return req
         skill_name = req.skill
-        if skill_name is None and binding.profile is not None:
-            skill_name = binding.profile.default_skill
+        if skill_name is None and binding.agent_profile is not None:
+            skill_name = binding.agent_profile.default_skill
         if not skill_name:
             return req
         skill = self._skill_registry.get(skill_name)
@@ -983,7 +991,7 @@ class AIAgent:
             skill_name=skill.name,
             source=skill.source,
             conversation_id=req.conversation_id,
-            agent_profile=binding.profile.name if binding.profile is not None else None,
+            agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
         )
         return activated
 
