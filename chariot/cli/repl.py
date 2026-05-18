@@ -160,7 +160,6 @@ class _ChatReplCompleter(Completer):
 
     def _complete_session_reference(self, token: str) -> Iterable[Completion]:
         prefix = "@session:"
-        arg = token[len(prefix) :]
         for conv_id in self._conversation_ids_getter():
             candidate = f"{prefix}{conv_id}"
             if candidate.startswith(token):

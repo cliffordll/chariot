@@ -38,7 +38,13 @@ class ChatMethod(MethodBase):
                 if event.kind == "error":
                     status = "error"
                     error_message = event.error_message or event.error_type or "chat error"
-                await ctx.notify("chat_event", dataclasses.asdict(event))
+                await ctx.notify(
+                    "chat_event",
+                    {
+                        "stream_id": stream_id,
+                        **dataclasses.asdict(event),
+                    },
+                )
         except Exception:
             await self._write_log(
                 provider=req.provider_ref,

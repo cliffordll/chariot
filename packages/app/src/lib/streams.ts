@@ -29,6 +29,7 @@ interface ChatEventNotify {
 }
 
 interface ChatEventPayload {
+  stream_id?: string | null;
   kind: string;
   message?: {
     id?: string;
@@ -179,6 +180,7 @@ export async function runChatTurn(
   signal: AbortSignal,
   onEvent: (ev: StreamEvent) => void,
 ): Promise<ChatRunResult> {
+  const expectedStreamId = crypto.randomUUID();
   const tracker = new ChatStreamTracker();
   // 流中途若收到 ChatEvent(kind=error),记下首条;chat RPC resolve 后转成
   // ChatStreamError 抛出,走上层 catch 路径(否则 success path 会 setPending(null)
@@ -188,6 +190,7 @@ export async function runChatTurn(
   const unlisten = await listen<ChatEventNotify>("rpc_notify", (e) => {
     if (e.payload.method !== "chat_event") return;
     if (signal.aborted) return;
+    if (e.payload.params.stream_id !== expectedStreamId) return;
     frameCount += 1;
     // 诊断日志:streaming 卡顿调试用。在 DevTools Console 过滤 [chariot] 看
     // 帧到达情况;0.6.6+ 改 Tauri Channel 后可删
@@ -200,9 +203,12 @@ export async function runChatTurn(
     }
   });
   signal.addEventListener("abort", () => unlisten());
-  console.debug("[chariot] chat invoke start", req.provider_ref, req.conversation_id ?? "(stateless)");
+  console.debug("[chariot] chat invoke start", req.provider_ref, req.conversation_id ?? "(stateless)", expectedStreamId);
   try {
-    const result = await rpc<{ stream_id: string; ended_at: number }>("chat", req);
+    const result = await rpc<{ stream_id: string; ended_at: number }>("chat", {
+      ...req,
+      stream_id: expectedStreamId,
+    });
     console.debug("[chariot] chat resolved", { frames: frameCount, ...result });
     if (streamErr !== null) {
       const err = streamErr as ErrorEvent;

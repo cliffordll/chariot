@@ -16,6 +16,7 @@ class ChatService:
 
     async def open_chat(self, params: dict[str, Any]) -> tuple[str, ChatRequest, Any]:
         req = ChatRequestDecoder.parse(params)
+        stream_id = self._optional_str(params, "stream_id") or uuid.uuid4().hex
         base_url = self._optional_str(params, "base_url")
         api_key = self._optional_str(params, "api_key")
         agent = await self._runtime.reserve_chat_agent(
@@ -23,7 +24,7 @@ class ChatService:
             base_url=base_url,
             api_key=api_key,
         )
-        return uuid.uuid4().hex, req, agent.run_chat(req)
+        return stream_id, req, agent.run_chat(req)
 
     @staticmethod
     def _optional_str(params: dict[str, Any], key: str) -> str | None:
