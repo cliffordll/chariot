@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import (
 from ulid import ULID
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 6
 _PROVIDER_SNAPSHOT_COLUMN = "provider_snapshot"
 
 
@@ -73,18 +73,19 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         row = result.fetchone()
     current = int(row[0]) if row else 0
 
-    # 0.8.9 provider identity 清理后把 002..028 历史链压成单个 squashed migration。
+    # 0.8.9 起把 002..028 历史链压成 `002_squashed_current.sql`,后续仍保留
+    # 003..006 这几段真实 identity migration。
     # 现网只需要兼容:
-    # - v0/v1:空库或 0.1.0 `logs` 单表库,按 001 + 002 升到当前
-    # - v28/v29:旧开发库已在 squash 前最终 schema,收敛回 v2 后继续补最新 migration
+    # - v0/v1:空库或 0.1.0 `logs` 单表库,按 001 + 002..006 升到当前
+    # - v28/v29:旧开发库已在 squash 前最终 schema,收敛回 v6
     # 中间版本链(2..27)在 squash 后不再保留自动升级承诺。
     if current in {28, 29}:
         async with engine.begin() as conn:
-            await conn.execute(text("PRAGMA user_version = 2"))
-        current = 2
+            await conn.execute(text("PRAGMA user_version = 6"))
+        current = 6
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
-    if current not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, CURRENT_SCHEMA_VERSION}:
+    if current not in {0, 1, CURRENT_SCHEMA_VERSION}:
         raise RuntimeError(
             f"DB schema version {current} 不在 squash 后支持的自动升级集合内; "
             "当前仅支持 v0/v1 新装或历史 0.1.0 库、以及已到 v28/v29 的现有库"
@@ -239,95 +240,6 @@ async def _backfill_toolset_identity(engine: AsyncEngine) -> None:
                 """
             )
         )
-
-
-async def _normalize_agent_profile_prompt_id_schema(engine: AsyncEngine) -> None:
-    async with engine.begin() as conn:
-        columns = (await conn.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
-        column_names = {str(row["name"]) for row in columns}
-
-        if "prompt_id" not in column_names:
-            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN prompt_id TEXT"))
-            await conn.execute(text("CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id)"))
-            column_names.add("prompt_id")
-
-        if "prompt_bundle" in column_names:
-            await conn.execute(
-                text(
-                    """
-                    UPDATE agent_profiles
-                    SET prompt_id = (
-                        SELECT pb.id FROM prompt_bundles AS pb
-                        WHERE pb.name = agent_profiles.prompt_bundle
-                    )
-                    WHERE prompt_bundle IS NOT NULL
-                      AND (prompt_id IS NULL OR prompt_id = '')
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE agent_profiles__new (
-                        name TEXT PRIMARY KEY,
-                        id TEXT UNIQUE,
-                        role TEXT NOT NULL,
-                        prompt_id TEXT,
-                        toolset_id TEXT,
-                        provider_id TEXT,
-                        budget TEXT NOT NULL DEFAULT '{}',
-                        meta TEXT NOT NULL DEFAULT '{}',
-                        reflection_enabled INTEGER NOT NULL DEFAULT 0,
-                        reflection_max_retries INTEGER NOT NULL DEFAULT 2,
-                        default_skill TEXT,
-                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO agent_profiles__new (
-                        name,
-                        id,
-                        role,
-                        prompt_id,
-                        toolset_id,
-                        provider_id,
-                        budget,
-                        meta,
-                        reflection_enabled,
-                        reflection_max_retries,
-                        default_skill,
-                        created_at,
-                        updated_at
-                    )
-                    SELECT
-                        name,
-                        id,
-                        role,
-                        prompt_id,
-                        toolset_id,
-                        provider_id,
-                        budget,
-                        meta,
-                        reflection_enabled,
-                        reflection_max_retries,
-                        default_skill,
-                        created_at,
-                        updated_at
-                    FROM agent_profiles
-                    """
-                )
-            )
-            await conn.execute(text("DROP TABLE agent_profiles"))
-            await conn.execute(text("ALTER TABLE agent_profiles__new RENAME TO agent_profiles"))
-            await conn.execute(text("CREATE UNIQUE INDEX idx_agent_profiles_id ON agent_profiles(id)"))
-            await conn.execute(text("CREATE INDEX idx_agent_profiles_role ON agent_profiles(role)"))
-            await conn.execute(text("CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id)"))
-            await conn.execute(text("CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)"))
 
 
 async def _normalize_agent_profile_toolset_id_schema(engine: AsyncEngine) -> None:
@@ -503,7 +415,6 @@ class DBState:
         await _backfill_auxiliary_identity(engine)
         await _ensure_toolset_identity_schema(engine)
         await _backfill_toolset_identity(engine)
-        await _normalize_agent_profile_prompt_id_schema(engine)
         await _normalize_agent_profile_toolset_id_schema(engine)
         await _ensure_job_identity_schema(engine)
         await _backfill_job_identity(engine)

@@ -283,6 +283,7 @@ CREATE TABLE agent_profiles (
     name TEXT PRIMARY KEY,
     role TEXT NOT NULL,
     prompt_id TEXT,
+    toolset_id TEXT,
     provider_id TEXT,
     budget TEXT NOT NULL DEFAULT '{}',
     meta TEXT NOT NULL DEFAULT '{}',
@@ -295,6 +296,7 @@ CREATE TABLE agent_profiles (
 
 CREATE INDEX idx_agent_profiles_role ON agent_profiles(role);
 CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id);
+CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id);
 
 CREATE TABLE tasks (
     id TEXT PRIMARY KEY,
