@@ -60,7 +60,7 @@ def chat_cmd(
         typer.Option(
             "--agent",
             help=(
-                "agent_profile name;非空时 AIAgent 解析后用其 binding:"
+                "agent_profile id;非空时 AIAgent 解析后用其 binding:"
                 "provider_id 覆盖 --provider、"
                 "prompt_id 决定 prompt、"
                 "toolset_id 做 toolset filter。"
@@ -179,7 +179,12 @@ async def _restore_conversation_config(conversation_id: str | None) -> str | Non
         conv = await ConversationService(sm).get(conversation_id)
     if conv is None:
         return None
-    return conv.agent_profile
+    if conv.agent_profile is None:
+        return None
+    from chariot.services.agent import AgentService
+
+    entry = await AgentService(sm).get_agent(conv.agent_profile)
+    return entry.id if entry is not None else conv.agent_profile
 
 
 async def _resolve_provider_ref(agent: object) -> str | None:

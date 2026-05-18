@@ -23,6 +23,7 @@ mod rpc_client;
 
 use serde::Serialize;
 use serde_json::Value;
+use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State, WindowEvent};
@@ -114,6 +115,18 @@ fn request_exit(app: &AppHandle) {
     app.exit(0);
 }
 
+fn sidecar_workspace_dir() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(workspace_root) = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    {
+        return workspace_root.to_path_buf();
+    }
+    manifest_dir
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -127,10 +140,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // --- spawn sidecar + 装载 JsonRpcClient ---
+            let sidecar_cwd = sidecar_workspace_dir();
             let (rx, child) = app
                 .shell()
                 .sidecar("chariot-sidecar")
                 .map_err(|e| format!("找不到 chariot-sidecar:{e}"))?
+                .current_dir(sidecar_cwd)
                 .spawn()
                 .map_err(|e| format!("spawn chariot-sidecar 失败:{e}"))?;
             let client = JsonRpcClient::spawn(app.handle().clone(), rx, child);

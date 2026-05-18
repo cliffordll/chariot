@@ -77,6 +77,12 @@ class AgentService:
         entry = await self._store.get_profile(name)
         return await self._enrich_agent(entry)
 
+    async def get_agent_by_id(self, agent_id: str) -> AgentProfile | None:
+        for entry in await self._store.list_profiles():
+            if entry.id == agent_id:
+                return await self._enrich_agent(entry)
+        return None
+
     async def create_agent(
         self,
         *,
@@ -177,6 +183,7 @@ class AgentService:
         return [
             replace(
                 entry,
+                agent_label=self._binding_label(entry.name, entry.id),
                 prompt_label=self._resolve_label(entry.prompt_id, prompt_labels),
                 toolset_label=self._resolve_label(entry.toolset_id, toolset_labels),
                 provider_label=self._resolve_label(entry.provider_id, provider_labels),
@@ -192,6 +199,7 @@ class AgentService:
         provider_label = await self._resolve_provider_label(entry.provider_id)
         return replace(
             entry,
+            agent_label=self._binding_label(entry.name, entry.id),
             prompt_label=prompt_label,
             toolset_label=toolset_label,
             provider_label=provider_label,

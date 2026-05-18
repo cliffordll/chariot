@@ -616,7 +616,7 @@ class AIAgent:
         from chariot.services.toolset import ToolsetService
 
         async with self._sessionmaker() as session:
-            profile = await AgentService(session).get_agent(req.agent_profile)
+            profile = await AgentService(session).get_agent_by_id(req.agent_profile)
             if profile is None:
                 return _NO_BINDING
             if profile.toolset_id is None:

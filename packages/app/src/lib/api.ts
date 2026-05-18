@@ -363,6 +363,7 @@ export interface SkillCurateBuckets {
 export interface AgentProfile {
   id: string;
   name: string;
+  agent_label: string | null;
   role: string;
   prompt_id: string | null;
   prompt_label: string | null;

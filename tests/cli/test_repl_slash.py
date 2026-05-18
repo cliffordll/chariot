@@ -97,11 +97,29 @@ async def test_slash_agent_no_arg_shows_current(agent: AIAgent, _capture_rendere
     assert "(none)" in outs[0][1]
 
 
-async def test_slash_agent_with_name_sets_ctx_agent_profile(agent: AIAgent) -> None:
-    """`/agent <name>` 设置 ctx.agent_profile。"""
+async def test_slash_agent_with_id_sets_ctx_agent_profile(agent: AIAgent) -> None:
+    """`/agent <id>` 设置 ctx.agent_profile。"""
+    entry = await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
+    ctx = _make_ctx(agent)
+    await ChatRepl(ctx=ctx)._handle_slash(f"/agent {entry.id}")
+    assert ctx.agent_profile == entry.id
+
+
+async def test_slash_agent_with_name_rejected(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
+    """`/agent <name>` 不再切换,只接受 id。"""
+    await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/agent dev-helper")
-    assert ctx.agent_profile == "dev-helper"
+    assert ctx.agent_profile is None
+    errs = [c for c in _capture_renderer_output if c[0] == "err"]
+    assert len(errs) == 1
+    assert "unknown agent_id" in errs[0][1]
 
 
 async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
@@ -114,20 +132,20 @@ async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
 
 async def test_slash_agents_lists_entries_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/agents` 走 AgentService,带 ← current 标记。"""
-    await AgentService(agent).create_agent(
+    entry = await AgentService(agent).create_agent(
         name="dev-helper",
         role="developer",
     )
 
     ctx = _make_ctx(agent)
-    ctx.agent_profile = "dev-helper"
+    ctx.agent_profile = entry.id
     await ChatRepl(ctx=ctx)._handle_slash("/agents")
 
     tables = [c for c in _capture_renderer_output if c[0] == "table"]
     assert len(tables) == 1
     title, body = tables[0][1].split("::", 1)
     assert title == "agent profiles"
-    assert "dev-helper" in body
+    assert f"dev-helper ({entry.id})" in body
     assert "← current" in body
     assert body.count("← current") == 1
 

@@ -103,7 +103,7 @@ class TestAgentProfileBinding:
         assert provider.last_req is not None
         assert provider.last_req.provider_ref == "mock"
 
-    async def test_provider_id_overrides_provider_ref(self, sessionmaker) -> None:
+    async def test_agent_profile_name_no_longer_binds(self, sessionmaker) -> None:
         primary = _CapturingProvider("primary")
         secondary = _CapturingProvider("secondary")
         agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})
@@ -114,6 +114,21 @@ class TestAgentProfileBinding:
                 provider_id="secondary",
             )
         events = [e async for e in agent.run_chat(_stateless("primary", agent_profile="researcher"))]
+        assert any(e.kind == "stream_done" for e in events)
+        assert primary.last_req is not None
+        assert secondary.last_req is None
+
+    async def test_provider_id_overrides_provider_ref(self, sessionmaker) -> None:
+        primary = _CapturingProvider("primary")
+        secondary = _CapturingProvider("secondary")
+        agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})
+        async with sessionmaker() as session:
+            profile = await TaskRepo(session).create_agent_profile(
+                name="researcher",
+                role="research",
+                provider_id="secondary",
+            )
+        events = [e async for e in agent.run_chat(_stateless("primary", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         # provider 被切到 secondary
         assert secondary.last_req is not None
@@ -136,12 +151,12 @@ class TestAgentProfileBinding:
             )
             pinned = await repo.get_bundle("research")
             assert pinned is not None
-            await TaskRepo(session).create_agent_profile(
+            profile = await TaskRepo(session).create_agent_profile(
                 name="researcher",
                 role="research",
                 prompt_id=pinned.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="researcher"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         system = provider.last_req.system
@@ -183,12 +198,12 @@ class TestAgentProfileBinding:
             await ToolsetRepo(session).create(name="fs_safe", members=["read_file", "list_dir"])
             toolset = await ToolsetRepo(session).get_entry("fs_safe")
             assert toolset is not None
-            await TaskRepo(session).create_agent_profile(
+            profile = await TaskRepo(session).create_agent_profile(
                 name="safe",
                 role="reader",
                 toolset_id=toolset.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="safe"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         tool_names = {t.name for t in (provider.last_req.tools or [])}
@@ -202,12 +217,12 @@ class TestAgentProfileBinding:
             await ToolsetRepo(session).create(name="none")
             toolset = await ToolsetRepo(session).get_entry("none")
             assert toolset is not None
-            await TaskRepo(session).create_agent_profile(
+            profile = await TaskRepo(session).create_agent_profile(
                 name="tooless",
                 role="x",
                 toolset_id=toolset.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="tooless"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         assert provider.last_req.tools == []

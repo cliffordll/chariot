@@ -62,12 +62,20 @@ API 的本地代理(0.6.0 之前的形态)。
 ChatRequest ─► AIAgent.run_chat
                    │
                    │ 1. _apply_profile_reflection(透传 agent_profile.reflection_*)
-                   │ 2. _resolve_binding(解析 agent_profile)
-                   │ 3. 分支:reflection_enabled? → _run_chat_reflective 循环 N 次
+                   │ 2. _resolve_binding(解析 agent_profile → provider_id /
+                   │    prompt_id / toolset_id)
+                   │ 3. _resolve_effective_provider(profile.provider_id 覆盖
+                   │    req.provider_ref)
+                   │ 4. 分支:reflection_enabled? → _run_chat_reflective 循环 N 次
                    │
                    ├─ stateless 路径 ──► _run_stateless_chat
-                   │       │ load memory entries / prompt bundle / refs
-                   │       │ → _prepare_request → SkillActivator.activate
+                   │       │ load memory entries
+                   │       │ → _prepare_request
+                   │       │   ├─ PromptComposer.render_layers_text
+                   │       │   ├─ _inject_default_tools
+                   │       │   │   └─ 只有 agent_profile.toolset_id 解析成功才
+                   │       │   │      注入 tool schemas;否则 tools=[]
+                   │       │   └─ SkillActivator.activate
                    │       │ → @reference expansion
                    │       │ → AgentLoop.stream_chat
                    │       └─ capture_memory(成功) / capture_error_memory(失败)
@@ -76,6 +84,7 @@ ChatRequest ─► AIAgent.run_chat
                            │ ConversationLockManager.acquire(进程内 + DB 双层锁)
                            │ persist new user messages
                            │ load history → build full_req → _prepare_request
+                           │ @reference expansion
                            │ ContextCompressor.maybe_compress(长对话)
                            │ prompt_trace 记录
                            │ → AgentLoop.stream_chat

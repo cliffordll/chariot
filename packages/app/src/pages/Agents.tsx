@@ -326,6 +326,7 @@ function AgentDetailCard({
               )}
             </div>
             <div className="grid gap-1 text-sm text-muted-foreground">
+              <span>id: {agent.id}</span>
               <span>created: {formatDateTime(agent.created_at)}</span>
               <span>updated: {formatDateTime(agent.updated_at)}</span>
             </div>

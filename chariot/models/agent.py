@@ -44,6 +44,7 @@ ClearableStr = str | None | _UnsetType
 class AgentProfile:
     name: str
     role: str
+    agent_label: str | None = None
     prompt_id: str | None = None
     prompt_label: str | None = None
     toolset_id: str | None = None
@@ -67,6 +68,7 @@ class AgentProfile:
         cls,
         *,
         name: str,
+        agent_label: str | None = None,
         role: str,
         provider_id: str | None = None,
         prompt_id: str | None = None,
@@ -85,6 +87,7 @@ class AgentProfile:
     ) -> AgentProfile:
         return cls(
             name=name,
+            agent_label=agent_label,
             role=role,
             prompt_id=prompt_id,
             prompt_label=prompt_label,

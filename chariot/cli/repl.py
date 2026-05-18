@@ -101,7 +101,7 @@ class ChatRepl:
         "  /exit, /quit           退出 REPL\n"
         "  /reset                 清空本地对话历史\n"
         "  /agent                 显示当前 agent_profile\n"
-        "  /agent <name>          本次会话切换到指定 agent_profile\n"
+        "  /agent <id>            本次会话切换到指定 agent_profile\n"
         "  /agent clear           清空当前 agent_profile\n"
         "  /agents                列已注册 agent profiles\n"
         "  /conversation, /convo  显示当前会话\n"
@@ -140,7 +140,10 @@ class ChatRepl:
             return
         # DB 是 canonical 真源:恢复 agent;provider 由 agent 推导
         if conv.agent_profile is not None:
-            self.ctx.agent_profile = conv.agent_profile
+            from chariot.services.agent import AgentService
+
+            entry = await AgentService(self.ctx.agent).get_agent(conv.agent_profile)
+            self.ctx.agent_profile = entry.id if entry is not None else conv.agent_profile
 
     async def run(self) -> None:
         """主循环:读输入 → 分派 slash / 发请求 → 打印 meta 行。
@@ -153,7 +156,7 @@ class ChatRepl:
             + " · /help 查看命令",
         )
         if self.ctx.agent_profile is None:
-            Renderer.out("提示: 先用 `/agent <name>` 选择 agent_profile，再发送消息。")
+            Renderer.out("提示: 先用 `/agent <id>` 选择 agent_profile，再发送消息。")
         session = self._make_prompt_session()
 
         while True:
@@ -200,7 +203,7 @@ class ChatRepl:
         和 rich Live 不冲突)。
         """
         if self.ctx.agent_profile is None:
-            Renderer.error_bubble("请先选择 agent_profile。用 `/agent <name>`。")
+            Renderer.error_bubble("请先选择 agent_profile。用 `/agent <id>`。")
             return
         self.ctx.append_user(user_text)
         Renderer.start_spinner()
@@ -319,7 +322,7 @@ class ChatRepl:
 
     async def _slash_agent(self, arg: str) -> None:
         """- `/agent` 显示当前 agent_profile
-        - `/agent <name>` 本次会话切换到 <name>(本地 + 同步到 conversation DB)
+        - `/agent <id>` 本次会话切换到 <id>(本地 + 同步到 conversation DB)
         - `/agent clear` / `/agent ""` 显式清空
         """
         if not arg:
@@ -331,8 +334,14 @@ class ChatRepl:
             self.ctx.agent_profile = None
             Renderer.out("agent_profile cleared")
         else:
-            self.ctx.agent_profile = arg
-            Renderer.out(f"agent_profile → {arg}")
+            from chariot.services.agent import AgentService
+
+            entry = await AgentService(self.ctx.agent).get_agent_by_id(arg)
+            if entry is None:
+                Renderer.error_bubble(f"unknown agent_id: {arg!r}")
+                return
+            self.ctx.agent_profile = entry.id
+            Renderer.out(f"agent_profile → {entry.id}")
 
         if self.ctx.conversation_id is not None:
             try:
@@ -349,7 +358,7 @@ class ChatRepl:
         """`/agents` — 列已注册的 agent profiles。"""
         if arg:
             Renderer.error_bubble(
-                "/agents 不接受参数;切换 agent 用 `/agent <name>`",
+                "/agents 不接受参数;切换 agent 用 `/agent <id>`",
             )
             return
         from chariot.services.agent import AgentService
@@ -360,16 +369,17 @@ class ChatRepl:
             return
         rows = [
             (
-                e.name,
+                e.agent_label or e.id,
                 e.role or "-",
-                e.provider_id or "-",
-                e.toolset_id or "-",
-                "← current" if e.name == self.ctx.agent_profile else "",
+                e.prompt_label or e.prompt_id or "-",
+                e.toolset_label or e.toolset_id or "-",
+                e.provider_label or e.provider_id or "-",
+                "← current" if e.id == self.ctx.agent_profile else "",
             )
             for e in entries
         ]
         Renderer.table(
-            ["name", "role", "provider", "toolset_id", ""],
+            ["agent", "role", "prompt", "toolset", "provider", ""],
             rows,
             title="agent profiles",
         )
@@ -414,10 +424,10 @@ class ChatRepl:
 
             conv = await ConversationService(self.ctx.agent).get(arg)
             if conv is not None and conv.agent_profile:
-                self.ctx.agent_profile = conv.agent_profile
                 from chariot.services.agent import AgentService
 
                 agent = await AgentService(self.ctx.agent).get_agent(conv.agent_profile)
+                self.ctx.agent_profile = agent.id if agent is not None else conv.agent_profile
                 if agent is not None and agent.provider_id:
                     self.ctx.set_provider(agent.provider_id)
         except Exception:

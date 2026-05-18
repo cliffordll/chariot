@@ -104,6 +104,7 @@ class AgentApi:
         return {
             "id": entry.id,
             "name": entry.name,
+            "agent_label": entry.agent_label,
             "role": entry.role,
             "prompt_id": entry.prompt_id,
             "prompt_label": entry.prompt_label,
