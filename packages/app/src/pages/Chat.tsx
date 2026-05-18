@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
@@ -25,23 +25,57 @@ import {
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 import type { StreamEvent } from "@/lib/streams";
 
-/**
- * Chat 页(0.4.0):左侧 conversation 侧栏 + 右侧 messages 视图。
- *
- * - sampling 参数取自 selected entry 的 `params`(不在本页配置)
- * - "+ New" 进入 draft 状态(conversationId=null);首次发送时创建 conversation
- * - 选中已存在 conversation → 拉取 messages,渲染 anthropic content blocks
- * - 发送只发新增的 user message(body.messages 单条);server 自己 prepend 历史
- *
- * Anthropic 默认兜底:max_tokens=1024,temperature/top_p 缺省不发。
- */
-
 const DEFAULT_MAX_TOKENS = 1024;
+const DRAFT_KEY = "__draft__";
+const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
+const DRAFT_AGENT_STORAGE_KEY = "chariot.chat.draft_agent";
 
 interface SamplingValues {
   maxTokens: number;
   temperature: number | undefined;
   topP: number | undefined;
+}
+
+interface PendingTurn {
+  requestId: number;
+  userText: string;
+  conversationId: string;
+  baseMessageCount: number;
+  blocks: AnthropicBlock[];
+  status: "streaming" | "done" | "aborted" | "error";
+  errorMsg: string | null;
+  meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
+}
+
+interface SessionState {
+  key: string;
+  conversationId: string | null;
+  conversation: Conversation | null;
+  detailStatus: "draft" | "loading" | "loaded" | "error";
+  detailError: string | null;
+  turnStatus: "idle" | "waiting" | "streaming" | "refreshing" | "done" | "error" | "aborted";
+  messages: Message[];
+  composerText: string;
+  selectedAgent: string | null;
+  pending: PendingTurn | null;
+  inFlight: boolean;
+}
+
+type ProvidersState =
+  | { kind: "loading" }
+  | { kind: "ok"; data: ProvidersListResponse }
+  | { kind: "err"; message: string };
+
+type ConvPaneState =
+  | { kind: "draft" }
+  | { kind: "loading"; id: string }
+  | { kind: "loaded"; id: string; convo: Conversation; messages: Message[] }
+  | { kind: "err"; id: string; message: string };
+
+interface ReferencePickerState {
+  query: string;
+  items: ReferenceSuggestion[];
+  index: number;
 }
 
 function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
@@ -60,9 +94,6 @@ function upsertConversation(list: Conversation[], convo: Conversation): Conversa
   const rest = list.filter((item) => item.id !== convo.id);
   return [convo, ...rest];
 }
-
-const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
-const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
 
 function lsGet(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -83,46 +114,6 @@ function lsSet(key: string, value: string | null): void {
   }
 }
 
-interface PendingTurn {
-  /** 用户这轮发的文本(已显示在右侧但还没落 DB)。 */
-  userText: string;
-  conversationId: string;
-  /**
-   * 0.5.0:渐进 append 的 anthropic content blocks。
-   * - text 增量累积进末尾 text block(没有就推一个新的)
-   * - tool_use_complete 推 tool_use block
-   * - tool_result 推 tool_result block
-   * - server 合成的 user role tool_result message 完整 turn 也走这里(单条 list 即可,
-   *   不区分 assistant / user 边界 —— BlocksRender 按 type 分支着色已足够区分)
-   */
-  blocks: AnthropicBlock[];
-  status: "streaming" | "done" | "aborted" | "error";
-  errorMsg: string | null;
-  meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
-}
-
-interface SharedChatUiState {
-  pending: PendingTurn | null;
-  inFlight: boolean;
-}
-
-type ConvPaneState =
-  | { kind: "draft" }
-  | { kind: "loading"; id: string }
-  | { kind: "loaded"; id: string; convo: Conversation; messages: Message[] }
-  | { kind: "err"; id: string; message: string };
-
-type ProvidersState =
-  | { kind: "loading" }
-  | { kind: "ok"; data: ProvidersListResponse }
-  | { kind: "err"; message: string };
-
-interface ReferencePickerState {
-  query: string;
-  items: ReferenceSuggestion[];
-  index: number;
-}
-
 function extractReferenceQuery(text: string): string | null {
   const token = text.match(/(?:^|\s)(@\S*)$/)?.[1] ?? null;
   return token && token.startsWith("@") ? token : null;
@@ -132,130 +123,260 @@ function replaceReferenceQuery(text: string, next: string): string {
   return text.replace(/(?:^|\s)(@\S*)$/, (full, token: string) => full.slice(0, full.length - token.length) + next);
 }
 
-let _sharedChatUiState: SharedChatUiState = {
-  pending: null,
-  inFlight: false,
-};
-let _sharedAbortController: AbortController | null = null;
-const _sharedChatUiListeners = new Set<(state: SharedChatUiState) => void>();
-
-function emitSharedChatUiState(): void {
-  for (const listener of _sharedChatUiListeners) {
-    listener(_sharedChatUiState);
-  }
-}
-
-function setSharedPending(pending: PendingTurn | null): void {
-  _sharedChatUiState = { ..._sharedChatUiState, pending };
-  emitSharedChatUiState();
-}
-
-function setSharedInFlight(inFlight: boolean): void {
-  _sharedChatUiState = { ..._sharedChatUiState, inFlight };
-  emitSharedChatUiState();
-}
-
-function subscribeSharedChatUiState(listener: (state: SharedChatUiState) => void): () => void {
-  _sharedChatUiListeners.add(listener);
-  listener(_sharedChatUiState);
-  return () => {
-    _sharedChatUiListeners.delete(listener);
+function makeDraftSession(selectedAgent: string | null): SessionState {
+  return {
+    key: DRAFT_KEY,
+    conversationId: null,
+    conversation: null,
+    detailStatus: "draft",
+    detailError: null,
+    turnStatus: "idle",
+    messages: [],
+    composerText: "",
+    selectedAgent,
+    pending: null,
+    inFlight: false,
   };
+}
+
+function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  return content;
+}
+
+function blocksPlainText(blocks: AnthropicBlock[]): string | null {
+  if (blocks.length === 0 || !blocks.every((b) => b.type === "text")) return null;
+  return blocks.map((b) => (b as { text?: string }).text ?? "").join("");
+}
+
+function messagePlainText(msg: Message): string | null {
+  return blocksPlainText(asBlocks(msg.content));
+}
+
+function hasCanonicalTurnEcho(messages: Message[], pending: PendingTurn): boolean {
+  if (messages.length <= pending.baseMessageCount) return false;
+  const appended = messages.slice(pending.baseMessageCount);
+  const hasUserEcho = appended.some(
+    (msg) => msg.role === "user" && messagePlainText(msg) === pending.userText,
+  );
+  if (!hasUserEcho) return false;
+  if (pending.blocks.length === 0) {
+    return true;
+  }
+  return appended.some((msg) => msg.role !== "user");
+}
+
+function hasCanonicalUserEcho(messages: Message[], pending: PendingTurn): boolean {
+  if (messages.length <= pending.baseMessageCount) return false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    return messagePlainText(msg) === pending.userText;
+  }
+  return false;
+}
+
+function applyEvent(blocks: AnthropicBlock[], ev: StreamEvent): AnthropicBlock[] {
+  if (ev.kind === "text") {
+    const last = blocks[blocks.length - 1];
+    if (last && last.type === "text" && typeof (last as { text?: unknown }).text === "string") {
+      const next = blocks.slice();
+      next[next.length - 1] = { type: "text", text: (last as { text: string }).text + ev.text };
+      return next;
+    }
+    return [...blocks, { type: "text", text: ev.text }];
+  }
+  if (ev.kind === "tool_use") {
+    return [
+      ...blocks,
+      { type: "tool_use", id: ev.toolUseId, name: ev.toolName, input: ev.toolInput },
+    ];
+  }
+  if (ev.kind === "tool_result") {
+    return [
+      ...blocks,
+      {
+        type: "tool_result",
+        tool_use_id: ev.toolUseId,
+        content: ev.toolResultContent,
+        is_error: ev.isError,
+      },
+    ];
+  }
+  return blocks;
+}
+
+function extractErr(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message;
+  return String(e);
 }
 
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
-  // 0.7.2-tool+ agent picker:选中 agent 后,本轮 chat RPC 带 agent_profile,
-  // sidecar 由 AIAgent._resolve_binding 解析三件套(provider/prompt/tool);
-  // 选 "(none)" 走 0.7.0 行为(全局 active bundle + 全量 enabled tools)。
   const [agents, setAgents] = useState<AgentProfile[]>([]);
-  const [selectedAgent, setSelectedAgentState] = useState<string | null>(() =>
-    lsGet(AGENT_STORAGE_KEY),
-  );
-
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
   const [convsErr, setConvsErr] = useState<string | null>(null);
-
-  const [pane, setPane] = useState<ConvPaneState>(() => {
-    const pendingConversationId = _sharedChatUiState.pending?.conversationId;
-    if (pendingConversationId && pendingConversationId !== "(draft)") {
-      return { kind: "loading", id: pendingConversationId };
-    }
-    const id = lsGet(CONV_STORAGE_KEY);
-    return id ? { kind: "loading", id } : { kind: "draft" };
+  const initialActiveKey = lsGet(CONV_STORAGE_KEY) ?? DRAFT_KEY;
+  const initialDraftAgent = lsGet(DRAFT_AGENT_STORAGE_KEY);
+  const [activeKey, setActiveKey] = useState(initialActiveKey);
+  const [sessions, setSessions] = useState<Record<string, SessionState>>({
+    [DRAFT_KEY]: makeDraftSession(initialDraftAgent),
+    ...(initialActiveKey !== DRAFT_KEY
+      ? {
+          [initialActiveKey]: {
+            key: initialActiveKey,
+            conversationId: initialActiveKey,
+            conversation: null,
+            detailStatus: "loading",
+            detailError: null,
+            messages: [],
+            composerText: "",
+            selectedAgent: null,
+            pending: null,
+            inFlight: false,
+          },
+        }
+      : {}),
   });
-  const [pending, setPendingState] = useState<PendingTurn | null>(() => _sharedChatUiState.pending);
-
-  const [input, setInput] = useState("");
   const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
-  const [inFlight, setInFlightState] = useState<boolean>(() => _sharedChatUiState.inFlight);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const detailReqSeqRef = useRef<Record<string, number>>({});
+  const turnReqSeqRef = useRef(0);
+  const abortControllersRef = useRef(new Map<string, AbortController>());
 
-  const setSelectedAgent = useCallback((agentId: string | null) => {
-    setSelectedAgentState(agentId);
-    lsSet(AGENT_STORAGE_KEY, agentId);
-  }, []);
+  const activeSession = sessions[activeKey] ?? sessions[DRAFT_KEY];
+  const pending = activeSession.pending;
+  const isBusy =
+    activeSession.turnStatus === "waiting" ||
+    activeSession.turnStatus === "streaming" ||
+    activeSession.turnStatus === "refreshing";
+  const input = activeSession.composerText;
+  const selectedAgent = activeSession.selectedAgent;
 
-  useEffect(() => subscribeSharedChatUiState((state) => {
-    setPendingState(state.pending);
-    setInFlightState(state.inFlight);
-  }), []);
-
-  const setActivePane = useCallback((next: ConvPaneState) => {
-    setPane(next);
-    if (next.kind === "draft") lsSet(CONV_STORAGE_KEY, null);
-    else lsSet(CONV_STORAGE_KEY, next.id);
+  const patchSession = useCallback((key: string, updater: (session: SessionState) => SessionState) => {
+    setSessions((cur) => {
+      const existing = cur[key] ?? (key === DRAFT_KEY ? makeDraftSession(lsGet(DRAFT_AGENT_STORAGE_KEY)) : null);
+      if (!existing) return cur;
+      return { ...cur, [key]: updater(existing) };
+    });
   }, []);
 
   const loadProviders = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
       const { providers } = await api.listProviders();
-      const data: ProvidersListResponse = {
-        available: providers.map((p) => p.name),
-        types: [],
-        entries: providers,
-      };
-      setProvidersState({ kind: "ok", data });
+      setProvidersState({
+        kind: "ok",
+        data: {
+          available: providers.map((p) => p.name),
+          types: [],
+          entries: providers,
+        },
+      });
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setProvidersState({ kind: "err", message: msg });
+      setProvidersState({ kind: "err", message: extractErr(e) });
     }
   }, []);
 
-  const loadConvs = useCallback(async () => {
-    setConvsLoading(true);
+  const loadConvs = useCallback(async (opts?: { preserveList?: boolean }) => {
+    if (!opts?.preserveList) {
+      setConvsLoading(true);
+    }
     setConvsErr(null);
     try {
       const { conversations } = await api.listConversations();
       setConvs(conversations.slice(0, 100));
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setConvsErr(msg);
+      setConvsErr(extractErr(e));
     } finally {
       setConvsLoading(false);
     }
   }, []);
 
-  const loadConvDetail = useCallback(async (id: string) => {
-    setActivePane({ kind: "loading", id });
+  const loadConversation = useCallback(async (id: string, opts?: { activate?: boolean; preserveMessages?: boolean }) => {
+    const activate = opts?.activate !== false;
+    const preserveMessages = opts?.preserveMessages === true;
+    const requestSeq = (detailReqSeqRef.current[id] ?? 0) + 1;
+    detailReqSeqRef.current[id] = requestSeq;
+    if (activate) {
+      setActiveKey(id);
+    }
+    setSessions((cur) => {
+      const existing = cur[id];
+      const next: SessionState = existing ?? {
+        key: id,
+            conversationId: id,
+            conversation: null,
+            detailStatus: "loading",
+            detailError: null,
+            turnStatus: "idle",
+            messages: [],
+            composerText: "",
+            selectedAgent: null,
+            pending: null,
+        inFlight: false,
+      };
+      return {
+        ...cur,
+        [id]: {
+          ...next,
+          detailStatus: preserveMessages && next.messages.length > 0 ? "loaded" : "loading",
+          detailError: null,
+        },
+      };
+    });
     try {
       const detail = await api.getConversation(id);
-      setActivePane({
-        kind: "loaded",
-        id,
-        convo: detail.conversation,
-        messages: detail.messages,
+      if (detailReqSeqRef.current[id] !== requestSeq) return;
+      setSessions((cur) => {
+        const existing = cur[id];
+        if (!existing) return cur;
+        const shouldClearPending =
+          existing.pending !== null && hasCanonicalTurnEcho(detail.messages, existing.pending);
+        return {
+          ...cur,
+          [id]: {
+            ...existing,
+            conversationId: id,
+            conversation: detail.conversation,
+            detailStatus: "loaded",
+            detailError: null,
+            messages: detail.messages,
+            selectedAgent: detail.conversation.agent_profile,
+            pending: shouldClearPending ? null : existing.pending,
+            inFlight: shouldClearPending ? false : existing.inFlight,
+            turnStatus: shouldClearPending ? "done" : existing.turnStatus,
+          },
+        };
       });
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setActivePane({ kind: "err", id, message: msg });
+      if (detailReqSeqRef.current[id] !== requestSeq) return;
+      setSessions((cur) => {
+        const existing = cur[id];
+        if (!existing) return cur;
+        return {
+          ...cur,
+          [id]: {
+            ...existing,
+            detailStatus: "error",
+            detailError: extractErr(e),
+          },
+        };
+      });
     }
-  }, [setActivePane]);
+  }, []);
 
-  // initial loads
+  useEffect(() => {
+    lsSet(CONV_STORAGE_KEY, activeKey === DRAFT_KEY ? null : activeKey);
+  }, [activeKey]);
+
+  useEffect(() => {
+    lsSet(DRAFT_AGENT_STORAGE_KEY, sessions[DRAFT_KEY]?.selectedAgent ?? null);
+  }, [sessions]);
+
   useEffect(() => {
     void loadProviders();
     void loadConvs();
@@ -264,97 +385,22 @@ export default function Chat() {
         const { agents: list } = await api.listAgents();
         setAgents(list);
       } catch {
-        // 静默:agent picker 是辅助,失败不阻断主聊天
+        // ignore
       }
     })();
   }, [loadProviders, loadConvs]);
 
-  // selectedAgent 兜底:dangling(本机 ls 残留但 DB 已删)→ 清空回 "(none)"
   useEffect(() => {
-    if (selectedAgent === null) return;
-    if (agents.length === 0) return;
-    if (!agents.some((a) => a.id === selectedAgent)) {
-      setSelectedAgent(null);
+    if (initialActiveKey !== DRAFT_KEY) {
+      void loadConversation(initialActiveKey, { activate: false });
     }
-  }, [agents, selectedAgent, setSelectedAgent]);
+  }, [initialActiveKey, loadConversation]);
 
-  // 启动时若 localStorage 里残留了 conv id,拉一次详情
-  useEffect(() => {
-    if (pane.kind === "loading") {
-      void loadConvDetail(pane.id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const pendingConversationId = _sharedChatUiState.pending?.conversationId;
-    if (!pendingConversationId || pendingConversationId === "(draft)") return;
-    if (pane.kind === "loading" || pane.kind === "loaded" || pane.kind === "err") {
-      if (pane.id === pendingConversationId) return;
-    }
-    setActivePane({ kind: "loading", id: pendingConversationId });
-    void loadConvDetail(pendingConversationId);
-  }, [pane, loadConvDetail, setActivePane, pending]);
-
-  // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
-  // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
-  // messages 时长度跳变,distance 常超 64px → 阈值卡住不滚 → 用户看不到最新。
-  // 牺牲"流式中往上翻看历史不被打断"的便利,优先保证消息可见性。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [pane, pending]);
-
-  // C1: 切换/恢复对话时自动恢复 agent
-  // 用 seenPaneId 追踪 pane 身份变化:当 pane id 改变时(切换对话/draft)
-  // 清空 restoredForConvId,确保重新恢复。同对话的 loadConvDetail reload
-  // 不会改变 pane id,因此不会触发重复恢复。
-  const seenPaneId = useRef<string | null>(null);
-  const restoredForConvId = useRef<string | null>(null);
-  useEffect(() => {
-    const currentId = pane.kind === "draft" ? null : pane.id;
-
-    if (currentId !== seenPaneId.current) {
-      // pane 身份变了 → 清空恢复标记,下次 loaded 时重新恢复
-      restoredForConvId.current = null;
-      seenPaneId.current = currentId;
-    }
-
-    if (pane.kind !== "loaded") return;
-    if (pane.id === restoredForConvId.current) return;
-    restoredForConvId.current = pane.id;
-
-    const convo = pane.convo;
-
-    // 恢复 agent;provider 由 agent 绑定自动推导
-    if (convo.agent_profile) {
-      setSelectedAgent(convo.agent_profile);
-    } else {
-      setSelectedAgent(null);
-    }
-  }, [pane, setSelectedAgent, agents]);
-
-  // 双向同步:页面重新可见时从 DB 拉最新 agent(应对 CLI 修改)
-  // provider 由 agent 自动推导,不再单独同步
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      if (pane.kind !== "loaded") return;
-      api
-        .getConversation(pane.id)
-        .then(({ conversation: c }) => {
-          const targetAgent = c.agent_profile ?? null;
-          if (targetAgent !== selectedAgent) {
-            setSelectedAgent(targetAgent);
-            // provider 由 handleSelectAgent 自动推导
-          }
-        })
-        .catch(() => {});
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [pane, selectedAgent, setSelectedAgent]);
+  }, [activeKey, activeSession.messages, activeSession.pending]);
 
   useEffect(() => {
     const query = extractReferenceQuery(input);
@@ -390,184 +436,228 @@ export default function Chat() {
     setReferencePicker(null);
   }, [input, convs]);
 
-  const startNewChat = useCallback(async () => {
-    _sharedAbortController?.abort();
-    setSharedPending(null);
-    setSharedInFlight(false);
-    setSelectedAgent(null);
-    try {
-      const conv = await api.createConversation({});
-      setConvs((cur) => upsertConversation(cur, conv));
-      setActivePane({
-        kind: "loaded",
-        id: conv.id,
-        convo: conv,
-        messages: [],
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      alert(`创建会话失败: ${msg}`);
-      setActivePane({ kind: "draft" });
+  const updateComposer = useCallback((key: string, value: string) => {
+    patchSession(key, (session) => ({ ...session, composerText: value }));
+  }, [patchSession]);
+
+  const startNewChat = useCallback(() => {
+    abortControllersRef.current.get(DRAFT_KEY)?.abort();
+    abortControllersRef.current.delete(DRAFT_KEY);
+    setSessions((cur) => ({
+      ...cur,
+      [DRAFT_KEY]: {
+        ...makeDraftSession(cur[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+      },
+    }));
+    setActiveKey(DRAFT_KEY);
+  }, []);
+
+  const selectConv = useCallback((id: string) => {
+    if (activeKey === id) return;
+    const existing = sessions[id];
+    setActiveKey(id);
+    if (!existing || existing.detailStatus === "error" || existing.messages.length === 0) {
+      void loadConversation(id, { activate: false });
     }
-  }, [setActivePane, setSelectedAgent]);
+  }, [activeKey, loadConversation, sessions]);
 
-  const selectConv = useCallback(
-    (id: string) => {
-      if (pane.kind !== "draft" && pane.kind !== "loading" && pane.kind !== "err") {
-        if (pane.id === id) return;
-      }
-      _sharedAbortController?.abort();
-      setSharedPending(null);
-      setSharedInFlight(false);
-      void loadConvDetail(id);
-    },
-    [pane, loadConvDetail],
-  );
+  const handleDeleteConv = useCallback(async (id: string) => {
+    if (!window.confirm("删除这个对话?不可撤销。")) return;
+    try {
+      await api.deleteConversation(id);
+    } catch (e) {
+      alert(`删除失败: ${extractErr(e)}`);
+      return;
+    }
+    abortControllersRef.current.get(id)?.abort();
+    abortControllersRef.current.delete(id);
+    setSessions((cur) => {
+      const next = { ...cur };
+      delete next[id];
+      return next;
+    });
+    if (activeKey === id) {
+      setActiveKey(DRAFT_KEY);
+    }
+    void loadConvs({ preserveList: true });
+  }, [activeKey, loadConvs]);
 
-  const handleDeleteConv = useCallback(
-    async (id: string) => {
-      if (!window.confirm("删除这个对话?不可撤销。")) return;
-      try {
-        await api.deleteConversation(id);
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        alert(`删除失败: ${msg}`);
-        return;
-      }
-      // 当前选中被删 → 回 draft
-      if (
-        (pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err") &&
-        pane.id === id
-      ) {
-        setSharedPending(null);
-        setActivePane({ kind: "draft" });
-      }
-      void loadConvs();
-    },
-    [pane, setActivePane, loadConvs],
-  );
+  const handleRenameConv = useCallback(async (id: string, currentTitle: string | null) => {
+    const next = window.prompt("新标题(空字符串清空):", currentTitle ?? "");
+    if (next === null) return;
+    const title = next.trim() === "" ? null : next.trim();
+    try {
+      const { conversation } = await api.renameConversation(id, title);
+      setConvs((cur) => upsertConversation(cur, conversation));
+      patchSession(id, (session) => ({
+        ...session,
+        conversation,
+      }));
+    } catch (e) {
+      alert(`改名失败: ${extractErr(e)}`);
+      return;
+    }
+    void loadConvs({ preserveList: true });
+    void loadConversation(id, { activate: false, preserveMessages: true });
+  }, [loadConversation, loadConvs, patchSession]);
 
-  const handleRenameConv = useCallback(
-    async (id: string, currentTitle: string | null) => {
-      const next = window.prompt("新标题(空字符串清空):", currentTitle ?? "");
-      if (next === null) return;
-      const title = next.trim() === "" ? null : next.trim();
-      try {
-        await api.renameConversation(id, title);
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        alert(`改名失败: ${msg}`);
-        return;
-      }
-      void loadConvs();
-      if (pane.kind === "loaded" && pane.id === id) {
-        void loadConvDetail(id);
-      }
-    },
-    [loadConvs, pane, loadConvDetail],
-  );
+  const handleSelectAgent = useCallback((name: string | null) => {
+    const key = activeKey;
+    patchSession(key, (session) => ({ ...session, selectedAgent: name }));
+    if (key === DRAFT_KEY) return;
+    api.updateConversationConfig(key, { agent_profile: name }).then(({ conversation }) => {
+      setConvs((cur) => upsertConversation(cur, conversation));
+      patchSession(key, (session) => ({ ...session, conversation }));
+    }).catch(() => {});
+  }, [activeKey, patchSession]);
 
-  const handleSelectAgent = useCallback(
-    (name: string | null) => {
-      setSelectedAgent(name);
-      if (pane.kind === "loaded") {
-        api.updateConversationConfig(pane.id, { agent_profile: name }).catch(() => {});
+  const refreshAfterTurn = useCallback(async (key: string, conversationId: string, requestId: number) => {
+    await loadConversation(conversationId, { activate: false, preserveMessages: true });
+    await loadConvs({ preserveList: true });
+    setSessions((cur) => {
+      const session = cur[key];
+      if (!session?.pending || session.pending.requestId !== requestId || session.pending.status !== "done") {
+        return cur;
       }
-    },
-    [setSelectedAgent, pane],
-  );
-
-  const canSend =
-    !inFlight &&
-    input.trim().length > 0 &&
-    selectedAgent !== null &&
-    (pane.kind === "draft" || pane.kind === "loaded");
+      return {
+        ...cur,
+        [key]: {
+          ...session,
+          inFlight: false,
+          pending: null,
+          turnStatus: "done",
+        },
+      };
+    });
+  }, [loadConversation, loadConvs]);
 
   const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || inFlight || selectedAgent === null) return;
-    if (pane.kind !== "draft" && pane.kind !== "loaded") return;
+    const session = sessions[activeKey];
+    if (!session) return;
+    const text = session.composerText.trim();
+    if (
+      !text ||
+      session.turnStatus === "waiting" ||
+      session.turnStatus === "streaming" ||
+      session.turnStatus === "refreshing" ||
+      session.selectedAgent === null
+    ) return;
 
-    setInput("");
-    setSharedInFlight(true);
-
-    // 0. 若 draft → 先创建 conversation
-    let convId: string;
-    if (pane.kind === "draft") {
-      try {
-        const conv = await api.createConversation({});
-        setConvs((cur) => upsertConversation(cur, conv));
-        convId = conv.id;
-        setActivePane({
-          kind: "loaded",
-          id: conv.id,
-          convo: conv,
-          messages: [],
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        setSharedPending({
-          userText: text,
-          conversationId: "(draft)",
-          blocks: [],
-          status: "error",
-          errorMsg: `创建会话失败: ${msg}`,
-          meta: null,
-        });
-        setSharedInFlight(false);
-        return;
-      }
-    } else {
-      convId = pane.id;
-    }
-
-    // 1. 显示 pending 行(blocks 起步空,onEvent 渐进 append)
-    setSharedPending({
+    const requestId = ++turnReqSeqRef.current;
+    const pendingTurn: PendingTurn = {
+      requestId,
       userText: text,
-      conversationId: convId,
+      conversationId: session.conversationId ?? DRAFT_KEY,
+      baseMessageCount: session.messages.length,
       blocks: [],
       status: "streaming",
       errorMsg: null,
       meta: null,
-    });
+    };
 
-    // 2. 取 sampling:从 agent 绑定的 provider_id 找 entry
-    const agentObj = agents.find((a) => a.id === selectedAgent);
+    patchSession(activeKey, (current) => ({
+      ...current,
+      composerText: "",
+      pending: pendingTurn,
+      turnStatus: "waiting",
+      inFlight: true,
+    }));
+
+    let targetKey = activeKey;
+    let conversationId = session.conversationId;
+    let agentForTurn = session.selectedAgent;
+
+    if (activeKey === DRAFT_KEY) {
+      try {
+        const created = await api.createConversation({});
+        const conversation: Conversation = { ...created, agent_profile: agentForTurn };
+        setConvs((cur) => upsertConversation(cur, conversation));
+        targetKey = conversation.id;
+        conversationId = conversation.id;
+        setSessions((cur) => ({
+          ...cur,
+          [DRAFT_KEY]: makeDraftSession(cur[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+          [conversation.id]: {
+            key: conversation.id,
+            conversationId: conversation.id,
+            conversation,
+            detailStatus: "loaded",
+            detailError: null,
+            turnStatus: "waiting",
+            messages: [],
+            composerText: "",
+            selectedAgent: agentForTurn,
+            pending: { ...pendingTurn, conversationId: conversation.id, baseMessageCount: 0 },
+            inFlight: true,
+          },
+        }));
+        setActiveKey(conversation.id);
+        api.updateConversationConfig(conversation.id, { agent_profile: agentForTurn }).catch(() => {});
+      } catch (e) {
+        patchSession(DRAFT_KEY, (current) => ({
+          ...current,
+          pending: {
+            ...pendingTurn,
+            status: "error",
+            errorMsg: `创建会话失败: ${extractErr(e)}`,
+          },
+          turnStatus: "error",
+          inFlight: false,
+        }));
+        return;
+      }
+    }
+
+    if (!conversationId || agentForTurn === null) return;
+
+    const agentObj = agents.find((a) => a.id === agentForTurn);
     const entryId = agentObj?.provider_id ?? null;
     const entry =
       providersState.kind === "ok"
         ? providersState.data.entries.find((e) => e.id === entryId)
         : undefined;
     const sampling = samplingFromEntry(entry);
-
-    // 3. 只发新的 user message;server 会从 DB prepend 历史
-    const newMessages: ChatTurnMsg[] = [{ role: "user", content: text }];
-
     const ctrl = new AbortController();
-    _sharedAbortController = ctrl;
+    abortControllersRef.current.set(targetKey, ctrl);
 
     try {
-      const result = await runTurn(newMessages, {
+      const result = await runTurn([{ role: "user", content: text } satisfies ChatTurnMsg], {
         provider: null,
         maxTokens: sampling.maxTokens,
         temperature: sampling.temperature,
         topP: sampling.topP,
-        conversationId: convId,
-        agentProfile: selectedAgent,
+        conversationId,
+        agentProfile: agentForTurn,
         signal: ctrl.signal,
         onEvent: (ev) => {
-          setSharedPending(
-            _sharedChatUiState.pending
-              ? { ..._sharedChatUiState.pending, blocks: applyEvent(_sharedChatUiState.pending.blocks, ev) }
-              : null,
-          );
+          setSessions((cur) => {
+            const current = cur[targetKey];
+            if (!current?.pending || current.pending.requestId !== requestId) return cur;
+            return {
+              ...cur,
+              [targetKey]: {
+                ...current,
+                turnStatus: "streaming",
+                pending: {
+                  ...current.pending,
+                  blocks: applyEvent(current.pending.blocks, ev),
+                },
+              },
+            };
+          });
         },
       });
-
-      setSharedPending(
-        _sharedChatUiState.pending
-          ? {
-              ..._sharedChatUiState.pending,
+      setSessions((cur) => {
+        const current = cur[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return cur;
+        return {
+          ...cur,
+          [targetKey]: {
+            ...current,
+            inFlight: false,
+            turnStatus: result.aborted ? "aborted" : "refreshing",
+            pending: {
+              ...current.pending,
               status: result.aborted ? "aborted" : "done",
               meta: {
                 inputTokens: result.inputTokens,
@@ -575,73 +665,97 @@ export default function Chat() {
                 latencyMs: result.latencyMs,
                 model: entryId ?? "?",
               },
-            }
-          : null,
-      );
+            },
+          },
+        };
+      });
+      if (!result.aborted) {
+        void refreshAfterTurn(targetKey, conversationId, requestId);
+      }
     } catch (e) {
-      const msg = e instanceof ChatError ? e.message : extractErr(e);
-      setSharedPending(
-        _sharedChatUiState.pending
-          ? { ..._sharedChatUiState.pending, status: "error", errorMsg: msg }
-          : null,
-      );
+      setSessions((cur) => {
+        const current = cur[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return cur;
+        return {
+          ...cur,
+          [targetKey]: {
+            ...current,
+            inFlight: false,
+            turnStatus: "error",
+            pending: {
+              ...current.pending,
+              status: "error",
+              errorMsg: e instanceof ChatError ? e.message : extractErr(e),
+            },
+          },
+        };
+      });
     } finally {
-      setSharedInFlight(false);
-      _sharedAbortController = null;
+      abortControllersRef.current.delete(targetKey);
     }
-  }, [input, inFlight, selectedAgent, agents, pane, providersState, setActivePane, loadConvDetail, loadConvs]);
+  }, [activeKey, agents, patchSession, providersState, refreshAfterTurn, sessions]);
 
   const handleStop = useCallback(() => {
-    _sharedAbortController?.abort();
-  }, []);
+    abortControllersRef.current.get(activeKey)?.abort();
+  }, [activeKey]);
 
   const handleRetry = useCallback(() => {
-    if (inFlight || !pending) return;
-    if (pending.status !== "error" && pending.status !== "aborted") return;
-    const text = pending.userText;
-    setSharedPending(null);
-    setInput(text);
-  }, [inFlight, pending]);
-
-  useEffect(() => {
-    if (!pending || pending.status !== "done") return;
-    if (pane.kind !== "loaded") return;
-    if (pending.conversationId !== pane.id) return;
-    void (async () => {
-      await loadConvDetail(pane.id);
-      await loadConvs();
-      if (
-        _sharedChatUiState.pending?.conversationId === pane.id &&
-        _sharedChatUiState.pending?.status === "done"
-      ) {
-        setSharedPending(null);
-      }
-    })();
-  }, [pending, pane, loadConvDetail, loadConvs]);
+    const session = sessions[activeKey];
+    if (
+      !session?.pending ||
+      session.turnStatus === "waiting" ||
+      session.turnStatus === "streaming" ||
+      session.turnStatus === "refreshing"
+    ) return;
+    if (session.pending.status !== "error" && session.pending.status !== "aborted") return;
+    patchSession(activeKey, (current) => ({
+      ...current,
+      composerText: current.pending?.userText ?? current.composerText,
+      turnStatus: "idle",
+      pending: null,
+    }));
+  }, [activeKey, patchSession, sessions]);
 
   const applyReferenceSuggestion = useCallback((item: ReferenceSuggestion) => {
-    setInput((cur) => `${replaceReferenceQuery(cur, item.value)} `);
+    updateComposer(activeKey, `${replaceReferenceQuery(input, item.value)} `);
     setReferencePicker(null);
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       const len = textareaRef.current?.value.length ?? 0;
       textareaRef.current?.setSelectionRange(len, len);
     });
-  }, []);
+  }, [activeKey, input, updateComposer]);
 
-  const activeId =
-    pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err" ? pane.id : null;
-  const visiblePending =
-    pending &&
-    (((pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err") &&
-      pending.conversationId === pane.id) ||
-      (pane.kind === "draft" && pending.conversationId === "(draft)"))
-      ? pending
-      : null;
+  const canSend =
+    !isBusy &&
+    input.trim().length > 0 &&
+    selectedAgent !== null &&
+    (activeSession.detailStatus === "draft" || activeSession.detailStatus === "loaded");
+
+  const activePane: ConvPaneState = useMemo(() => {
+    if (activeKey === DRAFT_KEY) return { kind: "draft" };
+    if (activeSession.detailStatus === "loading") return { kind: "loading", id: activeKey };
+    if (activeSession.detailStatus === "error") {
+      return { kind: "err", id: activeKey, message: activeSession.detailError ?? "load failed" };
+    }
+    return {
+      kind: "loaded",
+      id: activeKey,
+      convo: activeSession.conversation ?? {
+        id: activeKey,
+        title: null,
+        agent_profile: activeSession.selectedAgent,
+        last_model: null,
+        created_at: "",
+        updated_at: "",
+        message_count: activeSession.messages.length,
+      },
+      messages: activeSession.messages,
+    };
+  }, [activeKey, activeSession]);
 
   return (
     <section className="flex h-full gap-3">
-      {/* 左侧 sidebar */}
       <aside className="flex w-64 flex-col rounded-lg border border-border bg-muted/10">
         <div className="flex items-center justify-between border-b border-border p-2">
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -674,29 +788,67 @@ export default function Chat() {
             </p>
           )}
           <ul className="divide-y divide-border">
+            <li
+              className={
+                "group flex cursor-pointer items-start gap-1 px-2 py-2 text-xs hover:bg-muted/30 " +
+                (activeKey === DRAFT_KEY ? "bg-muted/40" : "")
+              }
+              onClick={startNewChat}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">New chat</div>
+                <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                  draft
+                </div>
+              </div>
+            </li>
             {convs.map((c) => {
-              const isActive = activeId === c.id;
+              const session = sessions[c.id];
+              const isStreaming =
+                session?.turnStatus === "waiting" ||
+                session?.turnStatus === "streaming" ||
+                session?.turnStatus === "refreshing";
+              const statusLabel =
+                session?.turnStatus === "waiting"
+                  ? "waiting"
+                  : session?.turnStatus === "streaming"
+                    ? "streaming"
+                  : session?.turnStatus === "refreshing"
+                    ? "syncing"
+                    : session?.turnStatus === "done"
+                      ? "done"
+                      : session?.turnStatus === "error"
+                        ? "error"
+                        : session?.turnStatus === "aborted"
+                          ? "aborted"
+                          : null;
               return (
                 <li
                   key={c.id}
                   className={
                     "group flex cursor-pointer items-start gap-1 px-2 py-2 text-xs hover:bg-muted/30 " +
-                    (isActive ? "bg-muted/40" : "")
+                    (activeKey === c.id ? "bg-muted/40" : "")
                   }
                   onClick={() => selectConv(c.id)}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">
+                    <div className="flex items-center gap-1 truncate font-medium">
+                      {isStreaming && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />}
                       {c.title?.trim() ? c.title : <span className="text-muted-foreground">(no title)</span>}
                     </div>
                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                       <code className="font-mono">{c.id.slice(-6)}</code>
                       {" · "}
-                      {c.message_count} msg
-                      {c.last_model && ` · ${c.last_model}`}
+                      {c.message_count} msgs
+                      {statusLabel && (
+                        <>
+                          {" · "}
+                          {statusLabel}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100">
+                  <div className="flex shrink-0 flex-col items-center opacity-0 transition group-hover:opacity-100">
                     <button
                       type="button"
                       className="text-[10px] text-muted-foreground hover:text-foreground"
@@ -727,19 +879,18 @@ export default function Chat() {
         </div>
       </aside>
 
-      {/* 右侧主面板 */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">
-            {pane.kind === "loaded" && pane.convo.title
-              ? pane.convo.title
-              : pane.kind === "draft"
+            {activePane.kind === "loaded" && activePane.convo.title
+              ? activePane.convo.title
+              : activePane.kind === "draft"
                 ? "New chat"
                 : "Chat"}
           </h1>
-          {pane.kind === "loaded" && (
+          {activePane.kind === "loaded" && (
             <div className="text-xs text-muted-foreground">
-              <code className="font-mono">{pane.id}</code>
+              <code className="font-mono">{activePane.id}</code>
             </div>
           )}
         </div>
@@ -755,9 +906,8 @@ export default function Chat() {
           ref={scrollRef}
           className="mb-3 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/20 p-4"
         >
-          <MessagesView pane={pane} pending={visiblePending} onRetry={handleRetry} />
+          <MessagesView pane={activePane} pending={pending} onRetry={handleRetry} />
         </div>
-
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Textarea
@@ -768,7 +918,7 @@ export default function Chat() {
                   ? "请先选择 agent_profile，再开始对话"
                   : "发消息…(Enter 发送,Shift+Enter 换行)"
               }
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => updateComposer(activeKey, e.target.value)}
               onKeyDown={(e) => {
                 if (referencePicker && referencePicker.items.length > 0) {
                   if (e.key === "ArrowDown") {
@@ -801,7 +951,7 @@ export default function Chat() {
                   if (canSend) void handleSend();
                 }
               }}
-              disabled={inFlight}
+              disabled={isBusy}
               className="min-h-20 flex-1"
             />
             {referencePicker && (
@@ -840,7 +990,7 @@ export default function Chat() {
               </p>
             )}
           </div>
-          {inFlight ? (
+          {isBusy ? (
             <Button variant="destructive" onClick={handleStop}>
               Stop
             </Button>
@@ -854,8 +1004,6 @@ export default function Chat() {
     </section>
   );
 }
-
-// ---------- EntryRow(0.3.1 起 · 0.6.6+ 加 per-call override 输入框)----------
 
 const AGENT_NONE = "__none__";
 
@@ -881,10 +1029,10 @@ function EntryRow({
     );
   }
 
-  const agent = agents.find((a) => a.name === selectedAgent);
-    const providerName = agent?.provider_label ?? agent?.provider_id ?? null;
-    const promptName = agent?.prompt_label ?? agent?.prompt_id ?? null;
-    const toolsetName = agent?.toolset_label ?? agent?.toolset_id ?? null;
+  const agent = agents.find((a) => a.id === selectedAgent);
+  const providerName = agent?.provider_label ?? agent?.provider_id ?? null;
+  const promptName = agent?.prompt_label ?? agent?.prompt_id ?? null;
+  const toolsetName = agent?.toolset_label ?? agent?.toolset_id ?? null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">
@@ -913,8 +1061,6 @@ function EntryRow({
     </div>
   );
 }
-
-// ---------- MessagesView ----------
 
 function MessagesView({
   pane,
@@ -953,8 +1099,8 @@ function MessagesView({
       <p className="text-sm text-destructive">无法读取对话:{pane.message}</p>
     );
   }
-  const { messages } = pane;
-  if (messages.length === 0 && !pending) {
+  const hidePendingUserBubble = pending ? hasCanonicalUserEcho(pane.messages, pending) : false;
+  if (pane.messages.length === 0 && !pending) {
     return (
       <p className="text-sm text-muted-foreground">
         空对话:输入消息开始。
@@ -963,14 +1109,18 @@ function MessagesView({
   }
   return (
     <ul className="space-y-4">
-      {messages.map((m, i) => (
+      {pane.messages.map((m, i) => (
         <li key={m.seq ?? i}>
           <MessageRow msg={m} />
         </li>
       ))}
       {pending && (
         <li>
-          <PendingBubble pending={pending} onRetry={onRetry} />
+          <PendingBubble
+            pending={pending}
+            onRetry={onRetry}
+            hideUserBubble={hidePendingUserBubble}
+          />
         </li>
       )}
     </ul>
@@ -979,21 +1129,9 @@ function MessagesView({
 
 function MessageRow({ msg }: { msg: Message }) {
   if (msg.role === "user") {
-    // user content 形态分两种:
-    // - 纯文本(string 或全是 type="text" 的 blocks)→ 右侧深色 bubble(用户输入)
-    // - 含 tool_result blocks → 左侧 emerald 框(那是 AgentLoop 合成的工具反馈,
-    //   语义上虽是 user role,但视觉上属于"系统输出"
-    //
-    // bug 注:0.6.0+ AIAgent._persist_new_user_messages 把 user 输入强制
-    // normalize 成 blocks 落库,DB load 出来 content 永远是 list,**永远不是
-    // string**;之前 `typeof content === "string"` 守卫永远 false,导致用户输入
-    // 也走 tool_result 分支(emerald + 左对齐),整个 history 看起来"没区分左右"。
     const blocks = asBlocks(msg.content);
-    const isPureText = blocks.length > 0 && blocks.every((b) => b.type === "text");
-    if (isPureText) {
-      const text = blocks
-        .map((b) => (b as { text?: string }).text ?? "")
-        .join("");
+    const text = blocksPlainText(blocks);
+    if (text !== null) {
       return (
         <div className="flex justify-end">
           <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
@@ -1009,7 +1147,6 @@ function MessageRow({ msg }: { msg: Message }) {
     );
   }
 
-  // assistant — 左侧浅色 bubble
   return (
     <div className="flex flex-col items-start gap-1">
       {typeof msg.content === "string" ? (
@@ -1024,11 +1161,6 @@ function MessageRow({ msg }: { msg: Message }) {
       )}
     </div>
   );
-}
-
-function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
-  if (typeof content === "string") return [{ type: "text", text: content }];
-  return content;
 }
 
 function AssistantTextBubble({ text }: { text: string }) {
@@ -1067,8 +1199,7 @@ function BlockRender({
   side: "assistant" | "tool";
 }) {
   if (block.type === "text" && typeof (block as { text?: unknown }).text === "string") {
-    const text = (block as { text: string }).text;
-    return <AssistantTextBubble text={text} />;
+    return <AssistantTextBubble text={(block as { text: string }).text} />;
   }
 
   if (block.type === "tool_use") {
@@ -1123,7 +1254,6 @@ function BlockRender({
     );
   }
 
-  // 兜底:其它 type → JSON dump
   void side;
   return (
     <pre className="max-w-[85%] overflow-auto rounded border border-border bg-muted/30 p-2 font-mono text-[11px]">
@@ -1170,60 +1300,24 @@ function ToolResultContent({
   );
 }
 
-/**
- * 0.5.0:把一条 StreamEvent 应用到 pending blocks 上。
- *
- * - text:文本增量累积进**末尾**那条 text block;末尾不是 text 就推一条新 text
- *   block(典型场景:tool_use 后的 text response 起步)
- * - tool_use:推一条新 tool_use block
- * - tool_result:推一条新 tool_result block
- * - turn_complete / stream_done:不动 blocks(纯通知,Chat.tsx 也不需要在这里处理 meta,
- *   meta 由 runTurn 返回值赋)
- */
-function applyEvent(blocks: AnthropicBlock[], ev: StreamEvent): AnthropicBlock[] {
-  if (ev.kind === "text") {
-    const last = blocks[blocks.length - 1];
-    if (last && last.type === "text" && typeof (last as { text?: unknown }).text === "string") {
-      const next = blocks.slice();
-      next[next.length - 1] = { type: "text", text: (last as { text: string }).text + ev.text };
-      return next;
-    }
-    return [...blocks, { type: "text", text: ev.text }];
-  }
-  if (ev.kind === "tool_use") {
-    return [
-      ...blocks,
-      { type: "tool_use", id: ev.toolUseId, name: ev.toolName, input: ev.toolInput },
-    ];
-  }
-  if (ev.kind === "tool_result") {
-    return [
-      ...blocks,
-      {
-        type: "tool_result",
-        tool_use_id: ev.toolUseId,
-        content: ev.toolResultContent,
-        is_error: ev.isError,
-      },
-    ];
-  }
-  return blocks;
-}
-
 function PendingBubble({
   pending,
   onRetry,
+  hideUserBubble = false,
 }: {
   pending: PendingTurn;
   onRetry: () => void;
+  hideUserBubble?: boolean;
 }) {
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-          {pending.userText}
+      {!hideUserBubble && (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+            {pending.userText}
+          </div>
         </div>
-      </div>
+      )}
       <div className="flex flex-col items-start gap-1">
         {pending.blocks.length === 0 && pending.status === "streaming" && (
           <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
@@ -1261,10 +1355,4 @@ function PendingBubble({
       </div>
     </div>
   );
-}
-
-function extractErr(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
-  if (e instanceof Error) return e.message;
-  return String(e);
 }
