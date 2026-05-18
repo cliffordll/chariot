@@ -259,7 +259,7 @@ function AgentsListCard({
                 <TableCell>{agent.role}</TableCell>
                 <TableCell>{agent.prompt_bundle ?? "-"}</TableCell>
                 <TableCell>{agent.tool_profile ?? "-"}</TableCell>
-                <TableCell>{agent.provider_profile ?? "-"}</TableCell>
+                <TableCell>{agent.provider_id ?? "-"}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -292,7 +292,7 @@ function AgentDetailCard({
               <Badge>{agent.role}</Badge>
               {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
               {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
-              {agent.provider_profile && <Badge variant="outline">{agent.provider_profile}</Badge>}
+              {agent.provider_id && <Badge variant="outline">{agent.provider_id}</Badge>}
               {agent.reflection_enabled && (
                 <Badge variant="default">reflect ×{agent.reflection_max_retries}</Badge>
               )}
@@ -387,7 +387,7 @@ function CreateAgentDialog({
         role,
         prompt_bundle: promptBundle || null,
         tool_profile: toolProfile || null,
-        provider_profile: providerProfile || null,
+        provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
         reflection_enabled: reflectionEnabled,
@@ -497,10 +497,11 @@ function EditAgentDialog({
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
+  const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
   const [promptBundle, setPromptBundle] = useState(agent.prompt_bundle ?? "");
   const [toolProfile, setToolProfile] = useState(agent.tool_profile ?? "");
-  const [providerProfile, setProviderProfile] = useState(agent.provider_profile ?? "");
+  const [providerProfile, setProviderProfile] = useState(agent.provider_id ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
   const [meta, setMeta] = useState(JSON.stringify(agent.meta, null, 2));
   const [reflectionEnabled, setReflectionEnabled] = useState(agent.reflection_enabled);
@@ -522,16 +523,17 @@ function EditAgentDialog({
     setSubmitting(true);
     try {
       await api.updateAgent(agent.name, {
+        rename: name.trim() !== agent.name ? name.trim() : undefined,
         role,
         prompt_bundle: promptBundle || null,
         tool_profile: toolProfile || null,
-        provider_profile: providerProfile || null,
+        provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
         reflection_enabled: reflectionEnabled,
         reflection_max_retries: reflectionMaxRetries,
       });
-      onSaved(agent.name);
+      onSaved(name.trim() || agent.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -547,6 +549,9 @@ function EditAgentDialog({
           <DialogDescription>Update role, bindings, budget, or meta for {agent.name}.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
           <Field label="Role">
             <Input value={role} onChange={(e) => setRole(e.target.value)} />
           </Field>

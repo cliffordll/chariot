@@ -363,6 +363,7 @@ async def _add(name: str, type_: str, options: list[str], params: list[str]) -> 
 @provider_app.command("update", help="更新现有 entry(改 type / options / params)")
 def update_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
+    rename: Annotated[str | None, typer.Option("--rename", help="新的 provider 展示名")] = None,
     type: Annotated[
         str | None,
         typer.Option("--type", help="新 type(可选)"),
@@ -384,29 +385,38 @@ def update_cmd(
         ),
     ] = None,
 ) -> None:
-    asyncio.run(_update(name, type, options, params))
+    asyncio.run(_update(name, rename, type, options, params))
 
 
 async def _update(
     name: str,
+    rename: str | None,
     type_: str | None,
     options: list[str] | None,
     params: list[str] | None,
 ) -> None:
-    if type_ is None and options is None and params is None:
-        Renderer.die("至少给一个 --type / -o / -p 选项,否则无事可做")
+    if rename is None and type_ is None and options is None and params is None:
+        Renderer.die("至少给一个 --rename / --type / -o / -p 选项,否则无事可做")
         return
     opts = _parse_kv(options, label="-o") if options is not None else None
     prms = _parse_kv(params, label="-p") if params is not None else None
     async with installed_runtime() as agent:
         try:
-            entry = await ProviderService(agent).update(
-                name,
-                type=type_,
-                options=opts,
-                params=prms,
-            )
+            service = ProviderService(agent)
+            if rename is not None:
+                entry = await service.rename_provider(name, rename)
+                name = entry.id
+            if type_ is not None or opts is not None or prms is not None:
+                entry = await service.update(
+                    name,
+                    type=type_,
+                    options=opts,
+                    params=prms,
+                )
         except ProviderNotFound as e:
+            Renderer.die(f"编辑失败: {e}")
+            return
+        except DuplicateProviderName as e:
             Renderer.die(f"编辑失败: {e}")
             return
         except ConfigError as e:

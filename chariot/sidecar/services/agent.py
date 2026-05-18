@@ -55,6 +55,7 @@ class AgentApi:
         self,
         *,
         name: str,
+        rename: str | None = None,
         role: str | None = None,
         prompt_bundle: ClearableStr = UNSET,
         tool_profile: ClearableStr = UNSET,
@@ -65,7 +66,11 @@ class AgentApi:
         reflection_max_retries: int | None = None,
     ) -> dict[str, Any]:
         try:
-            entry = await AgentService(self._runtime).update_agent(
+            service = AgentService(self._runtime)
+            if rename is not None:
+                entry = await service.rename_agent(name, rename)
+                name = entry.id or entry.name
+            entry = await service.update_agent(
                 name=name,
                 role=role,
                 prompt_bundle=prompt_bundle,

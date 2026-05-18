@@ -378,9 +378,15 @@ export default function Prompt() {
         <BundleDialog
           mode={bundleDialog}
           onClose={() => setBundleDialog({ kind: "closed" })}
-          onSaved={async () => {
+          onSaved={async (preferredName?: string) => {
             setBundleDialog({ kind: "closed" });
-            await refreshAll();
+            await loadBundles();
+            if (preferredName) {
+              setSelected(preferredName);
+              await loadSelected(preferredName);
+            } else {
+              await refreshAll();
+            }
           }}
         />
       )}
@@ -424,7 +430,7 @@ function BundleDialog({
 }: {
   mode: BundleDialogMode;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (preferredName?: string) => Promise<void>;
 }) {
   const isEdit = mode.kind === "edit";
   const initial = mode.kind === "edit" ? mode.bundle : null;
@@ -466,7 +472,8 @@ function BundleDialog({
     setSaving(true);
     try {
       const payload = {
-        name: bundleName,
+        name: isEdit && initial ? initial.name : bundleName,
+        ...(isEdit && initial && bundleName !== initial.name ? { rename: bundleName } : {}),
         description: description.trim() === "" ? null : description.trim(),
         ...(layers ? { layers: layers as PromptBundle["layers"] } : {}),
       };
@@ -475,7 +482,7 @@ function BundleDialog({
       } else {
         await api.updatePromptBundle(payload);
       }
-      await onSaved();
+      await onSaved(bundleName);
     } catch (e) {
       setErr(e instanceof Error ? (e as ApiError).message || e.message : String(e));
     } finally {
@@ -495,7 +502,7 @@ function BundleDialog({
 
         <div className="space-y-3">
           <Field label="name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} />
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="description">
             <Input

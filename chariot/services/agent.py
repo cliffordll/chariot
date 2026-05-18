@@ -57,6 +57,8 @@ class AgentProfileStore(Protocol):
 
     async def delete_agent_profile(self, name: str) -> None: ...
 
+    async def rename_agent_profile(self, ref: str, *, new_name: str) -> AgentProfile: ...
+
 
 class AgentService:
     def __init__(self, session_maker: object) -> None:
@@ -137,3 +139,9 @@ class AgentService:
         if agent is None:
             raise ValueError(f"agent profile {name!r} not found")
         await self._store.delete_agent_profile(name)
+
+    async def rename_agent(self, ref: str, new_name: str) -> AgentProfile:
+        agent = await self._store.get_profile(ref)
+        if agent is None:
+            raise ValueError(f"agent profile {ref!r} not found")
+        return await self._store.rename_agent_profile(ref, new_name=new_name)

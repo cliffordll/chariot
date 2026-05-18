@@ -75,6 +75,7 @@ export interface Tool {
 }
 
 export interface Provider {
+  id: string;
   name: string;
   type: string;
   options: Record<string, unknown>;
@@ -360,11 +361,12 @@ export interface SkillCurateBuckets {
 }
 
 export interface AgentProfile {
+  id: string;
   name: string;
   role: string;
   prompt_bundle: string | null;
   tool_profile: string | null;
-  provider_profile: string | null;
+  provider_id: string | null;
   budget: Record<string, unknown>;
   meta: Record<string, unknown>;
   reflection_enabled: boolean;
@@ -760,7 +762,10 @@ const apiCore = {
     return rpc("add_toolset", { ...req });
   },
 
-  updateToolset(name: string, req: Omit<ToolsetPayload, "name">): Promise<{ toolset: Toolset }> {
+  updateToolset(
+    name: string,
+    req: Omit<ToolsetPayload, "name"> & { rename?: string },
+  ): Promise<{ toolset: Toolset }> {
     return rpc("update_toolset", { name, ...req });
   },
 
@@ -796,6 +801,7 @@ const apiCore = {
   updateProvider(
     name: string,
     req: {
+      rename?: string;
       type?: string;
       options?: Record<string, unknown>;
       params?: Record<string, unknown>;
@@ -989,7 +995,7 @@ const apiCore = {
   },
 
   updatePromptBundle(
-    payload: PromptBundlePayload,
+    payload: PromptBundlePayload & { rename?: string },
   ): Promise<{ bundle: PromptBundle; version: PromptVersion }> {
     return rpc("update_prompt_bundle", payload as unknown as Record<string, unknown>);
   },
@@ -1011,7 +1017,7 @@ const apiCore = {
     role: string;
     prompt_bundle?: string | null;
     tool_profile?: string | null;
-    provider_profile?: string | null;
+    provider_id?: string | null;
     budget?: Record<string, unknown>;
     meta?: Record<string, unknown>;
     reflection_enabled?: boolean;
@@ -1023,10 +1029,11 @@ const apiCore = {
   updateAgent(
     name: string,
     payload: {
+      rename?: string;
       role?: string | null;
       prompt_bundle?: string | null;
       tool_profile?: string | null;
-      provider_profile?: string | null;
+      provider_id?: string | null;
       budget?: Record<string, unknown>;
       meta?: Record<string, unknown>;
       reflection_enabled?: boolean;

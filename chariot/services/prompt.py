@@ -96,6 +96,9 @@ class PromptService:
             kwargs["layers"] = layers
         return await self._repo.update_bundle(name, **kwargs)
 
+    async def rename_bundle(self, name: str, new_name: str) -> PromptBundleEntry:
+        return await self._repo.rename_bundle(name, new_name=new_name)
+
     async def activate_bundle(self, name: str) -> PromptBundleEntry:
         return await self._repo.activate_bundle(name)
 

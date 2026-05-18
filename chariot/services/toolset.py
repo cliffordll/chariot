@@ -61,6 +61,9 @@ class ToolsetService:
             members=members,
         )
 
+    async def rename(self, ref: str, new_name: str) -> Toolset:
+        return await self._repo.rename(ref, new_name=new_name)
+
     async def delete(self, name: str) -> None:
         await self._repo.delete(name)
 

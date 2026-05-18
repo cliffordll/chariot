@@ -65,6 +65,21 @@ class TestToolsetRepo:
         updated = await repo.update("ts", members=["list_dir", "http_get"])
         assert updated.members == ("http_get", "list_dir")
 
+    async def test_rename_updates_agent_tool_profile_name(self, session: AsyncSession) -> None:
+        repo = ToolsetRepo(session)
+        from chariot.repos.task_repo import TaskRepo
+
+        created = await repo.create(name="ts", members=["read_file"])
+        await TaskRepo(session).create_agent_profile(name="planner", role="planner", tool_profile=created.id)
+
+        renamed = await repo.rename(created.id, new_name="ts-v2")
+        assert renamed.id == created.id
+        assert renamed.name == "ts-v2"
+
+        agent = await TaskRepo(session).get_agent_profile("planner")
+        assert agent is not None
+        assert agent.tool_profile == "ts-v2"
+
     async def test_update_missing_raises(self, session: AsyncSession) -> None:
         repo = ToolsetRepo(session)
         with pytest.raises(ConfigError):

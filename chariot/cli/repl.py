@@ -152,6 +152,8 @@ class ChatRepl:
             + (f" · conversation={self.ctx.conversation_id}" if self.ctx.conversation_id else "")
             + " · /help 查看命令",
         )
+        if self.ctx.agent_profile is None:
+            Renderer.out("提示: 先用 `/agent <name>` 选择 agent_profile，再发送消息。")
         session = self._make_prompt_session()
 
         while True:
@@ -197,6 +199,9 @@ class ChatRepl:
         请求发出后到第一个 event 到达前显示旋转 spinner(由 Renderer 统一管理,
         和 rich Live 不冲突)。
         """
+        if self.ctx.agent_profile is None:
+            Renderer.error_bubble("请先选择 agent_profile。用 `/agent <name>`。")
+            return
         self.ctx.append_user(user_text)
         Renderer.start_spinner()
         try:

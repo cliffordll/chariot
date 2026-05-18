@@ -57,6 +57,7 @@ class AgentMethods(MethodBase):
     async def update_agent(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
+        rename = self._optional_str(params, "rename")
         role = self._optional_str(params, "role")
         # 三个 binding 字段走 clearable 语义:key 缺席 → UNSET(skip);null → 清空;str → set
         prompt_bundle = self._clearable_str(params, "prompt_bundle")
@@ -69,6 +70,7 @@ class AgentMethods(MethodBase):
         async with self._rpc_errors():
             agent = await self._api.update_agent(
                 name=name,
+                rename=rename,
                 role=role,
                 prompt_bundle=prompt_bundle,
                 tool_profile=tool_profile,

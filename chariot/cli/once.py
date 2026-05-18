@@ -21,6 +21,11 @@ class ChatOnce:
     ctx: ChatContext
 
     async def run(self, text: str) -> None:
+        if self.ctx.agent_profile is None:
+            Renderer.error_bubble(
+                "请先选择 agent_profile。用 `chariot chat --agent <name>` 或先进入 REPL 后执行 `/agent <name>`。"
+            )
+            raise typer.Exit(code=1) from None
         self.ctx.append_user(text)
         try:
             result = await self.ctx.run_turn(Renderer.render_event)

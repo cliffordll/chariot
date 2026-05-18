@@ -82,6 +82,7 @@ class PromptMethods(MethodBase):
     async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
+        rename = self._optional_str(params, "rename")
         description = params.get("description", _MISSING)
         if description is not _MISSING and description is not None and not isinstance(description, str):
             raise TypeError("description must be a string or null")
@@ -89,6 +90,7 @@ class PromptMethods(MethodBase):
         async with self._rpc_errors():
             result = await self._service.update_bundle(
                 name=name,
+                rename=rename,
                 description=description,
                 description_set=description is not _MISSING,
                 layers=layers,

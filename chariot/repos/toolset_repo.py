@@ -28,12 +28,12 @@ import json
 from typing import Any, cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError
-from chariot.database.models import ToolsetMemberRow, ToolsetRow
+from chariot.database.models import AgentProfileRow, ToolsetMemberRow, ToolsetRow
 from chariot.models.toolset import Toolset
 
 
@@ -121,6 +121,28 @@ class ToolsetRepo:
         await self.session.execute(sa_delete(ToolsetMemberRow).where(ToolsetMemberRow.toolset_name == name))
         await self.session.delete(row)
         await self.session.commit()
+
+    async def rename(self, ref: str, *, new_name: str) -> Toolset:
+        row = await self._require_row(ref)
+        self._require_non_empty(new_name, "toolset name")
+        old_name = row.name
+        row.name = new_name
+        await self.session.flush()
+        if old_name != new_name:
+            await self.session.execute(
+                update(ToolsetMemberRow).where(ToolsetMemberRow.toolset_id == row.id).values(toolset_name=new_name)
+            )
+            await self.session.execute(
+                update(AgentProfileRow).where(AgentProfileRow.toolset_id == row.id).values(tool_profile=new_name)
+            )
+        try:
+            await self.session.commit()
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise ConfigError(f"toolset name {new_name!r} 已存在") from e
+        await self.session.refresh(row)
+        result_members = await self._list_members(new_name)
+        return self._row_to_entry(row, result_members)
 
     async def add_member(self, name: str, tool_name: str) -> Toolset:
         row = await self._require_row(name)

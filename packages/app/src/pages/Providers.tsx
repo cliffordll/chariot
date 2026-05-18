@@ -922,7 +922,11 @@ function AddEditDialog({
       if (mode.kind === "add") {
         await api.addProvider({ name: name.trim(), type, options: cleanOptions });
       } else if (mode.kind === "edit") {
-        await api.updateProvider(initial!.name, { type, options: cleanOptions });
+        await api.updateProvider(initial!.name, {
+          rename: name.trim() !== initial!.name ? name.trim() : undefined,
+          type,
+          options: cleanOptions,
+        });
       } else {
         // duplicate: server 复制源 entry,as=new-name;type/options/params 都不在请求里
         await api.duplicateProvider(initial!.name, name.trim());
@@ -983,7 +987,7 @@ function AddEditDialog({
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              disabled={isEdit}
+              disabled={false}
               placeholder="user-friendly id(client 在 body.model 写这个)"
             />
           </FieldRow>

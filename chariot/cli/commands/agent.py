@@ -97,6 +97,7 @@ def agent_add_cmd(
 @agent_app.command("update", help="update agent profile")
 def agent_update_cmd(
     name: Annotated[str, typer.Argument(help="agent profile name or id")],
+    rename: Annotated[str | None, typer.Option("--rename", help="new agent profile name")] = None,
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_bundle: Annotated[
         str | None,
@@ -142,6 +143,7 @@ def agent_update_cmd(
     asyncio.run(
         _agent_update(
             name=name,
+            rename=rename,
             role=role or None,
             prompt_bundle=_to_clearable(prompt_bundle),
             tool_profile=_to_clearable(tool_profile),
@@ -259,6 +261,7 @@ async def _agent_add(
 async def _agent_update(
     *,
     name: str,
+    rename: str | None,
     role: str | None,
     prompt_bundle: ClearableStr,
     tool_profile: ClearableStr,
@@ -270,20 +273,37 @@ async def _agent_update(
 ) -> None:
     parsed_budget = _parse_meta(budget) if budget.strip() else None
     parsed_meta = _parse_meta(meta) if meta.strip() else None
+    has_non_rename_updates = (
+        role is not None
+        or prompt_bundle is not UNSET
+        or tool_profile is not UNSET
+        or provider_id is not UNSET
+        or parsed_budget is not None
+        or parsed_meta is not None
+        or reflection_enabled is not None
+        or reflection_max_retries is not None
+    )
+    if rename is None and not has_non_rename_updates:
+        Renderer.die("至少提供一个更新项")
+        return
     async with installed_runtime() as agent:
         service = AgentService(agent)
         try:
-            entry = await service.update_agent(
-                name=name,
-                role=role,
-                prompt_bundle=prompt_bundle,
-                tool_profile=tool_profile,
-                provider_id=provider_id,
-                budget=parsed_budget,
-                meta=parsed_meta,
-                reflection_enabled=reflection_enabled,
-                reflection_max_retries=reflection_max_retries,
-            )
+            if rename is not None:
+                entry = await service.rename_agent(name, rename)
+                name = entry.id or entry.name
+            if has_non_rename_updates:
+                entry = await service.update_agent(
+                    name=name,
+                    role=role,
+                    prompt_bundle=prompt_bundle,
+                    tool_profile=tool_profile,
+                    provider_id=provider_id,
+                    budget=parsed_budget,
+                    meta=parsed_meta,
+                    reflection_enabled=reflection_enabled,
+                    reflection_max_retries=reflection_max_retries,
+                )
         except ValueError as exc:
             Renderer.die(str(exc))
             return

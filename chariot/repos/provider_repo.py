@@ -113,7 +113,11 @@ class ProviderRepo:
             raise ProviderNotFound(f"未知 provider ref: {ref!r}")
         self._check_name(new_name)
         row.name = new_name
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise DuplicateProviderName(f"provider name {new_name!r} 已存在") from e
         await self.session.refresh(row)
         return self._row_to_entry(row)
 

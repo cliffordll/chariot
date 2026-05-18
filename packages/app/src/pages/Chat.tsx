@@ -56,6 +56,11 @@ function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
   };
 }
 
+function upsertConversation(list: Conversation[], convo: Conversation): Conversation[] {
+  const rest = list.filter((item) => item.id !== convo.id);
+  return [convo, ...rest];
+}
+
 const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
 const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
 
@@ -285,19 +290,19 @@ export default function Chat() {
     setSelectedAgent(null);
     try {
       const conv = await api.createConversation({});
+      setConvs((cur) => upsertConversation(cur, conv));
       setActivePane({
         kind: "loaded",
         id: conv.id,
         convo: conv,
         messages: [],
       });
-      void loadConvs();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       alert(`创建会话失败: ${msg}`);
       setActivePane({ kind: "draft" });
     }
-  }, [setActivePane, setSelectedAgent, loadConvs]);
+  }, [setActivePane, setSelectedAgent]);
 
   const selectConv = useCallback(
     (id: string) => {
@@ -383,6 +388,7 @@ export default function Chat() {
     if (pane.kind === "draft") {
       try {
         const conv = await api.createConversation({});
+        setConvs((cur) => upsertConversation(cur, conv));
         convId = conv.id;
         setActivePane({
           kind: "loaded",
@@ -402,7 +408,6 @@ export default function Chat() {
         setInFlight(false);
         return;
       }
-      void loadConvs();
     } else {
       convId = pane.id;
     }
@@ -416,9 +421,9 @@ export default function Chat() {
       meta: null,
     });
 
-    // 2. 取 sampling:从 agent 绑定的 provider_profile 找 entry
+    // 2. 取 sampling:从 agent 绑定的 provider_id 找 entry
     const agentObj = agents.find((a) => a.name === selectedAgent);
-    const entryName = agentObj?.provider_profile ?? null;
+    const entryName = agentObj?.provider_id ?? null;
     const entry =
       providersState.kind === "ok"
         ? providersState.data.entries.find((e) => e.name === entryName)
@@ -612,19 +617,28 @@ export default function Chat() {
         </div>
 
         <div className="flex gap-2">
-          <Textarea
-            value={input}
-            placeholder="发消息…(Enter 发送,Shift+Enter 换行)"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (canSend) void handleSend();
+          <div className="flex-1">
+            <Textarea
+              value={input}
+              placeholder={
+                selectedAgent === null
+                  ? "请先选择 agent_profile，再开始对话"
+                  : "发消息…(Enter 发送,Shift+Enter 换行)"
               }
-            }}
-            disabled={inFlight}
-            className="min-h-20 flex-1"
-          />
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) void handleSend();
+                }
+              }}
+              disabled={inFlight}
+              className="min-h-20 flex-1"
+            />
+            {selectedAgent === null && (
+              <p className="mt-2 text-xs text-muted-foreground">请先选择 `agent_profile`。</p>
+            )}
+          </div>
           {inFlight ? (
             <Button variant="destructive" onClick={handleStop}>
               Stop
@@ -667,7 +681,7 @@ function EntryRow({
   }
 
   const agent = agents.find((a) => a.name === selectedAgent);
-  const providerName = agent?.provider_profile ?? null;
+  const providerName = agent?.provider_id ?? null;
   const promptName = agent?.prompt_bundle ?? null;
   const toolsetName = agent?.tool_profile ?? null;
 

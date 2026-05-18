@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.chat_request import ChatRequest, Message
 from chariot.database.session import CURRENT_SCHEMA_VERSION, dispose_db, init_db
-from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.models.task import TaskCreate, TaskKind, TaskRunCreate
 from chariot.repos.audit_repo import AuditRepo
 from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.repos.eval_repo import EvalRepo
@@ -191,6 +191,13 @@ class TestPlatformRepos:
         assert first.slug == "mock-qwen"
         assert second.slug == "mock-qwen-2"
 
+    async def test_provider_repo_can_rename_display_name(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        created = await repo.create(name="Qwen", type="mock", options={})
+        renamed = await repo.rename(created.id, new_name="Qwen Renamed")
+        assert renamed.id == created.id
+        assert renamed.name == "Qwen Renamed"
+
     async def test_memory_repo_create_and_list(self, session: AsyncSession) -> None:
         repo = MemoryRepo(session)
         entry = await repo.create(kind="preference", text="默认用中文", meta={"scope": "user"})
@@ -270,6 +277,19 @@ class TestPlatformRepos:
         active_bundle = await repo.get_active_bundle()
         assert active_bundle is not None
         assert active_bundle.name == "default"
+
+    async def test_prompt_repo_rename_updates_agent_bindings(self, session: AsyncSession) -> None:
+        prompt_repo = PromptRepo(session)
+        task_repo = TaskRepo(session)
+        await prompt_repo.create_bundle("review")
+        await task_repo.create_agent_profile(name="reviewer", role="review", prompt_bundle="review")
+
+        renamed = await prompt_repo.rename_bundle("review", new_name="review-v2")
+        assert renamed.name == "review-v2"
+
+        agent = await task_repo.get_agent_profile("reviewer")
+        assert agent is not None
+        assert agent.prompt_bundle == "review-v2"
 
     async def test_task_repo_create_profile_task_run_and_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
@@ -364,6 +384,38 @@ class TestPlatformRepos:
         await repo.create_job(name="cleanup", goal="cleanup stale state", cron="0 * * * *")
         await repo.delete_job("cleanup")
         assert await repo.get_job("cleanup") is None
+
+    async def test_task_repo_rename_agent_profile_updates_live_name_refs(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        created = await repo.create_agent_profile(name="planner", role="planner")
+        await repo.create_task(TaskCreate(goal="plan", kind=TaskKind.INTERACTIVE, agent_profile=created.id))
+        await repo.create_job(name="nightly", goal="sync", cron="0 0 * * *", agent_profile=created.id)
+        await session.execute(
+            text("INSERT INTO conversations (id, title, agent_profile) VALUES ('cv_1', NULL, 'planner')")
+        )
+        await session.commit()
+
+        renamed = await repo.rename_agent_profile(created.id, new_name="planner-v2")
+        assert renamed.id == created.id
+        assert renamed.name == "planner-v2"
+
+        task_row = (
+            await session.execute(
+                text("SELECT agent_profile FROM tasks WHERE agent_profile_id = :id"), {"id": created.id}
+            )
+        ).scalar_one()
+        job_row = (
+            await session.execute(
+                text("SELECT agent_profile FROM scheduled_jobs WHERE agent_profile_id = :id"),
+                {"id": created.id},
+            )
+        ).scalar_one()
+        convo_row = (
+            await session.execute(text("SELECT agent_profile FROM conversations WHERE id = 'cv_1'"))
+        ).scalar_one()
+        assert task_row == "planner-v2"
+        assert job_row == "planner-v2"
+        assert convo_row == "planner-v2"
 
     async def test_task_repo_clear_agent_binding_fields(self, session: AsyncSession) -> None:
         """显式传 None 应清空 binding;未传(UNSET 默认)保持原值。"""

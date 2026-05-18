@@ -81,11 +81,16 @@ class ProviderApi:
         self,
         *,
         name: str,
+        rename: str | None,
         type_: str | None,
         options: dict[str, Any] | None,
         params: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        entry = await ProviderService(self._runtime).update(
+        service = ProviderService(self._runtime)
+        if rename is not None:
+            entry = await service.rename_provider(name, rename)
+            name = entry.id
+        entry = await service.update(
             name,
             type=type_,
             options=options,

@@ -46,12 +46,14 @@ class ToolsetMethods(MethodBase):
     async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
+        rename = self._optional_str(params, "rename")
         description = self._optional_str(params, "description")
         members = self._optional_str_list(params, "members")
         meta = self._optional_dict(params, "meta")
         async with self._rpc_errors():
             entry = await self._service.update(
                 name=name,
+                rename=rename,
                 description=description,
                 members=members,
                 meta=meta,

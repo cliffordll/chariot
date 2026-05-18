@@ -82,6 +82,7 @@ def toolset_add_cmd(
 @toolset_app.command("update", help="更新 toolset")
 def toolset_update_cmd(
     name: Annotated[str, typer.Argument(help="toolset name or id")],
+    rename: Annotated[str | None, typer.Option("--rename", help="new toolset name")] = None,
     description: Annotated[str, typer.Option("--description", help="描述")] = "",
     members: Annotated[str, typer.Option("--members", help="逗号分隔;给空字符串清空")] = "__UNSET__",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
@@ -89,6 +90,7 @@ def toolset_update_cmd(
     asyncio.run(
         _toolset_update(
             name=name,
+            rename=rename,
             description=description or None,
             members=None if members == "__UNSET__" else _parse_members(members),
             meta=meta,
@@ -186,19 +188,29 @@ async def _toolset_add(
 async def _toolset_update(
     *,
     name: str,
+    rename: str | None,
     description: str | None,
     members: list[str] | None,
     meta: str,
 ) -> None:
     parsed_meta = _parse_meta(meta) if meta.strip() else None
+    has_non_rename_updates = description is not None or members is not None or parsed_meta is not None
+    if rename is None and not has_non_rename_updates:
+        Renderer.die("至少提供一个更新项")
+        return
     async with installed_runtime() as agent:
         try:
-            entry = await ToolsetService(agent).update(
-                name,
-                description=description,
-                members=members,
-                meta=parsed_meta,
-            )
+            service = ToolsetService(agent)
+            if rename is not None:
+                entry = await service.rename(name, rename)
+                name = entry.id or entry.name
+            if has_non_rename_updates:
+                entry = await service.update(
+                    name,
+                    description=description,
+                    members=members,
+                    meta=parsed_meta,
+                )
         except ConfigError as exc:
             Renderer.die(str(exc))
             return

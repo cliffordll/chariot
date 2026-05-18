@@ -6,13 +6,14 @@ import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.config import ConfigError
 from chariot.database.models import (
     AgentProfileRow,
+    ConversationRow,
     JobRunRow,
     ProviderRow,
     ScheduledJobRow,
@@ -138,6 +139,30 @@ class TaskRepo:
         row = await self._require_agent_profile_row(name)
         await self.session.delete(row)
         await self.session.commit()
+
+    async def rename_agent_profile(self, ref: str, *, new_name: str) -> AgentProfile:
+        row = await self._require_agent_profile_row(ref)
+        self._require_non_empty(new_name, "agent profile name")
+        old_name = row.name
+        row.name = new_name
+        await self.session.flush()
+        if old_name != new_name:
+            await self.session.execute(
+                update(TaskRow).where(TaskRow.agent_profile_id == row.id).values(agent_profile=new_name)
+            )
+            await self.session.execute(
+                update(ScheduledJobRow).where(ScheduledJobRow.agent_profile_id == row.id).values(agent_profile=new_name)
+            )
+            await self.session.execute(
+                update(ConversationRow).where(ConversationRow.agent_profile == old_name).values(agent_profile=new_name)
+            )
+        try:
+            await self.session.commit()
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise ConfigError(f"agent profile {new_name!r} 已存在") from e
+        await self.session.refresh(row)
+        return self._row_to_agent_profile(row)
 
     async def get_task(self, task_id: str) -> Task | None:
         row = await self.session.get(TaskRow, task_id)

@@ -91,11 +91,15 @@ class PromptApi:
         self,
         *,
         name: str,
+        rename: str | None = None,
         description: str | None = None,
         description_set: bool = False,
         layers: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         service = PromptService(self._runtime)
+        if rename is not None:
+            bundle = await service.rename_bundle(name, rename)
+            name = bundle.id
         kwargs: dict[str, Any] = {}
         if description_set:
             kwargs["description"] = description
