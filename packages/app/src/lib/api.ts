@@ -718,7 +718,7 @@ const apiCore = {
     return rpc("config_tool", { name, options });
   },
 
-  updateTool(name: string, req: { enabled?: boolean; options?: Record<string, unknown> }): Promise<{ tool: Tool }> {
+  setToolState(name: string, req: { enabled?: boolean; options?: Record<string, unknown> }): Promise<{ tool: Tool }> {
     if (req.options !== undefined) {
       return apiCore.configTool(name, req.options);
     }

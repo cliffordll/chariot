@@ -1,6 +1,6 @@
 # Chariot —— 当前状态全景
 
-> 截止 B7 wave 1(`feat/0.8.6-rl`,2026-05)。
+> 截止 B7 wave 1 + 0.8.9 identity / snapshot 收口(`feat/0.8.9-boundary`,2026-05)。
 > 跟 `ARCHITECTURE.md`(早期愿景)的差异:本文只描述**当前真实跑得起来**的代码,
 > 不写"将来 X 会怎么做"的设想。后续开发方向单独放在 §10。
 
@@ -142,7 +142,7 @@ chariot/
 │                 memory / prompt / skill / task / tool / trace / ...)
 ├── models/       领域 frozen dataclass(agent_profile / trace / tool / provider)
 ├── services/     上层组合服务(agent / tool / toolset / trace)
-├── database/     session + migrations(022_*.sql + ORM models)
+├── database/     session + migrations(001_init + 002_squashed_current + 003..006 identity)
 ├── rpc/          stdio JSON-RPC 框架(sidecar / ACP / MCP 共用)
 ├── cli/          typer-based CLI 子命令(每个领域一个 commands/*.py)
 └── sidecar/      JSON-RPC method 适配器(methods/*.py)+ __main__ stdio loop
@@ -193,7 +193,7 @@ docs/
 ### 3.2 providers —— BaseProvider 抽象 + builtin
 
 - **入口**:`BaseProvider` ABC + `ProviderRegistry`(type → 工厂注册)
-- **builtin**:`mock`(测试)/ `anthropic`(透传 + SSE 解析)+(0.7.0 起规划 OpenAI)
+- **builtin**:`mock`(测试)/ `anthropic`(透传 + SSE 解析)/ `openai`
 - **职责**:`generate(ChatRequest) → AsyncIterator[ChatEvent]` 唯一接口;非 Claude
   provider(0.7.0+ openai 等)在子类内部翻译 wire format,**不污染**内核 IR
 - **关联表**:`providers`(name → type + options)+ `provider_health`(latency / status / 上次 probe)
@@ -481,7 +481,7 @@ stateful + agent_profile + reflection + skill 全开的场景:
    └─ branch: reflection_enabled=True → _run_chat_reflective 循环
 
 4. iteration 0:
-   ├─ _run_chat_once → _resolve_binding(reviewer profile)→ provider 路由(profile.provider_profile)
+   ├─ _run_chat_once → _resolve_binding(reviewer profile)→ provider 路由(profile.provider_id / req.provider_ref)
    ├─ trace.begin_turn(写 trace_turns 一行,status=running)
    ├─ _run_stateful_chat
    │  ├─ ConversationLockManager.acquire("cv-1") 双层锁

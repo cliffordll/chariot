@@ -71,7 +71,7 @@ export default function Tools() {
         return n;
       });
       try {
-        await api.updateTool(name, { enabled });
+        await api.setToolState(name, { enabled });
         await load();
       } finally {
         setPendingEnable((s) => {
