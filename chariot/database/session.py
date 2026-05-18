@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import (
 from ulid import ULID
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 10
+_PROVIDER_SNAPSHOT_COLUMN = "provider_snapshot"
 
 
 def _db_url(db_path: Path) -> str:
@@ -83,7 +84,7 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         current = 2
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
-    if current not in {0, 1, 2, 3, 4, 5, 6, 7, CURRENT_SCHEMA_VERSION}:
+    if current not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, CURRENT_SCHEMA_VERSION}:
         raise RuntimeError(
             f"DB schema version {current} 不在 squash 后支持的自动升级集合内; "
             "当前仅支持 v0/v1 新装或历史 0.1.0 库、以及已到 v28/v29 的现有库"

@@ -71,9 +71,9 @@ class AnthropicProvider(BaseProvider):
     _DEFAULT_MAX_KEEPALIVE: ClassVar[int] = 10
 
     # 不透给上游的 chariot 扩展字段(从 ChatRequest dict 里剔除后再发);
-    # `provider_name` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
+    # `provider_ref` 是 chariot 的路由 key,wire body 里不带这个字段(`model`
     # 用 `self.config.model` 显式写入)
-    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"provider_name", "conversation_id", "agent_id"})
+    _CHARIOT_EXTENSION_FIELDS: ClassVar[frozenset[str]] = frozenset({"provider_ref", "conversation_id", "agent_id"})
 
     def __init__(
         self,
@@ -232,8 +232,8 @@ class AnthropicProvider(BaseProvider):
 
         步骤:
         1. `dataclasses.asdict(req)` 拿全字段
-        2. 剔除 chariot 扩展字段(`provider_name` / `conversation_id` / `agent_id`);
-          `provider_name` 是 chariot 路由 key,Anthropic API 不识别
+        2. 剔除 chariot 扩展字段(`provider_ref` / `conversation_id` / `agent_id`);
+          `provider_ref` 是 chariot 路由 key,Anthropic API 不识别
         3. 剔除 `None` 值字段(Anthropic API 不接受 null,且 max_tokens 等
           有默认 4096 不能漏)
         4. **写 `body["model"] = req.model or self.config.model`**(0.6.5+):

@@ -115,7 +115,8 @@ async def _show(conversation_id: str, tail: int) -> None:
             preview = _truncate(content_data, 80)
         else:
             preview = _truncate(json.dumps(content_data, ensure_ascii=False), 80)
-        marker = f" [{m.provider_name}]" if m.provider_name else ""
+        provider_snapshot = getattr(m, "provider_snapshot", None)
+        marker = f" [{provider_snapshot}]" if provider_snapshot else ""
         Renderer.out(f"#{m.seq:3d} {m.role:9s}{marker}: {preview}")
 
 

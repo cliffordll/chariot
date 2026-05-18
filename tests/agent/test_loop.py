@@ -132,13 +132,13 @@ class _StubMessageStore:
         conversation_id: str,
         content: list[dict[str, Any]],
         *,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         agent_profile: str | None = None,
     ) -> dict[str, Any]:
         row = {
             "conversation_id": conversation_id,
             "content": content,
-            "provider_name": provider_name,
+            "provider_snapshot": provider_snapshot,
             "agent_profile": agent_profile,
         }
         self.assistant_messages.append(row)
@@ -165,7 +165,7 @@ class _StubMessageStore:
 @pytest.fixture
 def req() -> ChatRequest:
     return ChatRequest(
-        provider_name="scripted",
+        provider_ref="scripted",
         messages=[Message(role="user", content="hi")],
     )
 
@@ -176,7 +176,7 @@ def _make_loop(
     *,
     message_store: _StubMessageStore | None = None,
     conversation_id: str | None = None,
-    provider_name: str | None = None,
+    provider_snapshot: str | None = None,
     max_iter: int = 10,
 ) -> AgentLoop:
     return AgentLoop(
@@ -184,7 +184,7 @@ def _make_loop(
         tools=tools or {},
         message_store=message_store,
         conversation_id=conversation_id,
-        provider_name=provider_name,
+        provider_snapshot=provider_snapshot,
         max_iter=max_iter,
     )
 
@@ -410,13 +410,13 @@ class TestMessagePersistenceBoundary:
             {"stub": _StubTool("stub")},
             message_store=store,
             conversation_id="conv_1",
-            provider_name="scripted",
+            provider_snapshot="scripted",
         )
 
         _ = [ev async for ev in loop.stream_chat(req)]
 
         assert len(store.assistant_messages) == 2
         assert store.assistant_messages[0]["conversation_id"] == "conv_1"
-        assert store.assistant_messages[0]["provider_name"] == "scripted"
+        assert store.assistant_messages[0]["provider_snapshot"] == "scripted"
         assert len(store.tool_result_messages) == 1
         assert store.tool_result_messages[0]["content"][0]["type"] == "tool_result"

@@ -128,7 +128,7 @@ class ProviderService:
         entry = await self.resolve_provider(provider_ref)
         return await self._health.record_probe(
             entry.id,
-            provider_name=entry.name,
+            provider_snapshot=entry.name,
             ok=ok,
             latency_ms=latency_ms,
             error_code=error_code,

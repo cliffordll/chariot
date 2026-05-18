@@ -43,7 +43,7 @@ class AgentLoop:
         audit_hooks: AuditHookManager | None = None,
         todo_store: Any | None = None,
         agent_profile: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -59,7 +59,7 @@ class AgentLoop:
         self._max_iter = max_iter
         self._turn = turn
         self._agent_profile = agent_profile
-        self._provider_name = provider_name  # provider 展示名快照,用于持久化 last_provider;None = 不记录
+        self._provider_snapshot = provider_snapshot  # provider 展示快照,用于持久化 last_provider;None = 不记录
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -75,7 +75,7 @@ class AgentLoop:
             # Phase B1:provider call trace 配对(turn=None 时退化为 no-op)
             pc_handle = (
                 self._turn.begin_provider_call(
-                    provider_name=self._provider_name or self._provider.config.name,
+                    provider_snapshot=self._provider_snapshot or self._provider.config.name,
                     model=self._provider.config.model,
                 )
                 if self._turn is not None
@@ -203,7 +203,7 @@ class AgentLoop:
         await self._message_store.append_assistant_message(
             self._conversation_id,
             content=content,
-            provider_name=self._provider_name,
+            provider_snapshot=self._provider_snapshot,
             agent_profile=self._agent_profile,
         )
 

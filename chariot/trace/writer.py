@@ -53,7 +53,7 @@ class ProviderCallHandle:
     writer: TraceWriter
     turn_id: str | None
     provider_id: str | None
-    provider_name: str
+    provider_snapshot: str
     model: str | None
     started_at: datetime
     _start_perf: float
@@ -78,7 +78,7 @@ class ProviderCallHandle:
                 await TraceRepo(session).record_provider_call(
                     self.turn_id,
                     provider_id=self.provider_id,
-                    provider_name=self.provider_name,
+                    provider_snapshot=self.provider_snapshot,
                     model=self.model,
                     log_id=log_id,
                     request_summary=request_summary or {},
@@ -156,14 +156,14 @@ class TurnHandle:
     def begin_provider_call(
         self,
         *,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None = None,
     ) -> ProviderCallHandle:
         return ProviderCallHandle(
             writer=self.writer,
             turn_id=self.turn_id,
             provider_id=self.provider_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             started_at=_utcnow(),
             _start_perf=time.perf_counter(),
@@ -260,8 +260,8 @@ class TraceWriter:
     使用方式::
 
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock", conversation_id="X")
-        pc = turn.begin_provider_call(provider_name="mock", model="mock-1")
+        turn = await writer.begin_turn(provider_snapshot="mock", conversation_id="X")
+        pc = turn.begin_provider_call(provider_snapshot="mock", model="mock-1")
         try:
             # ... 调 provider ...
             await pc.finish(response_summary={"stop_reason": "end_turn"})
@@ -287,7 +287,7 @@ class TraceWriter:
         self,
         *,
         provider_id: str | None = None,
-        provider_name: str,
+        provider_snapshot: str,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
         task_id: str | None = None,
@@ -311,7 +311,7 @@ class TraceWriter:
             async with self._session() as session:
                 turn = await TraceRepo(session).create_turn(
                     provider_id=provider_id,
-                    provider_name=provider_name,
+                    provider_snapshot=provider_snapshot,
                     conversation_id=conversation_id,
                     agent_profile=agent_profile,
                     task_id=task_id,

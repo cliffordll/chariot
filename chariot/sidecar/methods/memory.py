@@ -19,8 +19,7 @@ class MemoryMethods(MethodBase):
         del ctx
         kind = self._optional_str(params, "kind")
         conversation_id = self._optional_str(params, "conversation_id")
-        provider_name = self._optional_str(params, "provider_name")
-        provider_name_snapshot = self._optional_str(params, "provider_name_snapshot")
+        provider_snapshot = self._optional_str(params, "provider_snapshot")
         tag = self._optional_str(params, "tag")
         search = self._optional_str(params, "search")
         pinned = self._optional_bool(params, "pinned")
@@ -33,8 +32,7 @@ class MemoryMethods(MethodBase):
                 pinned=pinned,
                 archived=archived,
                 conversation_id=conversation_id,
-                provider_name=provider_name,
-                provider_name_snapshot=provider_name_snapshot,
+                provider_snapshot=provider_snapshot,
                 tag=tag,
                 search=search,
                 limit=limit,
@@ -174,15 +172,13 @@ class MemoryMethods(MethodBase):
     async def relevant(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         conversation_id = self._optional_str(params, "conversation_id")
-        provider_name = self._optional_str(params, "provider_name")
-        provider_name_snapshot = self._optional_str(params, "provider_name_snapshot")
+        provider_snapshot = self._optional_str(params, "provider_snapshot")
         tags = self._optional_list_of_str(params, "tags")
         limit = int(params.get("limit", 8))
         async with self._rpc_errors():
             entries = await self._service.list_relevant_entries(
                 conversation_id=conversation_id,
-                provider_name=provider_name,
-                provider_name_snapshot=provider_name_snapshot,
+                provider_snapshot=provider_snapshot,
                 tags=tags,
                 limit=limit,
             )

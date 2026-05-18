@@ -162,7 +162,7 @@ async def test_get_conversation_returns_messages(server: JsonRpcServer, agent: A
     await service.append_assistant_message(
         "01CONV",
         [{"type": "text", "text": "hi"}],
-        provider_name="mock",
+        provider_snapshot="mock",
     )
 
     resp = await _call(server, "get_conversation", {"conversation_id": "01CONV"})

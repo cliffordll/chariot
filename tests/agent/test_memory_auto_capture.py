@@ -30,7 +30,7 @@ async def agent(tmp_path: Path) -> AIAgent:
 @pytest.mark.asyncio
 async def test_memory_is_auto_captured_after_turn(agent: AIAgent) -> None:
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="默认用中文输出但保留关键 English terms")],
     )
 

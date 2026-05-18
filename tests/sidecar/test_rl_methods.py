@@ -61,7 +61,7 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
         await conversation_service.append_user_message("cv-rl", [{"type": "text", "text": "hello"}])
         turn = await trace_service.create_turn(
             conversation_id="cv-rl",
-            provider_name="mock",
+            provider_snapshot="mock",
         )
         await conversation_service.append_assistant_message(
             "cv-rl",

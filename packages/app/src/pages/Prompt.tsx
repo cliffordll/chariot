@@ -337,7 +337,7 @@ export default function Prompt() {
                                 <div className="mt-1 truncate text-xs text-muted-foreground">{trace.model ?? "-"}</div>
                               </td>
                               <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
-                                {trace.provider_name}
+                                {trace.provider_snapshot}
                               </td>
                               <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
                                 {formatDate(trace.created_at)}
@@ -570,7 +570,7 @@ function TracePanel({ trace }: { trace: PromptTrace }) {
           <span className="break-all font-mono text-xs text-muted-foreground">{trace.id}</span>
         </div>
         <div className="text-xs text-muted-foreground">
-          {trace.bundle_name}:{trace.version} · {trace.provider_name}
+          {trace.bundle_name}:{trace.version} · {trace.provider_snapshot}
           {trace.model ? ` · ${trace.model}` : ""} · size {trace.prompt_size} · {formatDate(trace.created_at)}
         </div>
       </div>

@@ -140,11 +140,11 @@ async def _run(
     # Phase 1:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
     try:
         async with installed_runtime() as agent:
-            provider_name = provider or await _resolve_provider_name(agent)
+            provider_ref = provider or await _resolve_provider_ref(agent)
             resolved_agent = agent_profile or restored_agent
             ctx = ChatContext(
                 agent=agent,
-                provider_name=provider_name,
+                provider_ref=provider_ref,
                 conversation_id=conversation_id,
                 agent_profile=resolved_agent,
                 reflection_enabled=reflection_enabled,
@@ -182,12 +182,12 @@ async def _restore_conversation_config(conversation_id: str | None) -> str | Non
     return conv.agent_profile
 
 
-async def _resolve_provider_name(agent: object) -> str | None:
+async def _resolve_provider_ref(agent: object) -> str | None:
     """返回 CLI 默认 provider;没有默认时保持 None。"""
     from chariot.services.provider import ProviderService
 
     default = await ProviderService(agent).get_default()
-    return default.name if default is not None else None
+    return default.slug if default is not None else None
 
 
 def register(app: typer.Typer) -> None:

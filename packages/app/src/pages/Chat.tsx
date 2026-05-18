@@ -804,9 +804,9 @@ function MessageRow({ msg }: { msg: Message }) {
       ) : (
         <BlocksRender blocks={asBlocks(msg.content)} side="assistant" />
       )}
-      {msg.provider_name && (
+      {msg.provider_snapshot && (
         <div className="font-mono text-xs text-muted-foreground">
-          [{msg.provider_name}]
+          [{msg.provider_snapshot}]
         </div>
       )}
     </div>

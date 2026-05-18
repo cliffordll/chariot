@@ -65,7 +65,7 @@ async def _list() -> None:
         (
             entry.id,
             entry.conversation_id or "-",
-            entry.provider_name_snapshot,
+            entry.provider_snapshot,
             entry.model or "-",
             str(entry.context_size),
             _fmt_dt(entry.created_at),
@@ -94,7 +94,7 @@ async def _traces(conversation_id: str | None, *, limit: int, offset: int) -> No
             entry.id,
             entry.snapshot_id,
             entry.conversation_id or "-",
-            entry.provider_name_snapshot,
+            entry.provider_snapshot,
             entry.model or "-",
             entry.prompt_trace_id or "-",
             _fmt_dt(entry.created_at),
@@ -123,9 +123,9 @@ async def _inspect(context_id: str) -> None:
             "conversation": snapshot["conversation_id"]
             if snapshot is not None
             else (trace["conversation_id"] if trace is not None else "-"),
-            "provider": snapshot["provider_name_snapshot"]
+            "provider": snapshot["provider_snapshot"]
             if snapshot is not None
-            else (trace["provider_name_snapshot"] if trace is not None else "-"),
+            else (trace["provider_snapshot"] if trace is not None else "-"),
             "model": snapshot["model"] if snapshot is not None else (trace["model"] if trace is not None else "-"),
             "size": snapshot["context_size"] if snapshot is not None else "-",
         }

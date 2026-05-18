@@ -76,16 +76,16 @@ class EvalRunner:
 
         conversation_id = str(ULID())
         req = ChatRequest(
-            provider_name="",  # AIAgent 内部按 active default 路由(stub 也忽略)
+            provider_ref="",  # AIAgent 内部按 active default 路由(stub 也忽略)
             messages=[Message(role="user", content=task.prompt)],
             conversation_id=conversation_id,
             agent_profile=self._agent_profile,
             model=task.model,
             system=task.system,
         )
-        # 真 agent 默认 provider 由 bootstrap 时确定;factory 注入时若不设 provider_name,
+        # 真 agent 默认 provider 由 bootstrap 时确定;factory 注入时若不设 provider_ref,
         # 走 stub 路径 / CLI 把默认填好。这里不强行设防,留给 factory 决定。
-        if not req.provider_name:
+        if not req.provider_ref:
             req = self._fill_default_provider(req, agent)
 
         final_response_buf: list[str] = []
@@ -131,13 +131,13 @@ class EvalRunner:
 
     @staticmethod
     def _fill_default_provider(req: ChatRequest, agent: AIAgent) -> ChatRequest:
-        """req.provider_name 空 → 抓 agent 第一个 provider 当默认(stub 测试场景)。"""
+        """req.provider_ref 空 → 抓 agent 第一个 provider 当默认(stub 测试场景)。"""
         import dataclasses
 
         providers = getattr(agent, "_providers", {})
         if not providers:
             return req
-        return dataclasses.replace(req, provider_name=next(iter(providers)))
+        return dataclasses.replace(req, provider_ref=next(iter(providers)))
 
     @staticmethod
     async def _fill_trace(record: RunRecord, agent: AIAgent, conversation_id: str) -> None:

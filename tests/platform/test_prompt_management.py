@@ -44,8 +44,8 @@ async def test_prompt_bundle_create_update_activate(session: AsyncSession) -> No
     assert active_bundle.name == "demo"
 
     trace = await repo.record_trace(
-        ChatRequest(provider_name="mock", messages=[Message(role="user", content="hi")]),
-        provider_name="mock",
+        ChatRequest(provider_ref="mock", messages=[Message(role="user", content="hi")]),
+        provider_snapshot="mock",
         model="mock-1",
     )
     assert trace.bundle_name == "demo"

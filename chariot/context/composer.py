@@ -28,7 +28,7 @@ class ContextComposer:
         req: ChatRequest,
         *,
         provider_id: str | None = None,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None,
         history: list[dict[str, Any]],
         memory_entries: list[dict[str, Any]] | None = None,
@@ -41,7 +41,7 @@ class ContextComposer:
             history=history,
             memory_entries=memory_entries,
             memory_policy=memory_policy,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             provider_capabilities=provider_capabilities,
         )
@@ -65,7 +65,7 @@ class ContextComposer:
         )
         return ContextSnapshot(
             conversation_id=req.conversation_id,
-            provider_name_snapshot=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             request=request,
             slices=slices,
@@ -81,14 +81,13 @@ class ContextComposer:
         history: list[dict[str, Any]],
         memory_entries: list[dict[str, Any]] | None,
         memory_policy: dict[str, Any] | None,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None,
         provider_capabilities: dict[str, Any] | None,
     ) -> list[ContextSlice]:
         tool_names = [tool.name for tool in req.tools] if req.tools is not None else None
         provider_state = {
-            "provider_name": provider_name,
-            "provider_name_snapshot": provider_name,
+            "provider_snapshot": provider_snapshot,
             "model": model,
             "capabilities": provider_capabilities or {},
         }
@@ -109,8 +108,7 @@ class ContextComposer:
                 source="AIAgent runtime context",
                 content={
                     "conversation_id": req.conversation_id,
-                    "provider_name": provider_name,
-                    "provider_name_snapshot": provider_name,
+                    "provider_snapshot": provider_snapshot,
                     "model": model,
                     "agent_id": req.agent_id,
                     "message_count": len(req.messages),

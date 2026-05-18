@@ -41,7 +41,7 @@ async def _seed_long_conversation(sm: async_sessionmaker[AsyncSession], conv_id:
         await repo.create(conv_id)
         for i in range(8):
             await repo.append_message(conv_id, "user", f"u{i} {big}")
-            await repo.append_message(conv_id, "assistant", f"a{i} {big}", provider_name="mock")
+            await repo.append_message(conv_id, "assistant", f"a{i} {big}", provider_snapshot="mock")
 
 
 async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], agent: AIAgent) -> None:
@@ -71,7 +71,7 @@ async def test_stateful_run_with_long_history_triggers_compression(
     await _tighten_summarizer_threshold(sm, agent)
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         conversation_id=conv_id,
         messages=[Message(role="user", content="please answer briefly")],
     )
@@ -102,7 +102,7 @@ async def test_stateful_run_short_history_no_compression(agent: AIAgent) -> None
         await ConversationRepo(session).append_message(conv_id, "user", "hi")
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         conversation_id=conv_id,
         messages=[Message(role="user", content="hello again")],
     )

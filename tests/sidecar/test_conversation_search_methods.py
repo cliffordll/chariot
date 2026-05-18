@@ -115,7 +115,7 @@ async def test_rebuild_conversation_fts_returns_count(server: JsonRpcServer, age
     await service.append_assistant_message(
         "01CONV",
         [{"type": "text", "text": "two"}],
-        provider_name="mock",
+        provider_snapshot="mock",
     )
 
     resp = await _call(server, "rebuild_conversation_fts", {})

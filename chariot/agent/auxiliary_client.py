@@ -76,7 +76,7 @@ class AuxiliaryClient:
     ) -> ChatRequest:
         """用 entry 默认 params 装一个 ChatRequest;`overrides` 可逐字段覆盖。
 
-        默认 baking:`provider_name` / `model` / `max_tokens` / `temperature` / `top_p`
+        默认 baking:`provider_ref` / `model` / `max_tokens` / `temperature` / `top_p`
         全从 `entry.params` 取,缺省值用 entry / provider 的 fallback。
         """
         params = self._entry.params
@@ -85,7 +85,7 @@ class AuxiliaryClient:
         top_p = params.get("top_p")
         model = self._entry.model or self._provider.config.model
         base: dict[str, Any] = {
-            "provider_name": self._entry.provider_id,
+            "provider_ref": self._entry.provider_id,
             "messages": messages,
             "model": model,
             "max_tokens": max_tokens,

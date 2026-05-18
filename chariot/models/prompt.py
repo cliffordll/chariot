@@ -45,7 +45,7 @@ class PromptTraceEntry:
     version: str
     conversation_id: str | None
     provider_id: str | None
-    provider_name_snapshot: str
+    provider_snapshot: str
     model: str | None
     request: dict[str, Any]
     source_refs: list[dict[str, Any]]
@@ -64,7 +64,7 @@ class PromptLayer:
 class PromptSnapshot:
     bundle_name: str
     version: str
-    provider_name_snapshot: str
+    provider_snapshot: str
     model: str | None
     conversation_id: str | None
     request: dict[str, Any]

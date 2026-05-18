@@ -55,7 +55,7 @@ async def test_search_after_append_finds_hit(sessionmaker) -> None:
         repo = ConversationRepo(session)
         await repo.create("01CONVA")
         await repo.append_message("01CONVA", "user", "请帮我看一下 pyproject.toml")
-        await repo.append_message("01CONVA", "assistant", "好的", provider_name="mock")
+        await repo.append_message("01CONVA", "assistant", "好的", provider_snapshot="mock")
         hits = await repo.search("pyproject")
     assert len(hits) == 1
     assert hits[0].conversation_id == "01CONVA"
@@ -120,7 +120,7 @@ async def test_search_blocks_content_indexes_text_only(sessionmaker) -> None:
                 {"type": "text", "text": "hello world"},
                 {"type": "tool_use", "id": "tu1", "name": "read_file", "input": {"path": "x"}},
             ],
-            provider_name="mock",
+            provider_snapshot="mock",
         )
         # 真正的内容 "hello" 该命中
         hits_real = await repo.search("hello")

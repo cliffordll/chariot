@@ -19,8 +19,7 @@ class TraceMethods(MethodBase):
         del ctx
         conversation_id = self._optional_str(params, "conversation_id")
         task_id = self._optional_str(params, "task_id")
-        provider_name = self._optional_str(params, "provider_name")
-        provider_name_snapshot = self._optional_str(params, "provider_name_snapshot")
+        provider_snapshot = self._optional_str(params, "provider_snapshot")
         status = self._optional_str(params, "status")
         limit = self._optional_int(params, "limit", default=50)
         offset = self._optional_int(params, "offset", default=0)
@@ -28,8 +27,7 @@ class TraceMethods(MethodBase):
             turns = await self._service.list_turns(
                 conversation_id=conversation_id,
                 task_id=task_id,
-                provider_name=provider_name,
-                provider_name_snapshot=provider_name_snapshot,
+                provider_snapshot=provider_snapshot,
                 status=status,
                 limit=limit,
                 offset=offset,

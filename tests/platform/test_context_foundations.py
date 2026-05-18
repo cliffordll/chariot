@@ -33,7 +33,7 @@ async def agent(tmp_path: Path) -> AIAgent:
 
 def _stateful_req(conversation_id: str) -> ChatRequest:
     return ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hello")],
         conversation_id=conversation_id,
     )
@@ -47,7 +47,7 @@ async def test_context_repo_records_snapshot_and_trace(agent: AIAgent) -> None:
     service = ContextService(agent)
     snapshot = ContextComposer.build_snapshot(
         req,
-        provider_name="mock",
+        provider_snapshot="mock",
         model="mock-1",
         history=[{"role": "user", "content": "hello"}],
         provider_capabilities={"supports_system": False},

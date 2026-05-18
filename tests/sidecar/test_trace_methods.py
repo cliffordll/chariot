@@ -84,8 +84,8 @@ class TestTraceMethods:
 
     async def test_list_show_view(self, server: JsonRpcServer, agent: AIAgent) -> None:
         service = TraceService(agent)
-        turn = await service.create_turn(provider_name="mock", conversation_id="C1")
-        await service.record_provider_call(turn.id, provider_name="mock", latency_ms=120)
+        turn = await service.create_turn(provider_snapshot="mock", conversation_id="C1")
+        await service.record_provider_call(turn.id, provider_snapshot="mock", latency_ms=120)
         await service.record_tool_call(turn.id, tool_name="read_file", status=ToolCallStatus.OK)
         await service.finalize_turn(
             turn.id,
@@ -98,21 +98,21 @@ class TestTraceMethods:
         listed = await _call(server, "list_traces")
         assert len(listed["result"]["turns"]) == 1
         assert listed["result"]["turns"][0]["status"] == "completed"
-        assert listed["result"]["turns"][0]["provider_name_snapshot"] == "mock"
-        assert "provider_name" not in listed["result"]["turns"][0]
+        assert listed["result"]["turns"][0]["provider_snapshot"] == "mock"
+        assert "provider_snapshot" in listed["result"]["turns"][0]
 
         shown = await _call(server, "get_trace_turn", {"turn_id": turn.id})
         assert shown["result"]["turn"]["id"] == turn.id
         assert shown["result"]["turn"]["input_tokens"] == 20
-        assert shown["result"]["turn"]["provider_name_snapshot"] == "mock"
-        assert "provider_name" not in shown["result"]["turn"]
+        assert shown["result"]["turn"]["provider_snapshot"] == "mock"
+        assert "provider_snapshot" in shown["result"]["turn"]
 
         viewed = await _call(server, "view_trace_tree", {"turn_id": turn.id})
         assert len(viewed["result"]["provider_calls"]) == 1
         assert len(viewed["result"]["tool_calls"]) == 1
         assert viewed["result"]["tool_calls"][0]["tool_name"] == "read_file"
-        assert viewed["result"]["provider_calls"][0]["provider_name_snapshot"] == "mock"
-        assert "provider_name" not in viewed["result"]["provider_calls"][0]
+        assert viewed["result"]["provider_calls"][0]["provider_snapshot"] == "mock"
+        assert "provider_snapshot" in viewed["result"]["provider_calls"][0]
 
     async def test_show_not_found(self, server: JsonRpcServer) -> None:
         line = await _call(server, "get_trace_turn", {"turn_id": "ghost"})
@@ -124,8 +124,8 @@ class TestTraceMethods:
 
     async def test_list_filter_by_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
         service = TraceService(agent)
-        await service.create_turn(provider_name="mock", conversation_id="A")
-        await service.create_turn(provider_name="mock", conversation_id="B")
+        await service.create_turn(provider_snapshot="mock", conversation_id="A")
+        await service.create_turn(provider_snapshot="mock", conversation_id="B")
 
         line = await _call(server, "list_traces", {"conversation_id": "A"})
         turns = line["result"]["turns"]

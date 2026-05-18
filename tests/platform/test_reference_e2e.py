@@ -44,7 +44,7 @@ async def test_file_reference_expanded_into_user_message(tmp_path: Path, agent: 
     )
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="see @file:note.txt please")],
     )
     text_chunks: list[str] = []
@@ -62,7 +62,7 @@ async def test_file_reference_expanded_into_user_message(tmp_path: Path, agent: 
 async def test_unknown_reference_type_passes_through(agent: AIAgent) -> None:
     """非内建 type(如 @custom:x)pattern 不匹配 → 原样保留,不报错。"""
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="@custom:x raw text")],
     )
     text_chunks: list[str] = []
@@ -84,7 +84,7 @@ async def test_file_not_found_yields_error_block(tmp_path: Path, agent: AIAgent)
         sessionmaker=agent._sessionmaker,
     )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="@file:ghost.md")],
     )
     text_chunks: list[str] = []

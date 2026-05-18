@@ -47,10 +47,6 @@ class ProviderRepo:
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return self._row_to_entry(row) if row is not None else None
 
-    async def get_by_legacy_name(self, name: str) -> ProviderEntry | None:
-        row = await self._find_row_by_legacy_name(name)
-        return self._row_to_entry(row) if row is not None else None
-
     async def create(
         self,
         *,
@@ -279,23 +275,7 @@ class ProviderRepo:
         if row is not None:
             return row
         stmt = select(ProviderRow).where(ProviderRow.slug == ref)
-        row = (await self.session.execute(stmt)).scalar_one_or_none()
-        if row is not None:
-            return row
-        return await self._find_row_by_legacy_name(ref)
-
-    async def _find_row_by_legacy_name(self, name: str) -> ProviderRow | None:
-        stmt = (
-            select(ProviderRow)
-            .where(ProviderRow.name == name)
-            .order_by(ProviderRow.created_at.asc(), ProviderRow.id.asc())
-        )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        if not rows:
-            return None
-        if len(rows) > 1:
-            raise DuplicateProviderName(f"provider legacy name {name!r} 不再唯一,请改用 slug 或 id")
-        return rows[0]
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def _settings_row(self) -> SettingsRow | None:
         return await self.session.get(SettingsRow, 1)

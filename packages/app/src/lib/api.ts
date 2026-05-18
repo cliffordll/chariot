@@ -60,7 +60,7 @@ export interface Message {
   content: string | AnthropicBlock[];
   seq?: number;
   created_at?: string;
-  provider_name?: string | null;
+  provider_snapshot?: string | null;
 }
 
 export interface Tool {
@@ -148,7 +148,7 @@ export interface ProviderStatusResponse {
 }
 
 export interface ProviderHealthSummary {
-  provider_name: string;
+  provider_snapshot: string;
   last_ok: boolean;
   latency_ms: number | null;
   error_code: string | null;
@@ -207,7 +207,7 @@ export interface PromptTrace {
   version_id: string;
   version: string;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   request: Record<string, unknown>;
   source_refs: Array<Record<string, unknown>>;
@@ -224,7 +224,7 @@ export interface ContextSlice {
 export interface ContextSnapshot {
   id: string;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   request: Record<string, unknown>;
   slices: ContextSlice[];
@@ -237,7 +237,7 @@ export interface ContextTrace {
   id: string;
   snapshot_id: string;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   prompt_trace_id: string | null;
   policy: Record<string, unknown>;
@@ -476,7 +476,7 @@ export interface TraceTurn {
   agent_profile: string | null;
   task_id: string | null;
   task_run_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   prompt_trace_id: string | null;
   context_trace_id: string | null;
@@ -500,7 +500,7 @@ export interface TraceTurn {
 export interface TraceProviderCall {
   id: string;
   turn_id: string;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   log_id: string | null;
   request_summary: Record<string, unknown>;
@@ -543,7 +543,7 @@ export interface TraceTree {
 export interface ListTracesParams {
   conversation_id?: string;
   task_id?: string;
-  provider_name?: string;
+  provider_snapshot?: string;
   status?: TurnStatus;
   limit?: number;
   offset?: number;
@@ -929,7 +929,7 @@ const apiCore = {
     pinned?: boolean;
     archived?: boolean;
     conversation_id?: string;
-    provider_name?: string;
+    provider_snapshot?: string;
     tag?: string;
     search?: string;
     limit?: number;

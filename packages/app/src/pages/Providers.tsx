@@ -50,7 +50,7 @@ import {
  *   `delete_provider` RPC method)
  * - Test 按钮跑探针(`probe_provider`)
  *
- * Chat 页负责选哪个 entry(`ChatRequest.provider_name` 路由)。
+ * Chat 页负责选哪个 entry(`ChatRequest.provider_ref` 路由)。
  */
 
 interface FieldSchema {

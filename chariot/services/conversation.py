@@ -27,7 +27,7 @@ class ConversationMessageStore(Protocol):
         conversation_id: str,
         content: list[dict[str, Any]],
         *,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         agent_profile: str | None = None,
     ) -> Any: ...
 
@@ -83,14 +83,14 @@ class ConversationService:
         conversation_id: str,
         content: list[dict[str, Any]],
         *,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         agent_profile: str | None = None,
     ) -> Any:
         return await self._repo.append_message(
             conversation_id,
             role="assistant",
             content=content,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             agent_profile=agent_profile,
         )
 

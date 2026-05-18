@@ -59,14 +59,14 @@ class MemoryCaptureService:
         self,
         *,
         req: ChatRequest,
-        provider_name: str,
+        provider_snapshot: str,
         policy: MemoryPolicy,
         prompt_trace_id: str | None = None,
         context_trace_id: str | None = None,
     ) -> list[MemoryEntry]:
         candidates = self.extract_from_request(
             req,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
         )
@@ -78,7 +78,7 @@ class MemoryCaptureService:
         self,
         *,
         conversation_id: str | None,
-        provider_name: str,
+        provider_snapshot: str,
         error_type: str,
         error_message: str,
         prompt_trace_id: str | None = None,
@@ -86,7 +86,7 @@ class MemoryCaptureService:
     ) -> list[MemoryEntry]:
         candidate = self._error_candidate(
             conversation_id=conversation_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             error_type=error_type,
             error_message=error_message,
             prompt_trace_id=prompt_trace_id,
@@ -100,7 +100,7 @@ class MemoryCaptureService:
         self,
         req: ChatRequest,
         *,
-        provider_name: str,
+        provider_snapshot: str,
         prompt_trace_id: str | None = None,
         context_trace_id: str | None = None,
     ) -> list[MemoryCaptureCandidate]:
@@ -111,7 +111,7 @@ class MemoryCaptureService:
             for sentence in self._split_sentences(self._message_text(message.content)):
                 candidate = self._sentence_candidate(
                     sentence,
-                    provider_name=provider_name,
+                    provider_snapshot=provider_snapshot,
                     conversation_id=req.conversation_id,
                     prompt_trace_id=prompt_trace_id,
                     context_trace_id=context_trace_id,
@@ -124,7 +124,7 @@ class MemoryCaptureService:
         self,
         sentence: str,
         *,
-        provider_name: str,
+        provider_snapshot: str,
         conversation_id: str | None,
         prompt_trace_id: str | None,
         context_trace_id: str | None,
@@ -140,14 +140,14 @@ class MemoryCaptureService:
         kind = "preference" if has_preference_hint else "instruction"
         meta: dict[str, Any] = {
             "capture_source": "conversation",
-            "provider_name": provider_name,
+            "provider_snapshot": provider_snapshot,
             "conversation_id": conversation_id,
         }
         if prompt_trace_id is not None:
             meta["prompt_trace_id"] = prompt_trace_id
         if context_trace_id is not None:
             meta["context_trace_id"] = context_trace_id
-        links = [{"link_type": "provider", "link_value": provider_name}]
+        links = [{"link_type": "provider", "link_value": provider_snapshot}]
         if conversation_id is not None:
             links.append({"link_type": "conversation", "link_value": conversation_id})
         if prompt_trace_id is not None:
@@ -161,7 +161,7 @@ class MemoryCaptureService:
         self,
         *,
         conversation_id: str | None,
-        provider_name: str,
+        provider_snapshot: str,
         error_type: str,
         error_message: str,
         prompt_trace_id: str | None,
@@ -178,7 +178,7 @@ class MemoryCaptureService:
         meta: dict[str, Any] = {
             "capture_source": "error",
             "error_type": error_type,
-            "provider_name": provider_name,
+            "provider_snapshot": provider_snapshot,
             "conversation_id": conversation_id,
         }
         if prompt_trace_id is not None:
@@ -186,7 +186,7 @@ class MemoryCaptureService:
         if context_trace_id is not None:
             meta["context_trace_id"] = context_trace_id
         links = [
-            {"link_type": "provider", "link_value": provider_name},
+            {"link_type": "provider", "link_value": provider_snapshot},
             {"link_type": "tag", "link_value": "auto"},
         ]
         if conversation_id is not None:

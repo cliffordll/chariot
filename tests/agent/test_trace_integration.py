@@ -128,7 +128,7 @@ async def sessionmaker(tmp_path: Path):
 
 
 def _req(provider: str = "mock") -> ChatRequest:
-    return ChatRequest(provider_name=provider, messages=[Message(role="user", content="hi")])
+    return ChatRequest(provider_ref=provider, messages=[Message(role="user", content="hi")])
 
 
 class TestTraceIntegration:
@@ -143,7 +143,7 @@ class TestTraceIntegration:
             turn = turns[0]
             assert turn.status == TurnStatus.COMPLETED
             assert turn.stop_reason == "end_turn"
-            assert turn.provider_name_snapshot == "mock"
+            assert turn.provider_snapshot == "mock"
             assert turn.model == "mock-1"
             assert turn.input_tokens == 12
             assert turn.output_tokens == 5

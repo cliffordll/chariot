@@ -26,7 +26,7 @@ class _DummyAgent:
     """ChatContext._build_request ???? agent;????? dataclass ???"""
 
     async def resolve_chat_provider_display(self, req):  # type: ignore[no-untyped-def]
-        return req.provider_name
+        return req.provider_ref
 
     async def run_chat(self, req):  # type: ignore[no-untyped-def]
         yield ChatEvent.message_start(
@@ -41,7 +41,7 @@ class _DummyAgent:
 def _make_ctx(*, conversation_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=_DummyAgent(),  # type: ignore[arg-type]
-        provider_name="claude-haiku-4-5",
+        provider_ref="claude-haiku-4-5",
         conversation_id=conversation_id,
     )
 
@@ -130,9 +130,9 @@ def test_request_includes_provider_and_max_tokens() -> None:
     ctx = _make_ctx()
     ctx.append_user("hi")
     req = ctx._build_request()
-    # ChatRequest.provider_name 是 chariot 路由 key(entry name);wire body.model 由
+    # ChatRequest.provider_ref 是 chariot 路由 key(entry name);wire body.model 由
     # AnthropicProvider 内部从 self.config.model 写
-    assert req.provider_name == "claude-haiku-4-5"
+    assert req.provider_ref == "claude-haiku-4-5"
     assert req.max_tokens == 1024  # ChatContext 默认值
     # conversation_id 透传
     assert req.conversation_id is None
@@ -157,7 +157,7 @@ async def test_run_turn_writes_log_row(tmp_path: Path) -> None:
     ctx.append_user("hi")
 
     result = await ctx.run_turn(lambda ev: None)
-    assert result.provider_name_snapshot == "claude-haiku-4-5"
+    assert result.provider_snapshot == "claude-haiku-4-5"
     assert result.input_tokens == 3
     assert result.output_tokens == 7
 
@@ -180,10 +180,10 @@ async def test_run_turn_uses_effective_provider_display_from_agent() -> None:
 
     ctx = ChatContext(
         agent=_OverrideAgent(),  # type: ignore[arg-type]
-        provider_name="mock",
+        provider_ref="mock",
     )
     ctx.append_user("hi")
 
     result = await ctx.run_turn(lambda ev: None)
 
-    assert result.provider_name_snapshot == "ollama-qwen"
+    assert result.provider_snapshot == "ollama-qwen"

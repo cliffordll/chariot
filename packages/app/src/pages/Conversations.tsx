@@ -284,7 +284,7 @@ export default function Conversations() {
               <li key={idx} className="rounded-md border border-border p-3 text-sm">
                 <div className="text-xs text-muted-foreground">
                   #{idx + 1} {m.role}
-                  {m.provider_name ? ` [${m.provider_name}]` : ""}
+                  {m.provider_snapshot ? ` [${m.provider_snapshot}]` : ""}
                 </div>
                 <div className="mt-1 whitespace-pre-wrap break-words">{stringifyMessageContent(m.content)}</div>
               </li>

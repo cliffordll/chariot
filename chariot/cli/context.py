@@ -63,7 +63,7 @@ class TurnResult:
     """一轮请求的收尾结果(ChatRepl / ChatOnce 用 meta 行展示)。"""
 
     text: str
-    provider_name_snapshot: str | None
+    provider_snapshot: str | None
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -75,8 +75,8 @@ class ChatContext:
 
     agent: AIAgent
     # provider 路由引用。0.8.9 起优先走 provider slug / id,兼容 legacy
-    # display name;透传给 ChatRequest.provider_name(字段名保留兼容)。
-    provider_name: str | None = None
+    # display name;透传给 ChatRequest.provider_ref。
+    provider_ref: str | None = None
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
     # 0.4.0:可选 conversation id(ULID)。给了则 ChatRequest.conversation_id 透传给 AIAgent,
@@ -90,7 +90,7 @@ class ChatContext:
     model_override: str | None = None
     # 0.7.2+:CLI `--agent` flag 的承载;每轮 req 透传给 `ChatRequest.agent_profile`,
     # AIAgent 解析后:profile.provider_id
-    # 覆盖 req.provider_name,
+    # 覆盖 req.provider_ref,
     # profile.prompt_id 决定 prompt 注入,
     # profile.toolset_id 做 toolset filter。
     # None = 不绑定 agent_profile(常态;走全局 active bundle + 全量 enabled tools)
@@ -119,18 +119,18 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(provider_name / max_tokens / conversation_id)。"""
+        """清空对话历史,保留会话配置(provider_ref / max_tokens / conversation_id)。"""
         self.messages.clear()
 
     def set_provider(self, name: str | None) -> None:
-        self.provider_name = name
+        self.provider_ref = name
 
     # ---------- 核心:一轮请求 ----------
 
     async def run_turn(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
         """?? ChatRequest -> ? `agent.run_chat(req)` -> ?? ChatEvent -> ???"""
         req = self._build_request()
-        effective_provider_name = await self.agent.resolve_chat_provider_display(req)
+        effective_provider_display = await self.agent.resolve_chat_provider_display(req)
         current_text: list[str] = []
         last_message_text: list[str] = []
         input_tokens = 0
@@ -150,7 +150,7 @@ class ChatContext:
 
         if error_event is not None:
             await log_writer.record(
-                provider=effective_provider_name or self.provider_name,
+                provider=effective_provider_display or self.provider_ref,
                 status="error",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -164,13 +164,13 @@ class ChatContext:
 
         result = TurnResult(
             text="".join(last_message_text),
-            provider_name_snapshot=effective_provider_name or self.provider_name,
+            provider_snapshot=effective_provider_display or self.provider_ref,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
         await log_writer.record(
-            provider=result.provider_name_snapshot,
+            provider=result.provider_snapshot,
             status="ok",
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
@@ -204,14 +204,14 @@ class ChatContext:
         """把对话历史组装成 ChatRequest。
 
         req.messages 取值取决于 stateful / stateless;详见模块级 docstring 契约段。
-        `ChatRequest.provider_name` 是 chariot 路由引用(provider slug / id /
+        `ChatRequest.provider_ref` 是 chariot 路由引用(provider slug / id /
         兼容 legacy name);wire 字段
         `body.model` 由 Provider 内部从 `req.model or self.config.model` 决定
         —— `model_override` 非 None 时走 per-call 覆盖(CLI `--model`),
         否则用 entry.options.model。
         """
         return ChatRequest(
-            provider_name=self.provider_name,
+            provider_ref=self.provider_ref,
             messages=[self._to_message(m) for m in self._messages_to_send()],
             model=self.model_override,
             max_tokens=self.max_tokens,

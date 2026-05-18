@@ -11,7 +11,7 @@ v5(0.6.0)起表名 `conversations` rename → `conversations`,字段
   顺带更新 `conversations.agent_profile`(若 role='assistant' 且给了 agent_profile)
 - load_messages_as_anthropic:SELECT + reshape 成 Anthropic 协议 messages 数组
   形态 `[{role, content}, ...]`(content 已经是协议原生 blocks,丢掉
-  seq / provider_name 等元数据列即可)
+  seq / provider_snapshot 等元数据列即可)
 
 不暴露的事
 ----------
@@ -261,7 +261,7 @@ class ConversationRepo:
         role: str,
         content: str | list[dict[str, Any]],
         *,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         agent_profile: str | None = None,
     ) -> MessageRow:
         """追加一条 message。`seq` 内部 SELECT MAX+1。
@@ -274,9 +274,9 @@ class ConversationRepo:
             raise ConfigError(
                 f"messages.role 必须 ∈ {sorted(self._VALID_ROLES)},得到 {role!r}",
             )
-        if role != self.ROLE_ASSISTANT and provider_name is not None:
+        if role != self.ROLE_ASSISTANT and provider_snapshot is not None:
             raise ConfigError(
-                f"provider_name 仅 role='assistant' 可填,得到 role={role!r}",
+                f"provider_snapshot 仅 role='assistant' 可填,得到 role={role!r}",
             )
 
         next_seq = await self._next_seq(conversation_id)
@@ -286,7 +286,7 @@ class ConversationRepo:
             seq=next_seq,
             role=role,
             content=content_json,
-            provider_name=provider_name if role == self.ROLE_ASSISTANT else None,
+            provider_snapshot=provider_snapshot if role == self.ROLE_ASSISTANT else None,
         )
         self.session.add(msg)
         # 必须 flush 才能拿到 msg.id(default=_new_ulid 在 flush 时填),
@@ -331,7 +331,7 @@ class ConversationRepo:
 
     async def list_messages(self, conversation_id: str) -> list[MessageRow]:
         """返原始 ORM rows(给 admin/conversations/{id} 详情用 —— 需要 seq /
-        provider_name / created_at 等元数据)。"""
+        provider_snapshot / created_at 等元数据)。"""
         stmt = select(MessageRow).where(MessageRow.conversation_id == conversation_id).order_by(MessageRow.seq.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 

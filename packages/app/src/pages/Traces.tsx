@@ -69,7 +69,7 @@ export default function Traces() {
         const params: Record<string, unknown> = {};
         if (filters.conversation.trim()) params.conversation_id = filters.conversation.trim();
         if (filters.task.trim()) params.task_id = filters.task.trim();
-        if (filters.provider.trim()) params.provider_name = filters.provider.trim();
+        if (filters.provider.trim()) params.provider_snapshot = filters.provider.trim();
         if (filters.status) params.status = filters.status;
         const { turns } = await api.listTraces(params);
         setState({ kind: "ok", turns });
@@ -168,7 +168,7 @@ function FiltersBar({
         <Input value={filters.task} onChange={(e) => onChange({ ...filters, task: e.target.value })} placeholder="task id" />
       </Field>
       <Field label="Provider">
-        <Input value={filters.provider} onChange={(e) => onChange({ ...filters, provider: e.target.value })} placeholder="provider name" />
+        <Input value={filters.provider} onChange={(e) => onChange({ ...filters, provider: e.target.value })} placeholder="provider snapshot" />
       </Field>
       <Field label="Status">
         <select
@@ -227,7 +227,7 @@ function TurnsListCard({
                 <TableCell>
                   <StatusBadge status={t.status} />
                 </TableCell>
-                <TableCell>{t.provider_name}{t.model ? `/${t.model}` : ""}</TableCell>
+                <TableCell>{t.provider_snapshot}{t.model ? `/${t.model}` : ""}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(t.started_at)}</TableCell>
                 <TableCell className="text-xs">{formatDuration(t.duration_ms)}</TableCell>
                 <TableCell className="text-xs">
@@ -255,7 +255,7 @@ function TurnDetailCard({ detail }: { detail: DetailState }) {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={turn.status} />
-            <Badge variant="outline">{turn.provider_name}{turn.model ? `/${turn.model}` : ""}</Badge>
+            <Badge variant="outline">{turn.provider_snapshot}{turn.model ? `/${turn.model}` : ""}</Badge>
             {turn.stop_reason && <Badge variant="secondary">{turn.stop_reason}</Badge>}
             {turn.agent_profile && <Badge variant="outline">agent: {turn.agent_profile}</Badge>}
           </div>
@@ -324,7 +324,7 @@ function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
 
 function formatProviderCall(pc: TraceProviderCall): { key: string; line: string; details: string | null } {
   const err = pc.error_type ? `  error=${pc.error_type}` : "";
-  const line = `${pc.provider_name}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
+  const line = `${pc.provider_snapshot}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
   const detailsParts: string[] = [];
   if (Object.keys(pc.request_summary).length) {
     detailsParts.push("request: " + JSON.stringify(pc.request_summary));

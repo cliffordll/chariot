@@ -31,7 +31,7 @@ class ProviderHealthRepo:
         self,
         provider_id: str,
         *,
-        provider_name: str,
+        provider_snapshot: str,
         ok: bool,
         latency_ms: int,
         error_code: str | None = None,
@@ -39,9 +39,9 @@ class ProviderHealthRepo:
     ) -> dict[str, Any]:
         row = await self.session.get(ProviderHealthRow, provider_id)
         if row is None:
-            row = ProviderHealthRow(provider_id=provider_id, provider_name_snapshot=provider_name)
+            row = ProviderHealthRow(provider_id=provider_id, provider_snapshot=provider_snapshot)
             self.session.add(row)
-        row.provider_name_snapshot = provider_name
+        row.provider_snapshot = provider_snapshot
         row.last_ok = 1 if ok else 0
         row.latency_ms = latency_ms
         row.error_code = error_code
@@ -58,7 +58,7 @@ class ProviderHealthRepo:
     def _row_to_dict(row: ProviderHealthRow) -> dict[str, Any]:
         return {
             "provider_id": row.provider_id,
-            "provider_name_snapshot": row.provider_name_snapshot,
+            "provider_snapshot": row.provider_snapshot,
             "last_ok": bool(row.last_ok),
             "latency_ms": row.latency_ms,
             "error_code": row.error_code,

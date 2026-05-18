@@ -24,7 +24,7 @@ class ContextSlice:
 @dataclass(frozen=True)
 class ContextSnapshot:
     conversation_id: str | None
-    provider_name_snapshot: str
+    provider_snapshot: str
     model: str | None
     request: dict[str, Any]
     slices: list[ContextSlice]
@@ -38,7 +38,7 @@ class ContextSnapshotEntry:
     id: str
     conversation_id: str | None
     provider_id: str | None
-    provider_name_snapshot: str
+    provider_snapshot: str
     model: str | None
     request: dict[str, Any]
     slices: list[dict[str, Any]]
@@ -53,7 +53,7 @@ class ContextTraceEntry:
     snapshot_id: str
     conversation_id: str | None
     provider_id: str | None
-    provider_name_snapshot: str
+    provider_snapshot: str
     model: str | None
     prompt_trace_id: str | None
     policy: dict[str, Any]

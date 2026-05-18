@@ -44,21 +44,21 @@ def _build_long_request(turns: int) -> ChatRequest:
     for i in range(turns):
         msgs.append(Message(role="user", content=f"user_{i} {big}"))
         msgs.append(Message(role="assistant", content=f"assistant_{i} {big}"))
-    return ChatRequest(provider_name="mock", messages=msgs)
+    return ChatRequest(provider_ref="mock", messages=msgs)
 
 
 # ---- token 估算 ----
 
 
 def test_estimate_prompt_tokens_string_messages() -> None:
-    req = ChatRequest(provider_name="mock", messages=[Message(role="user", content="abc")])
+    req = ChatRequest(provider_ref="mock", messages=[Message(role="user", content="abc")])
     # len(text)//3 = 1
     assert ContextCompressor.estimate_prompt_tokens(req) == 1
 
 
 def test_estimate_prompt_tokens_with_system() -> None:
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="abc")],
         system="hello world",  # 11 // 3 = 3
     )
@@ -67,7 +67,7 @@ def test_estimate_prompt_tokens_with_system() -> None:
 
 def test_estimate_handles_anthropic_blocks() -> None:
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[
             Message(
                 role="assistant",
@@ -87,7 +87,7 @@ def test_estimate_handles_anthropic_blocks() -> None:
 
 async def test_noop_when_under_threshold() -> None:
     compressor = ContextCompressor(_StubAuxOk(), threshold=0.7, summary_turns=2)
-    req = ChatRequest(provider_name="mock", messages=[Message(role="user", content="short")])
+    req = ChatRequest(provider_ref="mock", messages=[Message(role="user", content="short")])
     new_req, result = await compressor.maybe_compress(req, context_length=8192)
     assert new_req is req
     assert result.compressed is False
@@ -124,16 +124,16 @@ async def test_fallback_to_oldest_pair_pruning_on_aux_failure() -> None:
 
 
 async def test_compression_preserves_request_fields() -> None:
-    """触发压缩后,非 messages 字段(provider_name / model 等)原样保留。"""
+    """触发压缩后,非 messages 字段(provider_ref / model 等)原样保留。"""
     compressor = ContextCompressor(_StubAuxOk(), threshold=0.5, summary_turns=2)
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         model="mock-1",
         max_tokens=1024,
         messages=_build_long_request(turns=8).messages,
     )
     new_req, _ = await compressor.maybe_compress(req, context_length=200)
-    assert new_req.provider_name == "mock"
+    assert new_req.provider_ref == "mock"
     assert new_req.model == "mock-1"
     assert new_req.max_tokens == 1024
 

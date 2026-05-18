@@ -76,9 +76,9 @@ def _make_agent(sessionmaker, *, providers: dict[str, BaseProvider], tools: dict
     return AIAgent(providers=providers, tools=tools, sessionmaker=sessionmaker)
 
 
-def _stateless(provider_name: str, *, agent_profile: str | None = None) -> ChatRequest:
+def _stateless(provider_ref: str, *, agent_profile: str | None = None) -> ChatRequest:
     return ChatRequest(
-        provider_name=provider_name,
+        provider_ref=provider_ref,
         messages=[Message(role="user", content="hi")],
         agent_profile=agent_profile,
     )
@@ -92,7 +92,7 @@ class TestAgentProfileBinding:
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         # 没绑定 → provider 路由原样,tools=None(没装载 tool 时不挂)
-        assert provider.last_req.provider_name == "mock"
+        assert provider.last_req.provider_ref == "mock"
 
     async def test_dangling_agent_profile_fallback(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
@@ -101,9 +101,9 @@ class TestAgentProfileBinding:
         assert any(e.kind == "stream_done" for e in events)
         # dangling profile name → 不阻断,走原 provider
         assert provider.last_req is not None
-        assert provider.last_req.provider_name == "mock"
+        assert provider.last_req.provider_ref == "mock"
 
-    async def test_provider_id_overrides_provider_name(self, sessionmaker) -> None:
+    async def test_provider_id_overrides_provider_ref(self, sessionmaker) -> None:
         primary = _CapturingProvider("primary")
         secondary = _CapturingProvider("secondary")
         agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})

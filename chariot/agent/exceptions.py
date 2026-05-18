@@ -58,7 +58,7 @@ class ConfigError(Exception):
 
 
 class ProviderNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好,语义明显是异常
-    """指定 provider ref(id / slug / 兼容 legacy name)在 `providers` 表里找不到。"""
+    """指定 provider ref(id / slug)在 `providers` 表里找不到。"""
 
 
 class DuplicateProviderName(ConfigError):  # noqa: N818 — 同上

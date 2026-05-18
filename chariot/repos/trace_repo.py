@@ -63,7 +63,7 @@ class TraceRepo:
         self,
         *,
         provider_id: str | None = None,
-        provider_name: str,
+        provider_snapshot: str,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
         task_id: str | None = None,
@@ -79,7 +79,7 @@ class TraceRepo:
             task_id=task_id,
             task_run_id=task_run_id,
             provider_id=provider_id,
-            provider_name_snapshot=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
@@ -207,7 +207,7 @@ class TraceRepo:
         turn_id: str,
         *,
         provider_id: str | None = None,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None = None,
         log_id: str | None = None,
         request_summary: dict[str, Any] | None = None,
@@ -220,7 +220,7 @@ class TraceRepo:
         row = TraceProviderCallRow(
             turn_id=turn_id,
             provider_id=provider_id,
-            provider_name_snapshot=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             log_id=log_id,
             request_summary=self._serialize_json("request_summary", request_summary or {}),
@@ -296,7 +296,7 @@ class TraceRepo:
         *,
         conversation_id: str | None = None,
         task_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         status: TurnStatus | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -306,8 +306,8 @@ class TraceRepo:
             stmt = stmt.where(TraceTurnRow.conversation_id == conversation_id)
         if task_id is not None:
             stmt = stmt.where(TraceTurnRow.task_id == task_id)
-        if provider_name is not None:
-            stmt = stmt.where(TraceTurnRow.provider_name_snapshot == provider_name)
+        if provider_snapshot is not None:
+            stmt = stmt.where(TraceTurnRow.provider_snapshot == provider_snapshot)
         if status is not None:
             stmt = stmt.where(TraceTurnRow.status == status.value)
         stmt = stmt.limit(limit).offset(offset)
@@ -401,7 +401,7 @@ class TraceRepo:
             task_id=row.task_id,
             task_run_id=row.task_run_id,
             provider_id=row.provider_id,
-            provider_name_snapshot=row.provider_name_snapshot,
+            provider_snapshot=row.provider_snapshot,
             model=row.model,
             prompt_trace_id=row.prompt_trace_id,
             context_trace_id=row.context_trace_id,
@@ -428,7 +428,7 @@ class TraceRepo:
             id=row.id,
             turn_id=row.turn_id,
             provider_id=row.provider_id,
-            provider_name_snapshot=row.provider_name_snapshot,
+            provider_snapshot=row.provider_snapshot,
             model=row.model,
             log_id=row.log_id,
             request_summary=cls._deserialize_dict("request_summary", row.request_summary),

@@ -33,7 +33,7 @@ async def agent(tmp_path: Path) -> AIAgent:
 async def test_memory_is_injected_into_context_and_prompt(agent: AIAgent) -> None:
     conversation_id = "01H00000000000000000000000"
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hello")],
         conversation_id=conversation_id,
     )

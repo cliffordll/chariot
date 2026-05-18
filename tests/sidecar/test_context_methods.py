@@ -77,7 +77,7 @@ def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
 async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AIAgent) -> None:
     conversation_id = "01H00000000000000000000000"
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hello")],
         conversation_id=conversation_id,
     )
@@ -85,7 +85,7 @@ async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AI
     service = ContextService(agent)
     snapshot = ContextComposer.build_snapshot(
         req,
-        provider_name="mock",
+        provider_snapshot="mock",
         model="mock-1",
         history=[{"role": "user", "content": "hello"}],
         provider_capabilities={"supports_system": False},
@@ -95,13 +95,13 @@ async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AI
 
     listed = await _call(server, "list_context_snapshots")
     assert listed["result"]["snapshots"][0]["id"] == recorded.id
-    assert listed["result"]["snapshots"][0]["provider_name_snapshot"] == "mock"
-    assert "provider_name" not in listed["result"]["snapshots"][0]
+    assert listed["result"]["snapshots"][0]["provider_snapshot"] == "mock"
+    assert "provider_snapshot" in listed["result"]["snapshots"][0]
 
     inspected = await _call(server, "inspect_context", {"context_id": recorded.id})
     assert inspected["result"]["snapshot"]["id"] == recorded.id
     assert inspected["result"]["trace"]["snapshot_id"] == recorded.id
-    assert inspected["result"]["snapshot"]["provider_name_snapshot"] == "mock"
-    assert inspected["result"]["trace"]["provider_name_snapshot"] == "mock"
-    assert "provider_name" not in inspected["result"]["snapshot"]
-    assert "provider_name" not in inspected["result"]["trace"]
+    assert inspected["result"]["snapshot"]["provider_snapshot"] == "mock"
+    assert inspected["result"]["trace"]["provider_snapshot"] == "mock"
+    assert "provider_snapshot" in inspected["result"]["snapshot"]
+    assert "provider_snapshot" in inspected["result"]["trace"]

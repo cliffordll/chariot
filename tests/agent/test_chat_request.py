@@ -4,7 +4,7 @@
 - frozen 不可变(改字段抛 FrozenInstanceError)
 - 字段默认值符合 DESIGN §3.1
 - 跟 Claude API 互操作:结构对齐(messages / max_tokens / system 等);
-  路由字段 chariot 用 `provider_name`,Claude wire 用 `model`(由 Provider 内部翻译)
+  路由字段 chariot 用 `provider_ref`,Claude wire 用 `model`(由 Provider 内部翻译)
 - `dataclasses.asdict(req)` 字段集合包 Claude 结构字段(不含 wire `model`)
 - 查询方法 `is_stateful` / `last_user_text` 行为
 """
@@ -67,8 +67,8 @@ class TestChatRequestDefaults:
     """字段默认值跟 DESIGN §3.1 一致。"""
 
     def test_minimal_construct(self) -> None:
-        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
-        assert req.provider_name == "claude"
+        req = ChatRequest(provider_ref="claude", messages=[Message(role="user", content="hi")])
+        assert req.provider_ref == "claude"
         assert len(req.messages) == 1
         assert req.max_tokens == 4096
         assert req.system is None
@@ -84,30 +84,30 @@ class TestChatRequestDefaults:
         assert req.agent_id is None
 
     def test_frozen(self) -> None:
-        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        req = ChatRequest(provider_ref="claude", messages=[Message(role="user", content="hi")])
         with pytest.raises(dataclasses.FrozenInstanceError):
-            req.provider_name = "gpt-4"  # type: ignore[misc]
+            req.provider_ref = "gpt-4"  # type: ignore[misc]
 
 
 class TestClaudeApiInterop:
-    """ChatRequest 结构跟 Claude Messages API 1:1;路由字段 `provider_name` 是 chariot 自己的。"""
+    """ChatRequest 结构跟 Claude Messages API 1:1;路由字段 `provider_ref` 是 chariot 自己的。"""
 
     def test_model_field_default_none(self) -> None:
         """0.6.5+ 加回 `model: str | None = None` 字段(per-call LLM id 覆盖)。
 
         默认 None;Provider 内部按 `req.model or self.config.model` 决定 wire
-        body["model"]。`provider_name`(路由 key)≠ `model`(LLM id)。
+        body["model"]。`provider_ref`(路由 key)≠ `model`(LLM id)。
         """
         field_names = {f.name for f in dataclasses.fields(ChatRequest)}
         assert "model" in field_names
-        assert "provider_name" in field_names
-        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        assert "provider_ref" in field_names
+        req = ChatRequest(provider_ref="claude", messages=[Message(role="user", content="hi")])
         assert req.model is None
 
     def test_asdict_contains_claude_structural_fields(self) -> None:
         """`dataclasses.asdict(req)` 字段集合 ⊇ Claude API 结构字段(messages /
         model / max_tokens / system / tools / sampling 等)。"""
-        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        req = ChatRequest(provider_ref="claude", messages=[Message(role="user", content="hi")])
         d = dataclasses.asdict(req)
         claude_structural_fields = {
             "messages",
@@ -125,13 +125,13 @@ class TestClaudeApiInterop:
         }
         assert claude_structural_fields.issubset(d.keys())
         # chariot 路由字段也在
-        assert "provider_name" in d
+        assert "provider_ref" in d
         # 默认 None,wire body 构造时会被 Provider 滤掉(asdict 仍含)
         assert d["model"] is None
 
     def test_chariot_extension_fields_present(self) -> None:
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[Message(role="user", content="hi")],
             conversation_id="01H...",
             agent_id="agent_main",
@@ -144,19 +144,19 @@ class TestClaudeApiInterop:
 class TestChatRequestQueries:
     def test_is_stateful_true(self) -> None:
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[Message(role="user", content="hi")],
             conversation_id="01H...",
         )
         assert req.is_stateful() is True
 
     def test_is_stateful_false(self) -> None:
-        req = ChatRequest(provider_name="claude", messages=[Message(role="user", content="hi")])
+        req = ChatRequest(provider_ref="claude", messages=[Message(role="user", content="hi")])
         assert req.is_stateful() is False
 
     def test_last_user_text_string_content(self) -> None:
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[
                 Message(role="user", content="first"),
                 Message(role="assistant", content="hi"),
@@ -167,7 +167,7 @@ class TestChatRequestQueries:
 
     def test_last_user_text_block_content(self) -> None:
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[
                 Message(
                     role="user",
@@ -179,7 +179,7 @@ class TestChatRequestQueries:
 
     def test_last_user_text_no_text_block(self) -> None:
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[Message(role="user", content=[{"type": "image", "source": {}}])],
         )
         assert req.last_user_text() is None
@@ -187,7 +187,7 @@ class TestChatRequestQueries:
     def test_last_user_text_empty(self) -> None:
         """messages 全是 assistant → 没有 user 消息 → None。"""
         req = ChatRequest(
-            provider_name="claude",
+            provider_ref="claude",
             messages=[Message(role="assistant", content="hi")],
         )
         assert req.last_user_text() is None

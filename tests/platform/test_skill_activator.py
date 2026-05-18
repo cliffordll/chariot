@@ -28,7 +28,7 @@ def _make_skill(
 
 def _make_req(*, system: str | None = None, tools: list[ToolSchema] | None = None) -> ChatRequest:
     return ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hi")],
         system=system,
         tools=tools,
@@ -63,7 +63,7 @@ def test_activate_appends_to_anthropic_system_list_form() -> None:
     """system 是 Anthropic block list 形态时,追加一条 text block。"""
     req = _make_req()
     req_with_list = req.__class__(
-        provider_name="mock",
+        provider_ref="mock",
         messages=req.messages,
         system=[SystemBlock(type="text", text="BLOCK_A")],
     )

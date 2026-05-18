@@ -38,7 +38,7 @@ def _v(verdict: str, reason: str = "stub reason") -> CriticVerdict:
 
 
 def _req(text: str = "do the task") -> ChatRequest:
-    return ChatRequest(provider_name="mock", messages=[Message(role="user", content=text)])
+    return ChatRequest(provider_ref="mock", messages=[Message(role="user", content=text)])
 
 
 # ---- AssistantBuffer ----

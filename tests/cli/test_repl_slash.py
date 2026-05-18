@@ -50,7 +50,7 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
 def _make_ctx(agent: AIAgent, *, conversation_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=agent,
-        provider_name="claude-haiku-4-5",
+        provider_ref="claude-haiku-4-5",
         conversation_id=conversation_id,
     )
 

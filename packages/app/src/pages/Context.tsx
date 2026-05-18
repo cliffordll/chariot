@@ -188,7 +188,7 @@ export default function Context() {
                           <TableCell className="font-mono text-xs">
                             {snapshot.conversation_id ?? "-"}
                           </TableCell>
-                          <TableCell className="font-mono text-xs">{snapshot.provider_name}</TableCell>
+                          <TableCell className="font-mono text-xs">{snapshot.provider_snapshot}</TableCell>
                           <TableCell className="font-mono text-xs">{snapshot.model ?? "-"}</TableCell>
                           <TableCell className="text-right font-mono text-xs">{snapshot.context_size}</TableCell>
                           <TableCell className="text-right">
@@ -247,7 +247,7 @@ export default function Context() {
                           <TableCell className="font-mono text-xs">
                             {trace.conversation_id ?? "-"}
                           </TableCell>
-                          <TableCell className="font-mono text-xs">{trace.provider_name}</TableCell>
+                          <TableCell className="font-mono text-xs">{trace.provider_snapshot}</TableCell>
                           <TableCell className="font-mono text-xs">{trace.model ?? "-"}</TableCell>
                           <TableCell className="text-right">
                             <Button

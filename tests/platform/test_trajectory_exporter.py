@@ -45,12 +45,12 @@ async def _seed_conversation(
         turn_repo = TraceRepo(session)
         turn = await turn_repo.create_turn(
             conversation_id=conv_id,
-            provider_name="mock",
+            provider_snapshot="mock",
             model="mock-1",
             agent_profile=None,
         )
         # provider call
-        pc = await turn_repo.record_provider_call(turn_id=turn.id, provider_name="mock", model="mock-1")
+        pc = await turn_repo.record_provider_call(turn_id=turn.id, provider_snapshot="mock", model="mock-1")
         await turn_repo.finalize_provider_call(
             pc.id,
             response_summary={"stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 5}},
@@ -187,7 +187,7 @@ async def test_export_with_secrets_default_scrubs(sm: async_sessionmaker[AsyncSe
             content=[{"type": "text", "text": "my key is sk-abcdef1234567890abcdef"}],
         )
         turn_repo = TraceRepo(session)
-        turn = await turn_repo.create_turn(conversation_id="cv-sec", provider_name="mock")
+        turn = await turn_repo.create_turn(conversation_id="cv-sec", provider_snapshot="mock")
         await repo.append_message("cv-sec", role="assistant", content=[{"type": "text", "text": "ok"}])
         await turn_repo.finalize_turn(turn.id, status=TurnStatus.COMPLETED)
     out = tmp_path / "sec.jsonl"
@@ -209,7 +209,7 @@ async def test_export_with_raw_scrubber_preserves_secrets(sm: async_sessionmaker
             content=[{"type": "text", "text": "raw=sk-abcdef1234567890abcdef"}],
         )
         turn_repo = TraceRepo(session)
-        turn = await turn_repo.create_turn(conversation_id="cv-raw", provider_name="mock")
+        turn = await turn_repo.create_turn(conversation_id="cv-raw", provider_snapshot="mock")
         await repo.append_message("cv-raw", role="assistant", content=[{"type": "text", "text": "ok"}])
         await turn_repo.finalize_turn(turn.id, status=TurnStatus.COMPLETED)
     out = tmp_path / "raw.jsonl"

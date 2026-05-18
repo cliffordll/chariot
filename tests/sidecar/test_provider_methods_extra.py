@@ -96,9 +96,11 @@ async def test_use_provider_switches_default(server: JsonRpcServer) -> None:
         "add_provider",
         {"name": "mock2", "type": "mock", "options": {}, "params": {}},
     )
-    assert line["result"]["provider"]["name"] == "mock2"
+    provider = line["result"]["provider"]
+    assert provider["name"] == "mock2"
+    slug = provider["slug"]
 
-    line = await _call(server, "use_provider", {"name": "mock2"})
+    line = await _call(server, "use_provider", {"name": slug})
     provider = line["result"]["provider"]
     assert provider["name"] == "mock2"
     assert provider["default"] is True

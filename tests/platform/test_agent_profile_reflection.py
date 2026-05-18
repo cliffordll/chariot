@@ -97,7 +97,7 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
 
 
 async def test_apply_profile_reflection_no_agent_profile_keeps_req(agent: AIAgent) -> None:
-    req = ChatRequest(provider_name="mock", messages=[Message(role="user", content="x")])
+    req = ChatRequest(provider_ref="mock", messages=[Message(role="user", content="x")])
     out = await agent._apply_profile_reflection(req)
     assert out.reflection_enabled is False  # no profile, no change
 
@@ -110,7 +110,7 @@ async def test_apply_profile_reflection_with_enabled_profile(agent: AIAgent) -> 
         reflection_max_retries=5,
     )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
         agent_profile="alpha",
     )
@@ -126,7 +126,7 @@ async def test_apply_profile_reflection_disabled_profile_no_op(agent: AIAgent) -
         reflection_enabled=False,
     )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
         agent_profile="beta",
     )
@@ -142,7 +142,7 @@ async def test_apply_profile_reflection_req_explicit_overrides_profile(agent: AI
         reflection_enabled=False,  # profile 关
     )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
         agent_profile="gamma",
         reflection_enabled=True,  # req 显式开

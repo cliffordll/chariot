@@ -36,7 +36,7 @@ class ChatOnce:
 
         Renderer.stream_newline()
         Renderer.meta_line(
-            provider=result.provider_name_snapshot,
+            provider=result.provider_snapshot,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,

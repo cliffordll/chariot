@@ -34,7 +34,7 @@ async def _run() -> None:
     async with installed_runtime() as agent:
         default = await ProviderService(agent).get_default()
         provider_entries = agent.provider_entries
-        provider_names = ", ".join(entry.slug for entry in provider_entries)
+        provider_slugs = ", ".join(entry.slug for entry in provider_entries)
         tool_names = ", ".join(sorted(agent.tools)) or "(无 enabled)"
         if default is None:
             default_line = "(未设;`chariot provider use <name>` 设一个)"
@@ -47,7 +47,7 @@ async def _run() -> None:
                 "version": __version__,
                 "db": str(DEFAULT_DB_PATH),
                 "default provider": default_line,
-                "providers": f"{len(provider_entries)} 个 ({provider_names})",
+                "providers": f"{len(provider_entries)} 个 ({provider_slugs})",
                 "tools": f"{len(agent.tools)} 个 ({tool_names})",
             }
         )

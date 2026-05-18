@@ -274,15 +274,16 @@ class TestProviderMethods:
         assert line["result"]["provider"]["slug"] == "mock-mock"
 
     async def test_update_provider(self, server: JsonRpcServer) -> None:
-        await _call(
+        added = await _call(
             server,
             "add_provider",
             {"name": "p1", "type": "mock", "options": {"x": 1}},
         )
+        slug = added["result"]["provider"]["slug"]
         line = await _call(
             server,
             "update_provider",
-            {"name": "p1", "options": {"x": 2}},
+            {"name": slug, "options": {"x": 2}},
         )
         assert line["result"]["provider"]["options"] == {"x": 2}
 
@@ -291,9 +292,10 @@ class TestProviderMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_delete_provider(self, server: JsonRpcServer) -> None:
-        await _call(server, "add_provider", {"name": "p1", "type": "mock", "options": {}})
-        line = await _call(server, "delete_provider", {"name": "p1"})
-        assert line["result"] == {"deleted": "p1"}
+        added = await _call(server, "add_provider", {"name": "p1", "type": "mock", "options": {}})
+        slug = added["result"]["provider"]["slug"]
+        line = await _call(server, "delete_provider", {"name": slug})
+        assert line["result"] == {"deleted": slug}
 
     async def test_delete_provider_not_found(self, server: JsonRpcServer) -> None:
         line = await _call(server, "delete_provider", {"name": "ghost"})
@@ -419,7 +421,7 @@ class TestRegistration:
 #
 # _____________?Chat _____________?CLI _?`--base-url` / `--api-key`:RPC params ___________________?
 # ___________________?___________________?_?ChatMethod _?AgentRegistry.reserve(session_key _?
-# (provider_name, sorted options) _?sha _________?_?per-call AIAgent_?
+# (provider_ref, sorted options) _?sha _________?_?per-call AIAgent_?
 # _?override _?____________?agent(fixture _________?bootstrap,_________?registry)_?
 #
 # ____________________?`AgentRegistry.size()` _________?default agent _________?registry _?________?size
@@ -431,7 +433,7 @@ class TestChatPerCallOverride:
     @staticmethod
     def _chat_params(**extra: str) -> dict[str, Any]:
         return {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             **extra,
         }

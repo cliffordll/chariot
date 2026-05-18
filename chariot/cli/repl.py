@@ -218,7 +218,7 @@ class ChatRepl:
         Renderer.stream_newline()
         self.ctx.append_assistant(result.text)
         Renderer.meta_line(
-            provider=result.provider_name_snapshot,
+            provider=result.provider_snapshot,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             latency_ms=result.latency_ms,
@@ -429,7 +429,7 @@ class ChatRepl:
 
     def _show_current_convo(self) -> None:
         """`/conversation` 无参数:打印当前会话快照(只读 ctx)。"""
-        provider_s = self.ctx.provider_name or "(none)"
+        provider_s = self.ctx.provider_ref or "(none)"
         if self.ctx.conversation_id is None:
             Renderer.out(f"conversation: off (stateless) · provider={provider_s}")
             return

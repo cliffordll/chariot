@@ -41,7 +41,7 @@ class ChatMethod(MethodBase):
                 await ctx.notify("chat_event", dataclasses.asdict(event))
         except Exception:
             await self._write_log(
-                provider=req.provider_name,
+                provider=req.provider_ref,
                 status="error",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -50,7 +50,7 @@ class ChatMethod(MethodBase):
             )
             raise
         await self._write_log(
-            provider=req.provider_name,
+            provider=req.provider_ref,
             status=status,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

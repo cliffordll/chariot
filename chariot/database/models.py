@@ -10,7 +10,7 @@
   Tool 层。messages.role 仅 `user / assistant`(Anthropic 协议原生两种),
   tool_use / tool_result 嵌入 content blocks 数组;tools 4 条 seeded fixture
 - v5(0.6.0):`models` rename → `providers`,`messages.model_name` rename →
-  `provider_name`,`logs.model` rename → `provider`(0.6.0 抽象层已是
+  `provider_snapshot`,`logs.model` rename → `provider`(0.6.0 抽象层已是
   BaseProvider,DB 层跟上;`ChatRequest.model` / options.model 仍叫 model
   对齐 Claude API)
 - v6(0.6.0):`providers` 加 `is_default` 列(历史默认 provider 方案)
@@ -145,7 +145,7 @@ class MessageRow(Base):
     - `content`:JSON,原样存 anthropic content(字符串或 blocks 数组);
       `SELECT * ORDER BY seq` 直接构成 Anthropic messages 数组,零翻译成本
     - `seq`:会话内单调 0 起;`(conversation_id, seq)` UNIQUE
-    - `provider_name`:仅 role='assistant' 行非空,记录本轮展示用 provider 名称快照;
+    - `provider_snapshot`:仅 role='assistant' 行非空,记录本轮展示用 provider 快照;
       不再承担稳定关系键语义(v6 起;v4~v5 时叫 `model_name`)
     - 不设 FK:cascade delete 由 `ConversationRepo.delete()` 手动 DELETE FROM messages
       WHERE conversation_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
@@ -158,7 +158,7 @@ class MessageRow(Base):
     seq: Mapped[int]
     role: Mapped[str]  # 'user' | 'assistant'
     content: Mapped[str]  # JSON-serialized;str 或 list[dict]
-    provider_name: Mapped[str | None] = mapped_column(default=None)
+    provider_snapshot: Mapped[str | None] = mapped_column("provider_snapshot", default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
@@ -311,7 +311,7 @@ class ProviderHealthRow(Base):
     __tablename__ = "provider_health"
 
     provider_id: Mapped[str] = mapped_column(primary_key=True)
-    provider_name_snapshot: Mapped[str]
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     last_ok: Mapped[int] = mapped_column(default=1)
     latency_ms: Mapped[int | None] = mapped_column(default=None)
     error_code: Mapped[str | None] = mapped_column(default=None)
@@ -351,7 +351,7 @@ class PromptVersionRow(Base):
 class PromptTraceRow(Base):
     """`prompt_traces` 表:记录每轮 prompt 解析结果与来源。
 
-    `provider_id` 是真实关系;`provider_name_snapshot` 保留当时展示名快照。
+    `provider_id` 是真实关系;`provider_snapshot` 保留当时展示名快照。
     """
 
     __tablename__ = "prompt_traces"
@@ -361,7 +361,7 @@ class PromptTraceRow(Base):
     version_id: Mapped[str] = mapped_column(index=True)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name_snapshot: Mapped[str] = mapped_column(index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     request: Mapped[str] = mapped_column(default="{}")  # JSON-serialized ChatRequest
     source_refs: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
@@ -372,7 +372,7 @@ class PromptTraceRow(Base):
 class ContextSnapshotRow(Base):
     """`context_snapshots` 表:记录一次上下文装配快照。
 
-    `provider_id` 是真实关系;`provider_name_snapshot` 保留展示名快照。
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
     """
 
     __tablename__ = "context_snapshots"
@@ -380,7 +380,7 @@ class ContextSnapshotRow(Base):
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name_snapshot: Mapped[str] = mapped_column(index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     request: Mapped[str] = mapped_column(default="{}")
     slices: Mapped[str] = mapped_column(default="[]")
@@ -392,7 +392,7 @@ class ContextSnapshotRow(Base):
 class ContextTraceRow(Base):
     """`context_traces` 表:记录上下文选择/压缩策略的执行痕迹。
 
-    `provider_id` 是真实关系;`provider_name_snapshot` 保留展示名快照。
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
     """
 
     __tablename__ = "context_traces"
@@ -401,7 +401,7 @@ class ContextTraceRow(Base):
     snapshot_id: Mapped[str] = mapped_column(index=True)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name_snapshot: Mapped[str] = mapped_column(index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     prompt_trace_id: Mapped[str | None] = mapped_column(default=None, index=True)
     policy: Mapped[str] = mapped_column(default="{}")
@@ -520,7 +520,7 @@ class ToolsetMemberRow(Base):
 class TraceTurnRow(Base):
     """`trace_turns` 表:记录一次 chat turn 的执行总览。
 
-    `provider_id` 是真实关系;`provider_name_snapshot` 保留展示名快照。
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
     """
 
     __tablename__ = "trace_turns"
@@ -531,7 +531,7 @@ class TraceTurnRow(Base):
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     task_run_id: Mapped[str | None] = mapped_column(default=None)
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name_snapshot: Mapped[str]
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     model: Mapped[str | None] = mapped_column(default=None)
     prompt_trace_id: Mapped[str | None] = mapped_column(default=None)
     context_trace_id: Mapped[str | None] = mapped_column(default=None)
@@ -555,7 +555,7 @@ class TraceTurnRow(Base):
 class TraceProviderCallRow(Base):
     """`trace_provider_calls` 表:记录单次 provider 调用。
 
-    `provider_id` 是真实关系;`provider_name_snapshot` 保留展示名快照。
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
     """
 
     __tablename__ = "trace_provider_calls"
@@ -564,7 +564,7 @@ class TraceProviderCallRow(Base):
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     turn_id: Mapped[str]
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name_snapshot: Mapped[str]
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     model: Mapped[str | None] = mapped_column(default=None)
     log_id: Mapped[str | None] = mapped_column(default=None)
     request_summary: Mapped[str] = mapped_column(default="{}")

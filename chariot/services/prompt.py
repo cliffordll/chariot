@@ -110,7 +110,7 @@ class PromptService:
         req: ChatRequest,
         *,
         provider_id: str | None = None,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None,
         bundle_name: str | None = None,
         version: str | None = None,
@@ -120,7 +120,7 @@ class PromptService:
         return await self._repo.record_trace(
             req,
             provider_id=provider_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             bundle_name=bundle_name,
             version=version,

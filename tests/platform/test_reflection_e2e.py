@@ -90,7 +90,7 @@ async def agent(tmp_path: Path):
 async def test_reflection_disabled_runs_single_turn(agent: AIAgent) -> None:
     """req.reflection_enabled=False → 单轮,即使产出含 FAILED 也不重试。"""
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="write sort")],
         reflection_enabled=False,
     )
@@ -118,7 +118,7 @@ async def test_reflection_enabled_triggers_retry_on_self_report_fail(agent: AIAg
     - trace_turns 两条;第二条 meta 含 reflection_iteration=1 + previous_verdict='FAIL'
     """
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="write sort")],
         reflection_enabled=True,
         reflection_max_retries=2,
@@ -156,7 +156,7 @@ async def test_reflection_enabled_no_critic_falls_back_to_single(tmp_path: Path)
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="x")],
             reflection_enabled=True,
             reflection_max_retries=2,
@@ -176,7 +176,7 @@ async def test_reflection_max_retries_zero_disables(tmp_path: Path) -> None:
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="x")],
             reflection_enabled=True,
             reflection_max_retries=0,

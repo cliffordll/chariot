@@ -1,7 +1,7 @@
 """AIAgent 单测。
 
 覆盖(对照 FEATURE.md S.6 验收清单):
-- 路由:`req.provider_name='not_exists'` → 单 event error(error_type='unknown_provider')
+- 路由:`req.provider_ref='not_exists'` → 单 event error(error_type='unknown_provider')
 - default tools 注入:`req.tools is None` + 装载 N 个 tool → AgentLoop 拿到 N 个 schema
 - default tools:`req.tools=[]` → 关闭工具调用(透传 [],不替换)
 - default tools:`req.tools=[<显式>]` → 透传(不替换)
@@ -21,6 +21,7 @@ import pytest
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
 from chariot.agent.run import AIAgent
+from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 from chariot.services.provider import ProviderService
 from chariot.tools.base import BaseTool
@@ -86,7 +87,7 @@ class TestRouting:
     async def test_unknown_provider_yields_error(self) -> None:
         agent = AIAgent(providers={"mock": _CapturingProvider("mock")}, tools={})
         req = ChatRequest(
-            provider_name="not_exists",
+            provider_ref="not_exists",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
@@ -94,18 +95,41 @@ class TestRouting:
         assert events[0].kind == "error"
         assert events[0].error_type == "unknown_provider"
 
-    async def test_routes_by_provider_name(self) -> None:
+    async def test_routes_by_provider_ref(self) -> None:
         p1 = _CapturingProvider("p1")
         p2 = _CapturingProvider("p2")
         agent = AIAgent(providers={"p1": p1, "p2": p2}, tools={})
         req = ChatRequest(
-            provider_name="p2",
+            provider_ref="p2",
             messages=[Message(role="user", content="hi")],
         )
         _ = [ev async for ev in agent.run_chat(req)]
         # 只有 p2 被调用
         assert p1.last_req is None
         assert p2.last_req is not None
+
+    async def test_does_not_route_by_provider_display_name(self) -> None:
+        provider = _CapturingProvider("p")
+        entry = ProviderEntry(
+            id="prov_123",
+            slug="provider-slug",
+            name="Human Readable",
+            type="mock",
+            options={},
+        )
+        agent = AIAgent(
+            providers={"prov_123": provider, "provider-slug": provider},
+            provider_entries={"prov_123": entry, "provider-slug": entry},
+            tools={},
+        )
+        req = ChatRequest(
+            provider_ref="Human Readable",
+            messages=[Message(role="user", content="hi")],
+        )
+        events = [ev async for ev in agent.run_chat(req)]
+        assert len(events) == 1
+        assert events[0].kind == "error"
+        assert events[0].error_type == "unknown_provider"
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +146,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1"), "t2": _StubTool("t2")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=None,
         )
@@ -138,7 +162,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
@@ -156,7 +180,7 @@ class TestDefaultToolsInjection:
             ToolSchema(name="custom", description="custom", input_schema={"type": "object"}),
         ]
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=list(explicit),  # 显式
         )
@@ -175,7 +199,7 @@ class TestRequestNormalization:
             tools={"t1": _StubTool("t1")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             system="system prompt",
             tools=[ToolSchema(name="custom", description="custom", input_schema={"type": "object"})],
@@ -209,7 +233,7 @@ class TestStatelessPath:
         agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=None)
 
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
@@ -233,7 +257,7 @@ class TestStatefulPath:
             sessionmaker=None,  # 没装载,会 yield error 但 acquire 之前先报错
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             conversation_id="01H_TEST",
         )
@@ -267,7 +291,8 @@ class TestBootstrapProviderOverrides:
         db_path = tmp_path / "chariot.db"
         agent = await AIAgent.bootstrap(db_path)
         await ProviderService(agent).create(
-            name="claude",
+            name="Claude Human",
+            slug="claude",
             type="anthropic",
             options={
                 "model": "claude-old",
@@ -310,6 +335,14 @@ class TestBootstrapProviderOverrides:
         agent = await AIAgent.bootstrap(
             _seed_anthropic_entry,
             provider_overrides={"ghost": {"model": "x"}},
+        )
+        assert agent.providers["claude"].config.model == "claude-old"
+
+    async def test_overrides_keyed_by_provider_display_name_ignored(self, _seed_anthropic_entry: Path) -> None:
+        """overrides keyed 到 provider 展示名 → 不再命中,必须改用 slug 或 id。"""
+        agent = await AIAgent.bootstrap(
+            _seed_anthropic_entry,
+            provider_overrides={"Claude Human": {"model": "claude-new"}},
         )
         assert agent.providers["claude"].config.model == "claude-old"
 

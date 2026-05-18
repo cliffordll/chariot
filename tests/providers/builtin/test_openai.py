@@ -49,7 +49,7 @@ def _make_provider(
 
 def _make_req() -> ChatRequest:
     return ChatRequest(
-        provider_name="openai",
+        provider_ref="openai",
         messages=[Message(role="user", content="hi")],
     )
 

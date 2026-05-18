@@ -2,7 +2,7 @@
  * Chat 页核心:历史消息 → 一次 chat RPC → typed StreamEvent 回流(0.6.5 S.10 起)。
  *
  * 跟 0.5.0 SSE 路径的差异:
- * - 不再调 `/v1/messages` HTTP,改 RPC `chat(provider_name, messages, ...)`
+ * - 不再调 `/v1/messages` HTTP,改 RPC `chat(provider_ref, messages, ...)`
  * - SSE 解析逻辑住 `streams.ts` 的 `runChatTurn`,这层只组 ChatRequest 调它
  */
 
@@ -14,7 +14,7 @@ export interface ChatTurnMsg {
 }
 
 export interface ChatTurnOpts {
-  /** Provider entry name(对齐 sidecar `chat.provider_name`);null = 未指定。 */
+  /** Provider 路由引用(对齐 sidecar `chat.provider_ref`);null = 未指定。 */
   provider: string | null;
   maxTokens: number;
   temperature?: number;
@@ -42,7 +42,7 @@ export class ChatError extends Error {
 
 export async function runTurn(messages: ChatTurnMsg[], opts: ChatTurnOpts): Promise<ChatTurnResult> {
   const req: ChatRequest = {
-    provider_name: opts.provider,
+    provider_ref: opts.provider,
     messages,
     max_tokens: opts.maxTokens,
   };

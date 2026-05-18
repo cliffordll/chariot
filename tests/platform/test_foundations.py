@@ -99,6 +99,22 @@ class TestMigrationV10:
         assert "prompt_id" in _columns(agent_profile_cols)
         assert "prompt_bundle" not in _columns(agent_profile_cols)
 
+    async def test_provider_snapshot_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        for table in (
+            "provider_health",
+            "prompt_traces",
+            "context_snapshots",
+            "context_traces",
+            "trace_turns",
+            "trace_provider_calls",
+        ):
+            cols = (await session.execute(text(f"PRAGMA table_info({table})"))).mappings().all()
+            assert "provider_snapshot" in _columns(cols)
+            assert all(not (name.startswith("provider_") and name.endswith("name_snapshot")) for name in _columns(cols))
+
     async def test_job_identity_columns_exist(self, session: AsyncSession) -> None:
         def _columns(rows: list[dict[str, object]]) -> set[str]:
             return {str(row["name"]) for row in rows}
@@ -207,6 +223,13 @@ class TestPlatformRepos:
         assert renamed.id == created.id
         assert renamed.name == "Qwen Renamed"
 
+    async def test_provider_repo_does_not_resolve_display_name_refs(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        created = await repo.create(name="Human Readable", type="mock", options={})
+        assert await repo.get_entry(created.slug) is not None
+        assert await repo.get_entry(created.id) is not None
+        assert await repo.get_entry("Human Readable") is None
+
     async def test_memory_repo_create_and_list(self, session: AsyncSession) -> None:
         repo = MemoryRepo(session)
         entry = await repo.create(kind="preference", text="默认用中文", meta={"scope": "user"})
@@ -271,17 +294,17 @@ class TestPlatformRepos:
 
         trace = await repo.record_trace(
             ChatRequest(
-                provider_name="mock",
+                provider_ref="mock",
                 messages=[Message(role="user", content="hi")],
                 system="system prompt",
             ),
-            provider_name="mock",
+            provider_snapshot="mock",
             model="mock-1",
         )
         assert len(trace.id) == 26
         fetched = await repo.get_trace(trace.id)
         assert fetched is not None
-        assert fetched.provider_name_snapshot == "mock"
+        assert fetched.provider_snapshot == "mock"
 
         active_bundle = await repo.get_active_bundle()
         assert active_bundle is not None

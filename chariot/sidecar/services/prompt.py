@@ -174,7 +174,7 @@ class PromptApi:
             "version": entry.version,
             "conversation_id": entry.conversation_id,
             "provider_id": entry.provider_id,
-            "provider_name_snapshot": entry.provider_name_snapshot,
+            "provider_snapshot": entry.provider_snapshot,
             "model": entry.model,
             "request": entry.request,
             "source_refs": entry.source_refs,

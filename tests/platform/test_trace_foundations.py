@@ -28,9 +28,9 @@ async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
 class TestTraceRepoTurnLifecycle:
     async def test_create_and_get(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock", conversation_id="conv-1")
+        turn = await repo.create_turn(provider_snapshot="mock", conversation_id="conv-1")
         assert turn.status == TurnStatus.RUNNING
-        assert turn.provider_name_snapshot == "mock"
+        assert turn.provider_snapshot == "mock"
         assert turn.conversation_id == "conv-1"
 
         loaded = await repo.get_turn(turn.id)
@@ -39,7 +39,7 @@ class TestTraceRepoTurnLifecycle:
 
     async def test_finalize_completed(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
+        turn = await repo.create_turn(provider_snapshot="mock")
         final = await repo.finalize_turn(
             turn.id,
             status=TurnStatus.COMPLETED,
@@ -57,7 +57,7 @@ class TestTraceRepoTurnLifecycle:
 
     async def test_finalize_failed(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
+        turn = await repo.create_turn(provider_snapshot="mock")
         final = await repo.finalize_turn(
             turn.id,
             status=TurnStatus.FAILED,
@@ -76,10 +76,10 @@ class TestTraceRepoTurnLifecycle:
 class TestTraceRepoChildEvents:
     async def test_record_provider_call(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
+        turn = await repo.create_turn(provider_snapshot="mock")
         call = await repo.record_provider_call(
             turn.id,
-            provider_name="mock",
+            provider_snapshot="mock",
             model="mock-1",
             request_summary={"message_count": 3, "tool_count": 2},
             response_summary={"stop_reason": "end_turn", "output_tokens": 30},
@@ -92,7 +92,7 @@ class TestTraceRepoChildEvents:
 
     async def test_record_tool_call_ok_and_error(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
+        turn = await repo.create_turn(provider_snapshot="mock")
         ok = await repo.record_tool_call(
             turn.id,
             tool_name="read_file",
@@ -117,7 +117,7 @@ class TestTraceRepoChildEvents:
 
     async def test_record_checkpoint(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
+        turn = await repo.create_turn(provider_snapshot="mock")
         cp = await repo.record_checkpoint(turn.id, kind=CheckpointKind.BEFORE_TOOL)
         assert cp.kind == CheckpointKind.BEFORE_TOOL
 
@@ -125,9 +125,9 @@ class TestTraceRepoChildEvents:
 class TestTraceRepoQuery:
     async def test_list_filters_and_order(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        t1 = await repo.create_turn(provider_name="mock", conversation_id="A")
-        t2 = await repo.create_turn(provider_name="mock", conversation_id="B")
-        t3 = await repo.create_turn(provider_name="alt", conversation_id="A")
+        t1 = await repo.create_turn(provider_snapshot="mock", conversation_id="A")
+        t2 = await repo.create_turn(provider_snapshot="mock", conversation_id="B")
+        t3 = await repo.create_turn(provider_snapshot="alt", conversation_id="A")
         await repo.finalize_turn(t2.id, status=TurnStatus.COMPLETED)
 
         # 全部:按 started_at desc(后插入的先返)
@@ -139,7 +139,7 @@ class TestTraceRepoQuery:
         assert {t.id for t in a_turns} == {t1.id, t3.id}
 
         # 按 provider
-        mock_turns = await repo.list_turns(provider_name="mock")
+        mock_turns = await repo.list_turns(provider_snapshot="mock")
         assert {t.id for t in mock_turns} == {t1.id, t2.id}
 
         # 按 status
@@ -148,8 +148,8 @@ class TestTraceRepoQuery:
 
     async def test_get_tree(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        turn = await repo.create_turn(provider_name="mock")
-        await repo.record_provider_call(turn.id, provider_name="mock", latency_ms=100)
+        turn = await repo.create_turn(provider_snapshot="mock")
+        await repo.record_provider_call(turn.id, provider_snapshot="mock", latency_ms=100)
         await repo.record_tool_call(turn.id, tool_name="read_file", status=ToolCallStatus.OK)
         await repo.record_tool_call(turn.id, tool_name="list_dir", status=ToolCallStatus.OK)
         await repo.record_checkpoint(turn.id, kind=CheckpointKind.BEFORE_APPLY)
@@ -168,7 +168,7 @@ class TestTraceRepoQuery:
 class TestTraceRepoReconcile:
     async def test_reconcile_old_running_turns(self, session: AsyncSession) -> None:
         repo = TraceRepo(session)
-        t = await repo.create_turn(provider_name="mock")
+        t = await repo.create_turn(provider_snapshot="mock")
         # 直接改 started_at 到很远的过去模拟 stale running
         from datetime import UTC, datetime, timedelta
 
@@ -190,8 +190,8 @@ class TestTraceRepoReconcile:
 class TestTraceService:
     async def test_service_wraps_repo(self, session: AsyncSession) -> None:
         service = TraceService(TraceRepo(session))
-        turn = await service.create_turn(provider_name="mock")
-        await service.record_provider_call(turn.id, provider_name="mock", latency_ms=200)
+        turn = await service.create_turn(provider_snapshot="mock")
+        await service.record_provider_call(turn.id, provider_snapshot="mock", latency_ms=200)
         await service.record_tool_call(turn.id, tool_name="read_file", status=ToolCallStatus.OK)
         await service.finalize_turn(
             turn.id,

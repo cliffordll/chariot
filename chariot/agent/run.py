@@ -1,7 +1,7 @@
 """AIAgent — 内核主入口。
 
 职责:
-1. 持有 `provider ref(id / slug / 兼容 legacy name) → BaseProvider` 实例字典
+1. 持有 `provider ref(id / slug) → BaseProvider` 实例字典
 2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
 3. `run_chat(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
 
@@ -192,7 +192,7 @@ class AIAgent:
         k8s 通用术语)。
 
         `provider_overrides`(0.6.5 起):per-session 注入到 entry.options 的 patch
-        dict,兼容按 provider id / slug / legacy name 指定。merge 进 entry.options
+        dict,按 provider id / slug 指定。merge 进 entry.options
         后传给 `ProviderRegistry.build`,Provider 内部从 merged options 算 ClientSpec
         命中或新建 client(共享 ClientCache)。CLI 一次性进程也走这条路径,只是
         session_key 固定 `"process"`。
@@ -231,11 +231,6 @@ class AIAgent:
         overrides = provider_overrides or {}
         providers: dict[str, BaseProvider] = {}
         provider_entries: dict[str, ProviderEntry] = {}
-        unique_names = {
-            entry.name
-            for entry in cfg.providers
-            if sum(1 for candidate in cfg.providers if candidate.name == entry.name) == 1
-        }
         for entry in cfg.providers:
             provider = ProviderRegistry.build(
                 entry.type,
@@ -243,15 +238,11 @@ class AIAgent:
                     **entry.options,
                     **overrides.get(entry.id, {}),
                     **overrides.get(entry.slug, {}),
-                    **overrides.get(entry.name, {}),
                 },
             )
             for ref in (entry.id, entry.slug):
                 providers[ref] = provider
                 provider_entries[ref] = entry
-            if entry.name in unique_names:
-                providers[entry.name] = provider
-                provider_entries[entry.name] = entry
         tools: dict[str, BaseTool] = {}
         for entry in tool_cfg.tools:
             try:
@@ -460,9 +451,9 @@ class AIAgent:
     async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
-        路由:按 `req.provider_name`(provider ref)找 Provider 实例;缺失 →
+        路由:按 `req.provider_ref`(provider ref)找 Provider 实例;缺失 →
         yield error event 退出。`req.agent_profile` 非空时先解析 binding:
-        - `profile.provider_id` 覆盖 `req.provider_name`
+        - `profile.provider_id` 覆盖 `req.provider_ref`
         - `profile.prompt_id` 由 `_prepare_request` 拣对应 bundle
         - `profile.toolset_id` 由 `_inject_default_tools` 做 toolset filter
         dangling reference 走 fallback 不阻断。
@@ -519,25 +510,25 @@ class AIAgent:
 
         req, provider_record, binding = await self._resolve_effective_provider(req)
 
-        if req.provider_name is None:
+        if req.provider_ref is None:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
                 error_message="provider 未指定:选择 agent 或显式指定 provider",
             )
             return
 
-        provider = self._providers.get(req.provider_name)
+        provider = self._providers.get(req.provider_ref)
         if provider is None or provider_record is None:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
-                error_message=(f"unknown provider {req.provider_name!r}; known: {sorted(self._providers.keys())}"),
+                error_message=(f"unknown provider {req.provider_ref!r}; known: {sorted(self._providers.keys())}"),
             )
             return
 
         # Phase B1:begin turn(provider 解析后,branch 之前);失败降级 no-op
         turn = await self._trace.begin_turn(
             provider_id=getattr(provider_record, "id", None),
-            provider_name=getattr(provider_record, "name", req.provider_name),
+            provider_snapshot=getattr(provider_record, "name", req.provider_ref),
             conversation_id=req.conversation_id,
             agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
             model=provider.config.model,
@@ -644,10 +635,10 @@ class AIAgent:
         binding = await self._resolve_binding(req)
         resolved_req = req
         if binding.agent_profile is not None and binding.agent_profile.provider_id is not None:
-            resolved_req = dataclasses.replace(req, provider_name=binding.agent_profile.provider_id)
+            resolved_req = dataclasses.replace(req, provider_ref=binding.agent_profile.provider_id)
         provider_record = None
-        if resolved_req.provider_name is not None:
-            provider_record = self._provider_record_for_ref(resolved_req.provider_name)
+        if resolved_req.provider_ref is not None:
+            provider_record = self._provider_record_for_ref(resolved_req.provider_ref)
         return resolved_req, provider_record, binding
 
     async def _run_stateless_chat(
@@ -658,7 +649,7 @@ class AIAgent:
         turn: TurnHandle | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
-        provider_record = self._provider_record_for_ref(req.provider_name or "")
+        provider_record = self._provider_record_for_ref(req.provider_ref or "")
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
                 memory_policy = MemoryPolicy()
@@ -764,7 +755,7 @@ class AIAgent:
 
         conversation_service = ConversationService(session)
         context_service = ContextService(session)
-        provider_record = self._provider_record_for_ref(req.provider_name or "")
+        provider_record = self._provider_record_for_ref(req.provider_ref or "")
         await conversation_service.ensure_exists(conversation_id)
         await self._persist_new_user_messages(conversation_service, conversation_id, req)
         history = await conversation_service.load_history_as_messages(conversation_id)
@@ -774,7 +765,7 @@ class AIAgent:
             ContextComposer.build_snapshot(
                 req,
                 provider_id=getattr(provider_record, "id", None),
-                provider_name=getattr(provider_record, "name", req.provider_name or "unknown"),
+                provider_snapshot=getattr(provider_record, "name", req.provider_ref or "unknown"),
                 model=provider.config.model,
                 history=[{"role": msg.role, "content": msg.content} for msg in history],
                 memory_entries=memory_entries,
@@ -810,7 +801,7 @@ class AIAgent:
             audit_hooks=self._audit_hooks,
             todo_store=self._todo_store_for(conversation_id),
             agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
-            provider_name=req.provider_name,
+            provider_snapshot=req.provider_ref,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -1049,7 +1040,7 @@ class AIAgent:
 
         return await MemoryService(session).list_relevant_entry_payloads(
             conversation_id=req.conversation_id,
-            provider_name=getattr(provider, "name", None),
+            provider_snapshot=getattr(provider, "name", None),
             limit=policy.max_items,
             policy=policy,
         )
@@ -1068,7 +1059,7 @@ class AIAgent:
         return await PromptService(session).record_trace(
             req,
             provider_id=getattr(provider_record, "id", None),
-            provider_name=getattr(provider_record, "name", provider.config.name),
+            provider_snapshot=getattr(provider_record, "name", provider.config.name),
             model=provider.config.model,
             memory_entries=memory_entries,
             memory_policy=memory_policy.describe() if memory_policy is not None else None,
@@ -1088,7 +1079,7 @@ class AIAgent:
 
         await MemoryService(session).capture_turn(
             req=req,
-            provider_name=str(getattr(provider_record, "name", req.provider_name or "unknown")),
+            provider_snapshot=str(getattr(provider_record, "name", req.provider_ref or "unknown")),
             policy=memory_policy,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
@@ -1110,7 +1101,7 @@ class AIAgent:
 
         await MemoryService(session).capture_error(
             conversation_id=req.conversation_id,
-            provider_name=str(getattr(provider_record, "name", req.provider_name or "unknown")),
+            provider_snapshot=str(getattr(provider_record, "name", req.provider_ref or "unknown")),
             error_event=error_event,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
