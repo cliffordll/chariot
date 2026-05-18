@@ -83,6 +83,33 @@ def test_agent_add_and_show() -> None:
     out = _plain(result.output)
     assert "planner" in out
     assert "max_steps" in out
+    assert "Mock (provider_mock)" in out
+    assert "default" in out
+
+
+def test_agent_list_shows_binding_labels() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "agent",
+            "add",
+            "--name",
+            "planner",
+            "--role",
+            "planner",
+            "--toolset-id",
+            "default",
+            "--provider-id",
+            "mock",
+        ],
+    )
+    assert result.exit_code == 0
+
+    result = runner.invoke(app, ["agent", "list"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "Mock (provider_mock)" in out
+    assert "default" in out
 
 
 def test_agent_update_and_remove() -> None:

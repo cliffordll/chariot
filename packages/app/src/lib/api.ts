@@ -365,8 +365,11 @@ export interface AgentProfile {
   name: string;
   role: string;
   prompt_id: string | null;
+  prompt_label: string | null;
   toolset_id: string | null;
+  toolset_label: string | null;
   provider_id: string | null;
+  provider_label: string | null;
   budget: Record<string, unknown>;
   meta: Record<string, unknown>;
   reflection_enabled: boolean;

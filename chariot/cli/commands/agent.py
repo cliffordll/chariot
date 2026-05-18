@@ -185,13 +185,13 @@ async def _agent_list() -> None:
             entry.id or "-",
             entry.name,
             entry.role,
-            entry.prompt_id or "-",
-            entry.toolset_id or "-",
-            entry.provider_id or "-",
+            entry.prompt_label or entry.prompt_id or "-",
+            entry.toolset_label or entry.toolset_id or "-",
+            entry.provider_label or entry.provider_id or "-",
         )
         for entry in entries
     ]
-    Renderer.table(["id", "name", "role", "prompt_id", "toolset_id", "provider_id"], rows, title="agents")
+    Renderer.table(["id", "name", "role", "prompt", "toolset", "provider"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -206,8 +206,11 @@ async def _agent_show(name: str) -> None:
             "name": entry.name,
             "role": entry.role,
             "prompt_id": entry.prompt_id or "-",
+            "prompt": entry.prompt_label or entry.prompt_id or "-",
             "toolset_id": entry.toolset_id or "-",
+            "toolset": entry.toolset_label or entry.toolset_id or "-",
             "provider_id": entry.provider_id or "-",
+            "provider": entry.provider_label or entry.provider_id or "-",
             "reflection_enabled": str(entry.reflection_enabled).lower(),
             "reflection_max_retries": str(entry.reflection_max_retries),
             "created_at": _fmt_dt(entry.created_at),

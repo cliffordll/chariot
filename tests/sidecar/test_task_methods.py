@@ -106,10 +106,13 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
     agent = line["result"]["agent"]
     assert agent["name"] == "planner"
     assert agent["provider_id"]
+    assert agent["provider_label"] is not None
+    assert agent["toolset_label"] is not None
     assert agent["budget"]["max_steps"] == 5
 
     detail = await _call(server, "get_agent", {"name": "planner"})
     assert detail["result"]["agent"]["role"] == "planner"
+    assert detail["result"]["agent"]["provider_label"] is not None
     detail_by_id = await _call(server, "get_agent", {"name": agent["id"]})
     assert detail_by_id["result"]["agent"]["name"] == "planner"
 
@@ -133,6 +136,7 @@ async def test_create_and_update_agent_accept_prompt_id(server: JsonRpcServer) -
     )
     agent = created["result"]["agent"]
     assert agent["prompt_id"] == bundle_id
+    assert agent["prompt_label"] is not None
     assert "prompt_bundle" not in agent
 
     updated = await _call(

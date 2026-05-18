@@ -62,6 +62,31 @@ type BindingOption = {
   label: string;
 };
 
+function bindingText(label: string | null, ref: string | null): string {
+  return label ?? ref ?? "-";
+}
+
+function BindingStack({ agent }: { agent: AgentProfile }) {
+  const rows = [
+    { label: "Prompt", text: bindingText(agent.prompt_label, agent.prompt_id), variant: "outline" as const },
+    { label: "Toolset", text: bindingText(agent.toolset_label, agent.toolset_id), variant: "secondary" as const },
+    { label: "Provider", text: bindingText(agent.provider_label, agent.provider_id), variant: "outline" as const },
+  ];
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      {rows.map((row) => (
+        <div key={row.label} className="flex min-w-0 items-center gap-2">
+          <span className="w-14 shrink-0 text-[11px] font-medium text-muted-foreground">{row.label}</span>
+          <Badge variant={row.variant} className="min-w-0 max-w-full truncate">
+            {row.text}
+          </Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Agents() {
   const [state, setState] = useState<AgentsState>({ kind: "loading" });
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
@@ -247,9 +272,7 @@ function AgentsListCard({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Prompt ID</TableHead>
-              <TableHead>Toolset ID</TableHead>
-              <TableHead>Provider profile</TableHead>
+              <TableHead>Bindings</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -262,9 +285,9 @@ function AgentsListCard({
               >
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
-                <TableCell>{agent.prompt_id ?? "-"}</TableCell>
-                <TableCell>{agent.toolset_id ?? "-"}</TableCell>
-                <TableCell>{agent.provider_id ?? "-"}</TableCell>
+                <TableCell className="max-w-[18rem] align-top">
+                  <BindingStack agent={agent} />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -295,9 +318,9 @@ function AgentDetailCard({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{agent.role}</Badge>
-              {agent.prompt_id && <Badge variant="outline">{agent.prompt_id}</Badge>}
-              {agent.toolset_id && <Badge variant="secondary">{agent.toolset_id}</Badge>}
-              {agent.provider_id && <Badge variant="outline">{agent.provider_id}</Badge>}
+              {agent.prompt_id && <Badge variant="outline">{bindingText(agent.prompt_label, agent.prompt_id)}</Badge>}
+              {agent.toolset_id && <Badge variant="secondary">{bindingText(agent.toolset_label, agent.toolset_id)}</Badge>}
+              {agent.provider_id && <Badge variant="outline">{bindingText(agent.provider_label, agent.provider_id)}</Badge>}
               {agent.reflection_enabled && (
                 <Badge variant="default">reflect ×{agent.reflection_max_retries}</Badge>
               )}

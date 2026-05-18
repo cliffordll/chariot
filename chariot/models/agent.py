@@ -45,8 +45,11 @@ class AgentProfile:
     name: str
     role: str
     prompt_id: str | None = None
+    prompt_label: str | None = None
     toolset_id: str | None = None
+    toolset_label: str | None = None
     provider_id: str | None = None
+    provider_label: str | None = None
     budget: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
     # B4 wave 3:reflection 控制(透传给 ChatRequest.reflection_* 字段)
@@ -68,6 +71,9 @@ class AgentProfile:
         provider_id: str | None = None,
         prompt_id: str | None = None,
         toolset_id: str | None = None,
+        prompt_label: str | None = None,
+        toolset_label: str | None = None,
+        provider_label: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         reflection_enabled: bool = False,
@@ -81,8 +87,11 @@ class AgentProfile:
             name=name,
             role=role,
             prompt_id=prompt_id,
+            prompt_label=prompt_label,
             toolset_id=toolset_id,
+            toolset_label=toolset_label,
             provider_id=provider_id,
+            provider_label=provider_label,
             budget=budget or {},
             meta=meta or {},
             reflection_enabled=reflection_enabled,
