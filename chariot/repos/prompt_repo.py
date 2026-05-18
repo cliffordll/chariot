@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.chat_request import ChatRequest
 from chariot.agent.config import ConfigError
-from chariot.database.models import AgentProfileRow, PromptBundleRow, PromptTraceRow, PromptVersionRow
+from chariot.database.models import PromptBundleRow, PromptTraceRow, PromptVersionRow
 from chariot.models.prompt import PromptBundleEntry, PromptTraceEntry, PromptVersionEntry
 from chariot.prompt.composer import PromptComposer
 
@@ -284,7 +284,6 @@ class PromptRepo:
         existing = await self._bundle_row_by_name(new_name)
         if existing is not None and existing.id != bundle.id:
             raise ConfigError(f"prompt bundle {new_name!r} already exists")
-        old_name = bundle.name
         bundle.name = new_name
         versions = (
             (await self.session.execute(select(PromptVersionRow).where(PromptVersionRow.bundle_id == bundle.id)))
@@ -295,9 +294,6 @@ class PromptRepo:
             spec = cast(dict[str, Any], json.loads(row.spec))
             spec["bundle"] = new_name
             row.spec = self._serialize_json("spec", spec)
-        await self.session.execute(
-            update(AgentProfileRow).where(AgentProfileRow.prompt_bundle == old_name).values(prompt_bundle=new_name)
-        )
         await self.session.commit()
         renamed = await self.get_bundle(new_name)
         if renamed is None:

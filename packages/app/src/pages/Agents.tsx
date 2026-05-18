@@ -57,6 +57,11 @@ type BindingOptions = {
   providers: Provider[];
 };
 
+type BindingOption = {
+  value: string;
+  label: string;
+};
+
 export default function Agents() {
   const [state, setState] = useState<AgentsState>({ kind: "loading" });
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
@@ -242,7 +247,7 @@ function AgentsListCard({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Prompt bundle</TableHead>
+              <TableHead>Prompt ID</TableHead>
               <TableHead>Tool profile</TableHead>
               <TableHead>Provider profile</TableHead>
             </TableRow>
@@ -257,7 +262,7 @@ function AgentsListCard({
               >
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
-                <TableCell>{agent.prompt_bundle ?? "-"}</TableCell>
+                <TableCell>{agent.prompt_id ?? "-"}</TableCell>
                 <TableCell>{agent.tool_profile ?? "-"}</TableCell>
                 <TableCell>{agent.provider_id ?? "-"}</TableCell>
               </TableRow>
@@ -290,7 +295,7 @@ function AgentDetailCard({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{agent.role}</Badge>
-              {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
+              {agent.prompt_id && <Badge variant="outline">{agent.prompt_id}</Badge>}
               {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
               {agent.provider_id && <Badge variant="outline">{agent.provider_id}</Badge>}
               {agent.reflection_enabled && (
@@ -325,7 +330,7 @@ function BindingSelect({
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ name: string }>;
+  options: BindingOption[];
   placeholder: string;
 }) {
   return (
@@ -339,8 +344,8 @@ function BindingSelect({
       <SelectContent>
         <SelectItem value={BINDING_NONE}>(none)</SelectItem>
         {options.map((opt) => (
-          <SelectItem key={opt.name} value={opt.name}>
-            {opt.name}
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
           </SelectItem>
         ))}
       </SelectContent>
@@ -359,7 +364,7 @@ function CreateAgentDialog({
 }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [promptBundle, setPromptBundle] = useState("");
+  const [promptId, setPromptId] = useState("");
   const [toolProfile, setToolProfile] = useState("");
   const [providerProfile, setProviderProfile] = useState("");
   const [budget, setBudget] = useState("{}");
@@ -385,7 +390,7 @@ function CreateAgentDialog({
       await api.createAgent({
         name,
         role,
-        prompt_bundle: promptBundle || null,
+        prompt_id: promptId || null,
         tool_profile: toolProfile || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
@@ -420,11 +425,11 @@ function CreateAgentDialog({
             </Field>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            <Field label="Prompt bundle">
-              <BindingSelect
-                value={promptBundle}
-                onChange={setPromptBundle}
-                options={options.bundles}
+            <Field label="Prompt ID">
+                <BindingSelect
+                value={promptId}
+                onChange={setPromptId}
+                options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -432,7 +437,7 @@ function CreateAgentDialog({
               <BindingSelect
                 value={toolProfile}
                 onChange={setToolProfile}
-                options={options.toolsets}
+                options={options.toolsets.map((toolset) => ({ value: toolset.name, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -440,7 +445,7 @@ function CreateAgentDialog({
               <BindingSelect
                 value={providerProfile}
                 onChange={setProviderProfile}
-                options={options.providers}
+                options={options.providers.map((provider) => ({ value: provider.id, label: provider.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -499,7 +504,7 @@ function EditAgentDialog({
 }) {
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
-  const [promptBundle, setPromptBundle] = useState(agent.prompt_bundle ?? "");
+  const [promptId, setPromptId] = useState(agent.prompt_id ?? "");
   const [toolProfile, setToolProfile] = useState(agent.tool_profile ?? "");
   const [providerProfile, setProviderProfile] = useState(agent.provider_id ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
@@ -525,7 +530,7 @@ function EditAgentDialog({
       await api.updateAgent(agent.name, {
         rename: name.trim() !== agent.name ? name.trim() : undefined,
         role,
-        prompt_bundle: promptBundle || null,
+        prompt_id: promptId || null,
         tool_profile: toolProfile || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
@@ -556,11 +561,11 @@ function EditAgentDialog({
             <Input value={role} onChange={(e) => setRole(e.target.value)} />
           </Field>
           <div className="grid gap-3 md:grid-cols-3">
-            <Field label="Prompt bundle">
+            <Field label="Prompt ID">
               <BindingSelect
-                value={promptBundle}
-                onChange={setPromptBundle}
-                options={options.bundles}
+                value={promptId}
+                onChange={setPromptId}
+                options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -568,7 +573,7 @@ function EditAgentDialog({
               <BindingSelect
                 value={toolProfile}
                 onChange={setToolProfile}
-                options={options.toolsets}
+                options={options.toolsets.map((toolset) => ({ value: toolset.name, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -576,7 +581,7 @@ function EditAgentDialog({
               <BindingSelect
                 value={providerProfile}
                 onChange={setProviderProfile}
-                options={options.providers}
+                options={options.providers.map((provider) => ({ value: provider.id, label: provider.name }))}
                 placeholder="(none)"
               />
             </Field>

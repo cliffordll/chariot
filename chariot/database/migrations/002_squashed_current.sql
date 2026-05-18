@@ -282,7 +282,7 @@ CREATE INDEX idx_provider_health_last_probe_at ON provider_health(last_probe_at)
 CREATE TABLE agent_profiles (
     name TEXT PRIMARY KEY,
     role TEXT NOT NULL,
-    prompt_bundle TEXT,
+    prompt_id TEXT,
     tool_profile TEXT,
     provider_id TEXT,
     budget TEXT NOT NULL DEFAULT '{}',
@@ -295,6 +295,7 @@ CREATE TABLE agent_profiles (
 );
 
 CREATE INDEX idx_agent_profiles_role ON agent_profiles(role);
+CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id);
 
 CREATE TABLE tasks (
     id TEXT PRIMARY KEY,

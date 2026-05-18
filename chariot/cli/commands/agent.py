@@ -55,7 +55,7 @@ def agent_show_cmd(
 def agent_add_cmd(
     name: Annotated[str, typer.Option("--name", help="agent profile name (stable id auto-generated)")] = "",
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
-    prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
+    prompt_id: Annotated[str, typer.Option("--prompt-id", help="prompt 绑定 id")] = "",
     tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
     provider_id: Annotated[
         str,
@@ -83,7 +83,7 @@ def agent_add_cmd(
         _agent_add(
             name=name,
             role=role,
-            prompt_bundle=prompt_bundle or None,
+            prompt_id=prompt_id or None,
             tool_profile=tool_profile or None,
             provider_id=provider_id or None,
             budget=budget,
@@ -99,10 +99,7 @@ def agent_update_cmd(
     name: Annotated[str, typer.Argument(help="agent profile name or id")],
     rename: Annotated[str | None, typer.Option("--rename", help="new agent profile name")] = None,
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
-    prompt_bundle: Annotated[
-        str | None,
-        typer.Option("--prompt-bundle", help="prompt bundle name(传空串 `--prompt-bundle ''` 表示清空)"),
-    ] = None,
+    prompt_id: Annotated[str | None, typer.Option("--prompt-id", help="prompt 绑定 id(传空串表示清空)")] = None,
     tool_profile: Annotated[
         str | None,
         typer.Option("--tool-profile", help="tool profile name(传空串清空)"),
@@ -145,7 +142,7 @@ def agent_update_cmd(
             name=name,
             rename=rename,
             role=role or None,
-            prompt_bundle=_to_clearable(prompt_bundle),
+            prompt_id=_to_clearable(prompt_id),
             tool_profile=_to_clearable(tool_profile),
             provider_id=_to_clearable(provider_id),
             budget=budget,
@@ -188,13 +185,13 @@ async def _agent_list() -> None:
             entry.id or "-",
             entry.name,
             entry.role,
-            entry.prompt_bundle or "-",
+            entry.prompt_id or "-",
             entry.tool_profile or "-",
             entry.provider_id or "-",
         )
         for entry in entries
     ]
-    Renderer.table(["id", "name", "role", "prompt_bundle", "tool_profile", "provider_id"], rows, title="agents")
+    Renderer.table(["id", "name", "role", "prompt_id", "tool_profile", "provider_id"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -208,7 +205,7 @@ async def _agent_show(name: str) -> None:
             "id": entry.id or "-",
             "name": entry.name,
             "role": entry.role,
-            "prompt_bundle": entry.prompt_bundle or "-",
+            "prompt_id": entry.prompt_id or "-",
             "tool_profile": entry.tool_profile or "-",
             "toolset_id": entry.toolset_id or "-",
             "provider_id": entry.provider_id or "-",
@@ -230,7 +227,7 @@ async def _agent_add(
     *,
     name: str,
     role: str,
-    prompt_bundle: str | None,
+    prompt_id: str | None,
     tool_profile: str | None,
     provider_id: str | None,
     budget: str,
@@ -247,7 +244,7 @@ async def _agent_add(
         entry = await AgentService(agent).create_agent(
             name=name.strip(),
             role=role.strip(),
-            prompt_bundle=prompt_bundle,
+            prompt_id=prompt_id,
             tool_profile=tool_profile,
             provider_id=provider_id,
             budget=parsed_budget,
@@ -263,7 +260,7 @@ async def _agent_update(
     name: str,
     rename: str | None,
     role: str | None,
-    prompt_bundle: ClearableStr,
+    prompt_id: ClearableStr,
     tool_profile: ClearableStr,
     provider_id: ClearableStr,
     budget: str,
@@ -275,7 +272,7 @@ async def _agent_update(
     parsed_meta = _parse_meta(meta) if meta.strip() else None
     has_non_rename_updates = (
         role is not None
-        or prompt_bundle is not UNSET
+        or prompt_id is not UNSET
         or tool_profile is not UNSET
         or provider_id is not UNSET
         or parsed_budget is not None
@@ -296,7 +293,7 @@ async def _agent_update(
                 entry = await service.update_agent(
                     name=name,
                     role=role,
-                    prompt_bundle=prompt_bundle,
+                    prompt_id=prompt_id,
                     tool_profile=tool_profile,
                     provider_id=provider_id,
                     budget=parsed_budget,

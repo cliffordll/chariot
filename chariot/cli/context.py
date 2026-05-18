@@ -91,7 +91,8 @@ class ChatContext:
     # 0.7.2+:CLI `--agent` flag 的承载;每轮 req 透传给 `ChatRequest.agent_profile`,
     # AIAgent 解析后:profile.provider_id
     # 覆盖 req.provider_name,
-    # profile.prompt_bundle 决定 prompt 注入,profile.tool_profile 做 toolset filter。
+    # profile.prompt_id 决定 prompt 注入,
+    # profile.tool_profile 做 toolset filter。
     # None = 不绑定 agent_profile(常态;走全局 active bundle + 全量 enabled tools)
     agent_profile: str | None = None
     # B4 wave 3:CLI `--reflect` flag 承载;透传给 ChatRequest.reflection_*。

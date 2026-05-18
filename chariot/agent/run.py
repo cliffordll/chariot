@@ -463,7 +463,7 @@ class AIAgent:
         路由:按 `req.provider_name`(provider ref)找 Provider 实例;缺失 →
         yield error event 退出。`req.agent_profile` 非空时先解析 binding:
         - `profile.provider_id` 覆盖 `req.provider_name`
-        - `profile.prompt_bundle` 由 `_prepare_request` 拣对应 bundle
+        - `profile.prompt_id` 由 `_prepare_request` 拣对应 bundle
         - `profile.tool_profile` 由 `_inject_default_tools` 做 toolset filter
         dangling reference 走 fallback 不阻断。
 
@@ -974,8 +974,8 @@ class AIAgent:
     ) -> ChatRequest:
         """Compose prompt bundle into `system`, then normalize request fields.
 
-        binding.agent_profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
-        active bundle);profile 缺失 / 字段空 → 走 active bundle 兜底。
+        binding.agent_profile.prompt_id 非空 → 按稳定 id 取指定 bundle;
+        dangling 时回退到 active bundle。
 
         B6 wave 2:normalize 之后跑 SkillActivator —— 在 `_inject_default_tools`
         已把 toolset filter 走完之后,skill.tool_filter 再过一次(取交集 - forbidden);
@@ -988,8 +988,8 @@ class AIAgent:
 
             async with self._sessionmaker() as session:
                 prompt_service = PromptService(session)
-                bundle_name = binding.agent_profile.prompt_bundle if binding.agent_profile is not None else None
-                bundle = await prompt_service.resolve_bundle(bundle_name=bundle_name)
+                bundle_ref = binding.agent_profile.prompt_id if binding.agent_profile is not None else None
+                bundle = await prompt_service.resolve_bundle(bundle_name=bundle_ref)
                 if bundle is not None:
                     existing_system = req.system if isinstance(req.system, str) else None
                     system = PromptComposer.render_layers_text(
@@ -1012,7 +1012,7 @@ class AIAgent:
         - 都 None → 不激活
 
         dangling reference / disabled skill / registry 未装 → 静默 skip(跟
-        prompt_bundle dangling 同款 fallback,不阻断 chat)。
+        prompt_id dangling 同款 fallback,不阻断 chat)。
         """
         if self._skill_registry is None:
             return req

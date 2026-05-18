@@ -364,7 +364,7 @@ export interface AgentProfile {
   id: string;
   name: string;
   role: string;
-  prompt_bundle: string | null;
+  prompt_id: string | null;
   tool_profile: string | null;
   provider_id: string | null;
   budget: Record<string, unknown>;
@@ -1015,7 +1015,7 @@ const apiCore = {
   createAgent(payload: {
     name: string;
     role: string;
-    prompt_bundle?: string | null;
+    prompt_id?: string | null;
     tool_profile?: string | null;
     provider_id?: string | null;
     budget?: Record<string, unknown>;
@@ -1031,7 +1031,7 @@ const apiCore = {
     payload: {
       rename?: string;
       role?: string | null;
-      prompt_bundle?: string | null;
+      prompt_id?: string | null;
       tool_profile?: string | null;
       provider_id?: string | null;
       budget?: Record<string, unknown>;

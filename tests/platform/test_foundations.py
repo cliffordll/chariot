@@ -90,6 +90,14 @@ class TestMigrationV10:
         assert "toolset_id" in _columns(member_cols)
         assert "toolset_id" in _columns(agent_profile_cols)
 
+    async def test_prompt_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        assert "prompt_id" in _columns(agent_profile_cols)
+        assert "prompt_bundle" not in _columns(agent_profile_cols)
+
     async def test_job_identity_columns_exist(self, session: AsyncSession) -> None:
         def _columns(rows: list[dict[str, object]]) -> set[str]:
             return {str(row["name"]) for row in rows}
@@ -281,15 +289,15 @@ class TestPlatformRepos:
     async def test_prompt_repo_rename_updates_agent_bindings(self, session: AsyncSession) -> None:
         prompt_repo = PromptRepo(session)
         task_repo = TaskRepo(session)
-        await prompt_repo.create_bundle("review")
-        await task_repo.create_agent_profile(name="reviewer", role="review", prompt_bundle="review")
+        created = await prompt_repo.create_bundle("review")
+        await task_repo.create_agent_profile(name="reviewer", role="review", prompt_id=created.bundle_id)
 
         renamed = await prompt_repo.rename_bundle("review", new_name="review-v2")
         assert renamed.name == "review-v2"
 
         agent = await task_repo.get_agent_profile("reviewer")
         assert agent is not None
-        assert agent.prompt_bundle == "review-v2"
+        assert agent.prompt_id == created.bundle_id
 
     async def test_task_repo_create_profile_task_run_and_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
@@ -422,28 +430,29 @@ class TestPlatformRepos:
         repo = TaskRepo(session)
         from chariot.repos.toolset_repo import ToolsetRepo
 
+        prompt = await PromptRepo(session).create_bundle("research")
         toolset = await ToolsetRepo(session).create(name="fs_safe")
         await repo.create_agent_profile(
             name="a1",
             role="r",
-            prompt_bundle="research",
+            prompt_id=prompt.bundle_id,
             tool_profile="fs_safe",
             provider_id="claude",
         )
         # 1) 未传 prompt/tool/provider → 都保留;只改 role
         u1 = await repo.update_agent_profile(name="a1", role="executor")
-        assert u1.prompt_bundle == "research"
+        assert u1.prompt_id == prompt.bundle_id
         assert u1.tool_profile == "fs_safe"
         assert u1.toolset_id == toolset.id
         assert u1.provider_id == "claude"
         # 2) 显式 None → 清空 provider,其它仍保留
         u2 = await repo.update_agent_profile(name="a1", provider_id=None)
         assert u2.provider_id is None
-        assert u2.prompt_bundle == "research"
+        assert u2.prompt_id == prompt.bundle_id
         assert u2.tool_profile == "fs_safe"
         # 3) 同时清两个
-        u3 = await repo.update_agent_profile(name="a1", prompt_bundle=None, tool_profile=None)
-        assert u3.prompt_bundle is None
+        u3 = await repo.update_agent_profile(name="a1", prompt_id=None, tool_profile=None)
+        assert u3.prompt_id is None
         assert u3.tool_profile is None
         assert u3.toolset_id is None
         # 4) 重新 set

@@ -1,4 +1,4 @@
-"""phase 4 binding tests:agent_profile -> provider_id / prompt_bundle / tool_profile。"""
+"""phase 4 binding tests:agent_profile -> provider_id / prompt_id / tool_profile。"""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ class TestAgentProfileBinding:
         assert secondary.last_req is not None
         assert primary.last_req is None
 
-    async def test_prompt_bundle_pinned_overrides_active(self, sessionmaker) -> None:
+    async def test_prompt_id_pinned_overrides_active(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools={})
         async with sessionmaker() as session:
@@ -134,10 +134,12 @@ class TestAgentProfileBinding:
                 "override",
                 layers=[{"name": "base_system", "source": "override", "content": "OVERRIDE MARKER"}],
             )
+            pinned = await repo.get_bundle("research")
+            assert pinned is not None
             await TaskRepo(session).create_agent_profile(
                 name="researcher",
                 role="research",
-                prompt_bundle="research",
+                prompt_id=pinned.id,
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="researcher"))]
         assert any(e.kind == "stream_done" for e in events)
@@ -148,7 +150,7 @@ class TestAgentProfileBinding:
         assert "RESEARCH MARKER" in system
         assert "OVERRIDE MARKER" not in system
 
-    async def test_prompt_bundle_dangling_falls_back_to_active(self, sessionmaker) -> None:
+    async def test_prompt_id_dangling_falls_back_to_active(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools={})
         async with sessionmaker() as session:
@@ -159,7 +161,7 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="bad_prompt",
                 role="x",
-                prompt_bundle="ghost_bundle",
+                prompt_id="ghost_bundle",
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="bad_prompt"))]
         assert any(e.kind == "stream_done" for e in events)

@@ -33,7 +33,7 @@ class AgentMethods(MethodBase):
         del ctx
         name = self._require_str(params, "name")
         role = self._require_str(params, "role")
-        prompt_bundle = self._optional_str(params, "prompt_bundle")
+        prompt_id = self._optional_str(params, "prompt_id")
         tool_profile = self._optional_str(params, "tool_profile")
         provider_id = self._provider_binding(params)
         budget = self._optional_dict(params, "budget")
@@ -44,7 +44,7 @@ class AgentMethods(MethodBase):
             agent = await self._api.create_agent(
                 name=name,
                 role=role,
-                prompt_bundle=prompt_bundle,
+                prompt_id=prompt_id,
                 tool_profile=tool_profile,
                 provider_id=provider_id,
                 budget=budget,
@@ -60,7 +60,7 @@ class AgentMethods(MethodBase):
         rename = self._optional_str(params, "rename")
         role = self._optional_str(params, "role")
         # 三个 binding 字段走 clearable 语义:key 缺席 → UNSET(skip);null → 清空;str → set
-        prompt_bundle = self._clearable_str(params, "prompt_bundle")
+        prompt_id = self._clearable_str(params, "prompt_id")
         tool_profile = self._clearable_str(params, "tool_profile")
         provider_id = self._clearable_provider_binding(params)
         budget = self._optional_dict(params, "budget")
@@ -72,7 +72,7 @@ class AgentMethods(MethodBase):
                 name=name,
                 rename=rename,
                 role=role,
-                prompt_bundle=prompt_bundle,
+                prompt_id=prompt_id,
                 tool_profile=tool_profile,
                 provider_id=provider_id,
                 budget=budget,

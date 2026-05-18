@@ -44,7 +44,7 @@ ClearableStr = str | None | _UnsetType
 class AgentProfile:
     name: str
     role: str
-    prompt_bundle: str | None = None
+    prompt_id: str | None = None
     tool_profile: str | None = None
     toolset_id: str | None = None
     provider_id: str | None = None
@@ -67,7 +67,7 @@ class AgentProfile:
         name: str,
         role: str,
         provider_id: str | None = None,
-        prompt_bundle: str | None = None,
+        prompt_id: str | None = None,
         tool_profile: str | None = None,
         toolset_id: str | None = None,
         budget: dict[str, Any] | None = None,
@@ -82,7 +82,7 @@ class AgentProfile:
         return cls(
             name=name,
             role=role,
-            prompt_bundle=prompt_bundle,
+            prompt_id=prompt_id,
             tool_profile=tool_profile,
             toolset_id=toolset_id,
             provider_id=provider_id,

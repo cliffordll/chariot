@@ -682,7 +682,7 @@ function EntryRow({
 
   const agent = agents.find((a) => a.name === selectedAgent);
   const providerName = agent?.provider_id ?? null;
-  const promptName = agent?.prompt_bundle ?? null;
+  const promptName = agent?.prompt_id ?? null;
   const toolsetName = agent?.tool_profile ?? null;
 
   return (

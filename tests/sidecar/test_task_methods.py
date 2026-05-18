@@ -115,6 +115,36 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_and_update_agent_accept_prompt_id(server: JsonRpcServer) -> None:
+    bundle = await _call(
+        server,
+        "add_prompt_bundle",
+        {
+            "name": "research",
+            "layers": [{"name": "base_system", "source": "test", "content": "RESEARCH"}],
+        },
+    )
+    bundle_id = bundle["result"]["bundle"]["id"]
+
+    created = await _call(
+        server,
+        "create_agent",
+        {"name": "researcher", "role": "planner", "prompt_id": bundle_id},
+    )
+    agent = created["result"]["agent"]
+    assert agent["prompt_id"] == bundle_id
+    assert "prompt_bundle" not in agent
+
+    updated = await _call(
+        server,
+        "update_agent",
+        {"name": "researcher", "prompt_id": None},
+    )
+    assert updated["result"]["agent"]["prompt_id"] is None
+    assert "prompt_bundle" not in updated["result"]["agent"]
+
+
+@pytest.mark.asyncio
 async def test_update_and_delete_agent(server: JsonRpcServer) -> None:
     await _call(server, "create_agent", {"name": "planner", "role": "planner"})
 
@@ -138,11 +168,19 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
     """RPC payload key 不在 → UNSET(skip);key=null → 清空;key=str → set。"""
     await _call(
         server,
+        "add_prompt_bundle",
+        {
+            "name": "research",
+            "layers": [{"name": "base_system", "source": "test", "content": "RESEARCH"}],
+        },
+    )
+    await _call(
+        server,
         "create_agent",
         {
             "name": "researcher",
             "role": "research",
-            "prompt_bundle": "research",
+            "prompt_id": "research",
             "tool_profile": "fs_safe",
             "provider_id": "claude",
         },
@@ -152,7 +190,7 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
     only_role = await _call(server, "update_agent", {"name": "researcher", "role": "planner"})
     assert only_role["result"]["agent"]["role"] == "planner"
     assert only_role["result"]["agent"]["provider_id"] == "claude"
-    assert only_role["result"]["agent"]["prompt_bundle"] == "research"
+    assert only_role["result"]["agent"]["prompt_id"] is not None
 
     # provider_id=null → 清空,其它保留
     cleared = await _call(
@@ -161,7 +199,7 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
         {"name": "researcher", "provider_id": None},
     )
     assert cleared["result"]["agent"]["provider_id"] is None
-    assert cleared["result"]["agent"]["prompt_bundle"] == "research"
+    assert cleared["result"]["agent"]["prompt_id"] is not None
     assert cleared["result"]["agent"]["tool_profile"] == "fs_safe"
 
     # 重新 set
