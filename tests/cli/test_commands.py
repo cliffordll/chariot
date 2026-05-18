@@ -165,6 +165,48 @@ def test_conversation_list_runs_with_tmp_db(tmp_path: Path, monkeypatch: pytest.
     assert result.exit_code == 0
 
 
+def test_provider_list_shows_id_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chariot.cli import _runtime
+
+    monkeypatch.setattr(_runtime, "DEFAULT_DB_PATH", tmp_path / "chariot.db")
+    add_result = runner.invoke(app, ["provider", "add", "--name", "Mock CLI", "--type", "mock"])
+    assert add_result.exit_code == 0
+
+    result = runner.invoke(app, ["provider", "list"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "id" in out
+    assert "Mock CLI" in out
+
+
+def test_prompt_list_shows_id_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chariot.cli import _runtime
+
+    monkeypatch.setattr(_runtime, "DEFAULT_DB_PATH", tmp_path / "chariot.db")
+    add_result = runner.invoke(app, ["prompt", "add", "review"])
+    assert add_result.exit_code == 0
+
+    result = runner.invoke(app, ["prompt", "list"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "id" in out
+    assert "review" in out
+
+
+def test_toolset_list_shows_id_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chariot.cli import _runtime
+
+    monkeypatch.setattr(_runtime, "DEFAULT_DB_PATH", tmp_path / "chariot.db")
+    add_result = runner.invoke(app, ["toolset", "add", "--name", "ops"])
+    assert add_result.exit_code == 0
+
+    result = runner.invoke(app, ["toolset", "list"])
+    assert result.exit_code == 0
+    out = _plain(result.output)
+    assert "id" in out
+    assert "ops" in out
+
+
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_root_help_accepts_short_and_long(flag: str) -> None:
     result = runner.invoke(app, [flag])

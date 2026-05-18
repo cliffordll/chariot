@@ -68,8 +68,8 @@ async def _list() -> None:
     if not entries:
         Renderer.out("(DB 里没有 provider — `chariot provider add` 加一条)")
     else:
-        rows = [(e.name, e.slug, e.type, "*" if e.id == default_id else "", _caps_short(e.type)) for e in entries]
-        Renderer.table(["name", "slug", "type", "default", "capabilities"], rows, title="providers")
+        rows = [(e.id, e.name, e.slug, e.type, "*" if e.id == default_id else "", _caps_short(e.type)) for e in entries]
+        Renderer.table(["id", "name", "slug", "type", "default", "capabilities"], rows, title="providers")
 
     types = sorted(ProviderRegistry.known_types())
     Renderer.out(f"已注册 type:{', '.join(types)}")
@@ -147,6 +147,7 @@ async def _status() -> None:
     if entries:
         table_rows = [
             (
+                entry.id,
                 entry.name,
                 entry.slug,
                 entry.type,
@@ -155,7 +156,7 @@ async def _status() -> None:
             )
             for entry in entries
         ]
-        Renderer.table(["name", "slug", "type", "default", "capabilities"], table_rows, title="providers")
+        Renderer.table(["id", "name", "slug", "type", "default", "capabilities"], table_rows, title="providers")
 
 
 def _redact(key: str, value: object) -> str:

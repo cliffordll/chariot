@@ -174,14 +174,14 @@ type DialogMode =
   | { kind: "edit"; source: ProviderEntry }
   | { kind: "duplicate"; source: ProviderEntry };
 
-type DeleteState = { open: false } | { open: true; name: string };
+type DeleteState = { open: false } | { open: true; ref: string; label: string };
 
 export default function Providers() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
   const [dialog, setDialog] = useState<DialogMode>({ kind: "closed" });
   const [del, setDel] = useState<DeleteState>({ open: false });
-  /** 哪些行处于展开状态(name set);点击行头切换。 */
+  /** 哪些行处于展开状态(id set);点击行头切换。 */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -200,22 +200,22 @@ export default function Providers() {
     }
   }, []);
 
-  const toggleExpand = useCallback((name: string) => {
+  const toggleExpand = useCallback((providerId: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
       return next;
     });
   }, []);
 
-  const runProbe = useCallback(async (name: string) => {
-    setProbeStates((s) => ({ ...s, [name]: { kind: "probing" } }));
+  const runProbe = useCallback(async (providerId: string) => {
+    setProbeStates((s) => ({ ...s, [providerId]: { kind: "probing" } }));
     try {
-      const r = await api.probeProvider(name);
+      const r = await api.probeProvider(providerId);
       setProbeStates((s) => ({
         ...s,
-        [name]: r.ok
+        [providerId]: r.ok
           ? { kind: "ok", latency: r.latency_ms }
           : {
               kind: "fail",
@@ -228,30 +228,30 @@ export default function Providers() {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setProbeStates((s) => ({
         ...s,
-        [name]: { kind: "fail", latency: 0, code: "request_failed", message: msg },
+        [providerId]: { kind: "fail", latency: 0, code: "request_failed", message: msg },
       }));
     }
   }, []);
 
   const findEntry = useCallback(
-    (name: string): ProviderEntry | undefined => {
+    (providerId: string): ProviderEntry | undefined => {
       if (providersState.kind !== "ok") return undefined;
-      return providersState.data.entries.find((e) => e.name === name);
+      return providersState.data.entries.find((e) => e.id === providerId);
     },
     [providersState],
   );
 
   const openEdit = useCallback(
-    (name: string) => {
-      const source = findEntry(name);
+    (providerId: string) => {
+      const source = findEntry(providerId);
       if (source) setDialog({ kind: "edit", source });
     },
     [findEntry],
   );
 
   const openDuplicate = useCallback(
-    (name: string) => {
-      const source = findEntry(name);
+    (providerId: string) => {
+      const source = findEntry(providerId);
       if (source) setDialog({ kind: "duplicate", source });
     },
     [findEntry],
@@ -283,8 +283,8 @@ export default function Providers() {
         onProbe={runProbe}
         onEdit={openEdit}
         onDuplicate={openDuplicate}
-        onUse={(name) => void api.useProvider(name).then(() => void load())}
-        onDelete={(name) => setDel({ open: true, name })}
+        onUse={(providerId) => void api.useProvider(providerId).then(() => void load())}
+        onDelete={(providerId, label) => setDel({ open: true, ref: providerId, label })}
         onParamsSaved={() => void load()}
       />
 
@@ -299,7 +299,8 @@ export default function Providers() {
 
       {del.open && (
         <DeleteDialog
-          name={del.name}
+          ref={del.ref}
+          label={del.label}
           onClose={() => setDel({ open: false })}
           onSuccess={() => {
             setDel({ open: false });
@@ -328,12 +329,12 @@ function ProvidersCard({
   providersState: ProvidersState;
   probeStates: Record<string, ProbeState>;
   expanded: Set<string>;
-  onToggleExpand: (name: string) => void;
-  onProbe: (name: string) => void;
-  onEdit: (name: string) => void;
-  onDuplicate: (name: string) => void;
-  onUse: (name: string) => void;
-  onDelete: (name: string) => void;
+  onToggleExpand: (providerId: string) => void;
+  onProbe: (providerId: string) => void;
+  onEdit: (providerId: string) => void;
+  onDuplicate: (providerId: string) => void;
+  onUse: (providerId: string) => void;
+  onDelete: (providerId: string, label: string) => void;
   onParamsSaved: () => void;
 }) {
   if (providersState.kind === "loading") {
@@ -370,16 +371,16 @@ function ProvidersCard({
           <ul className="mb-4 divide-y divide-border rounded-md border border-border">
             {data.entries.map((entry) => (
               <ProviderRow
-                key={entry.name}
+                key={entry.id}
                 entry={entry}
-                state={probeStates[entry.name] ?? { kind: "idle" }}
-                isExpanded={expanded.has(entry.name)}
-                onToggleExpand={() => onToggleExpand(entry.name)}
-                onProbe={() => onProbe(entry.name)}
-                onEdit={() => onEdit(entry.name)}
-                onDuplicate={() => onDuplicate(entry.name)}
-                onUse={() => onUse(entry.name)}
-                onDelete={() => onDelete(entry.name)}
+                state={probeStates[entry.id] ?? { kind: "idle" }}
+                isExpanded={expanded.has(entry.id)}
+                onToggleExpand={() => onToggleExpand(entry.id)}
+                onProbe={() => onProbe(entry.id)}
+                onEdit={() => onEdit(entry.id)}
+                onDuplicate={() => onDuplicate(entry.id)}
+                onUse={() => onUse(entry.id)}
+                onDelete={() => onDelete(entry.id, entry.name)}
                 onParamsSaved={onParamsSaved}
               />
             ))}
@@ -523,7 +524,7 @@ function ProviderStatusBanner({ status }: { status: ProviderStatusResponse }) {
       {status.providers.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {status.providers.map((p) => (
-            <Badge key={p.name} variant={p.default ? "default" : "secondary"} className="text-[10px]">
+            <Badge key={p.id} variant={p.default ? "default" : "secondary"} className="text-[10px]">
               {p.name}:{formatHealth(p.health)}
             </Badge>
           ))}
@@ -744,7 +745,7 @@ function ParamsEditor({
     }
     setSubmitting(true);
     try {
-      await api.updateProvider(entry.name, { params });
+      await api.updateProvider(entry.id, { params });
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -922,14 +923,14 @@ function AddEditDialog({
       if (mode.kind === "add") {
         await api.addProvider({ name: name.trim(), type, options: cleanOptions });
       } else if (mode.kind === "edit") {
-        await api.updateProvider(initial!.name, {
+        await api.updateProvider(initial!.id, {
           rename: name.trim() !== initial!.name ? name.trim() : undefined,
           type,
           options: cleanOptions,
         });
       } else {
         // duplicate: server 复制源 entry,as=new-name;type/options/params 都不在请求里
-        await api.duplicateProvider(initial!.name, name.trim());
+        await api.duplicateProvider(initial!.id, name.trim());
       }
       onSuccess();
       onClose();
@@ -1084,11 +1085,13 @@ function FieldRow({
 // ---------- DeleteDialog ----------
 
 function DeleteDialog({
-  name,
+  ref,
+  label,
   onClose,
   onSuccess,
 }: {
-  name: string;
+  ref: string;
+  label: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -1099,7 +1102,7 @@ function DeleteDialog({
     setErr(null);
     setSubmitting(true);
     try {
-      await api.deleteProvider(name);
+      await api.deleteProvider(ref);
       onSuccess();
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
@@ -1113,7 +1116,7 @@ function DeleteDialog({
     <AlertDialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除 {name}?</AlertDialogTitle>
+          <AlertDialogTitle>删除 {label}?</AlertDialogTitle>
           <AlertDialogDescription>
             此 entry 会从 DB 移除,不可撤销。Chat 页若上次选的就是它,刷新后会自动落回第一条。
           </AlertDialogDescription>

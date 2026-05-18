@@ -66,6 +66,7 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         return
     rows = [
         (
+            entry.id,
             entry.name,
             "yes" if entry.is_active else "no",
             str(entry.version_count),
@@ -74,7 +75,7 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
+    Renderer.table(["id", "bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
 
 
 def _render_layers_table(layers: list[dict[str, Any]]) -> None:

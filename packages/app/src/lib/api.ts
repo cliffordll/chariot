@@ -786,8 +786,8 @@ const apiCore = {
     return rpc("list_providers");
   },
 
-  showProvider(name: string): Promise<{ provider: Provider }> {
-    return rpc("show_provider", { name });
+  showProvider(ref: string): Promise<{ provider: Provider }> {
+    return rpc("show_provider", { name: ref });
   },
 
   addProvider(req: {
@@ -800,7 +800,7 @@ const apiCore = {
   },
 
   updateProvider(
-    name: string,
+    ref: string,
     req: {
       rename?: string;
       type?: string;
@@ -808,22 +808,22 @@ const apiCore = {
       params?: Record<string, unknown>;
     },
   ): Promise<{ provider: Provider }> {
-    return rpc("update_provider", { name, ...req });
+    return rpc("update_provider", { name: ref, ...req });
   },
 
-  deleteProvider(name: string): Promise<{ deleted: string }> {
-    return rpc("delete_provider", { name });
+  deleteProvider(ref: string): Promise<{ deleted: string }> {
+    return rpc("delete_provider", { name: ref });
   },
 
-  useProvider(name: string): Promise<{ provider: Provider }> {
-    return rpc("use_provider", { name });
+  useProvider(ref: string): Promise<{ provider: Provider }> {
+    return rpc("use_provider", { name: ref });
   },
 
-  async duplicateProvider(name: string, as_?: string): Promise<{ provider: Provider }> {
+  async duplicateProvider(ref: string, as_?: string): Promise<{ provider: Provider }> {
     const { providers } = await apiCore.listProviders();
-    const src = providers.find((p) => p.name === name);
-    if (!src) throw new RpcError(-32001, `provider ${name} not found`);
-    const newName = (as_ ?? `${name}_copy`).trim();
+    const src = providers.find((p) => p.id === ref);
+    if (!src) throw new RpcError(-32001, `provider ${ref} not found`);
+    const newName = (as_ ?? `${src.name}_copy`).trim();
     const { provider } = await apiCore.addProvider({
       name: newName,
       type: src.type,
@@ -833,8 +833,8 @@ const apiCore = {
     return { provider };
   },
 
-  probeProvider(name: string): Promise<ProbeResult> {
-    return rpc("probe_provider", { name });
+  probeProvider(ref: string): Promise<ProbeResult> {
+    return rpc("probe_provider", { name: ref });
   },
 
   getProviderStatus(): Promise<ProviderStatusResponse> {
