@@ -18,11 +18,12 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from prompt_toolkit.document import Document
 
 from chariot.agent.run import AIAgent
 from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
-from chariot.cli.repl import ChatRepl
+from chariot.cli.repl import ChatRepl, _ChatReplCompleter
 from chariot.database.session import dispose_db
 from chariot.services.agent import AgentService
 from chariot.services.conversation import ConversationService
@@ -81,6 +82,60 @@ def _capture_renderer_output(
 
 
 _Capt = list[tuple[str, str]]
+
+
+def test_repl_completer_completes_slash_commands(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+    completions = list(completer.get_completions(Document(text="/ag", cursor_position=3), object()))
+    assert [c.text for c in completions] == ["/agent", "/agents"]
+
+
+def test_repl_completer_completes_reference_prefixes(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+    completions = list(completer.get_completions(Document(text="@u", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@url:"]
+
+    completions = list(completer.get_completions(Document(text="@d", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@diff"]
+
+    completions = list(completer.get_completions(Document(text="@s", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@session:"]
+
+
+def test_repl_completer_completes_agent_skill_and_session_values(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(
+        slash_commands=ChatRepl._SLASH_COMMANDS,
+        cwd=tmp_path,
+        agent_ids_getter=lambda: ("01AGENTAAAAAAAAAAAAAAAAAA",),
+        skill_names_getter=lambda: ("reviewer",),
+        conversation_ids_getter=lambda: ("01CONVAAAAAAAAAAAAAAAAAAA",),
+    )
+
+    completions = list(completer.get_completions(Document(text="/agent 01A", cursor_position=10), object()))
+    assert [c.text for c in completions] == ["01AGENTAAAAAAAAAAAAAAAAAA"]
+
+    completions = list(completer.get_completions(Document(text="/skill rev", cursor_position=10), object()))
+    assert [c.text for c in completions] == ["reviewer"]
+
+    completions = list(completer.get_completions(Document(text="@session:01C", cursor_position=12), object()))
+    assert [c.text for c in completions] == ["@session:01CONVAAAAAAAAAAAAAAAAAAA"]
+
+
+def test_repl_completer_completes_file_reference_paths(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("guide", encoding="utf-8")
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+
+    completions = list(completer.get_completions(Document(text="@file:R", cursor_position=7), object()))
+    assert [c.text for c in completions] == ["@file:README.md"]
+
+    completions = list(completer.get_completions(Document(text="@file:d", cursor_position=7), object()))
+    assert [c.text for c in completions] == ["@file:docs/"]
+
+    completions = list(completer.get_completions(Document(text="@file:docs/g", cursor_position=12), object()))
+    assert [c.text for c in completions] == ["@file:docs/guide.md"]
 
 
 # ==========================================================
@@ -145,7 +200,8 @@ async def test_slash_agents_lists_entries_with_current_marker(agent: AIAgent, _c
     assert len(tables) == 1
     title, body = tables[0][1].split("::", 1)
     assert title == "agent profiles"
-    assert f"dev-helper ({entry.id})" in body
+    assert entry.id in body
+    assert "dev-helper" in body
     assert "← current" in body
     assert body.count("← current") == 1
 

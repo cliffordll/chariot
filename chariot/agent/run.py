@@ -800,7 +800,7 @@ class AIAgent:
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
             todo_store=self._todo_store_for(conversation_id),
-            agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
+            agent_profile=binding.agent_profile.id if binding.agent_profile is not None else None,
             provider_snapshot=req.provider_ref,
         )
         last_event_kind = None

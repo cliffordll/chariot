@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,6 +20,7 @@ import {
   type Message,
   type ProviderEntry,
   type ProvidersListResponse,
+  type ReferenceSuggestion,
 } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 import type { StreamEvent } from "@/lib/streams";
@@ -86,6 +86,7 @@ function lsSet(key: string, value: string | null): void {
 interface PendingTurn {
   /** 用户这轮发的文本(已显示在右侧但还没落 DB)。 */
   userText: string;
+  conversationId: string;
   /**
    * 0.5.0:渐进 append 的 anthropic content blocks。
    * - text 增量累积进末尾 text block(没有就推一个新的)
@@ -100,6 +101,11 @@ interface PendingTurn {
   meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
 }
 
+interface SharedChatUiState {
+  pending: PendingTurn | null;
+  inFlight: boolean;
+}
+
 type ConvPaneState =
   | { kind: "draft" }
   | { kind: "loading"; id: string }
@@ -110,6 +116,52 @@ type ProvidersState =
   | { kind: "loading" }
   | { kind: "ok"; data: ProvidersListResponse }
   | { kind: "err"; message: string };
+
+interface ReferencePickerState {
+  query: string;
+  items: ReferenceSuggestion[];
+  index: number;
+}
+
+function extractReferenceQuery(text: string): string | null {
+  const token = text.match(/(?:^|\s)(@\S*)$/)?.[1] ?? null;
+  return token && token.startsWith("@") ? token : null;
+}
+
+function replaceReferenceQuery(text: string, next: string): string {
+  return text.replace(/(?:^|\s)(@\S*)$/, (full, token: string) => full.slice(0, full.length - token.length) + next);
+}
+
+let _sharedChatUiState: SharedChatUiState = {
+  pending: null,
+  inFlight: false,
+};
+let _sharedAbortController: AbortController | null = null;
+const _sharedChatUiListeners = new Set<(state: SharedChatUiState) => void>();
+
+function emitSharedChatUiState(): void {
+  for (const listener of _sharedChatUiListeners) {
+    listener(_sharedChatUiState);
+  }
+}
+
+function setSharedPending(pending: PendingTurn | null): void {
+  _sharedChatUiState = { ..._sharedChatUiState, pending };
+  emitSharedChatUiState();
+}
+
+function setSharedInFlight(inFlight: boolean): void {
+  _sharedChatUiState = { ..._sharedChatUiState, inFlight };
+  emitSharedChatUiState();
+}
+
+function subscribeSharedChatUiState(listener: (state: SharedChatUiState) => void): () => void {
+  _sharedChatUiListeners.add(listener);
+  listener(_sharedChatUiState);
+  return () => {
+    _sharedChatUiListeners.delete(listener);
+  };
+}
 
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
@@ -126,20 +178,30 @@ export default function Chat() {
   const [convsErr, setConvsErr] = useState<string | null>(null);
 
   const [pane, setPane] = useState<ConvPaneState>(() => {
+    const pendingConversationId = _sharedChatUiState.pending?.conversationId;
+    if (pendingConversationId && pendingConversationId !== "(draft)") {
+      return { kind: "loading", id: pendingConversationId };
+    }
     const id = lsGet(CONV_STORAGE_KEY);
     return id ? { kind: "loading", id } : { kind: "draft" };
   });
-  const [pending, setPending] = useState<PendingTurn | null>(null);
+  const [pending, setPendingState] = useState<PendingTurn | null>(() => _sharedChatUiState.pending);
 
   const [input, setInput] = useState("");
-  const [inFlight, setInFlight] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
+  const [inFlight, setInFlightState] = useState<boolean>(() => _sharedChatUiState.inFlight);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const setSelectedAgent = useCallback((name: string | null) => {
-    setSelectedAgentState(name);
-    lsSet(AGENT_STORAGE_KEY, name);
+  const setSelectedAgent = useCallback((agentId: string | null) => {
+    setSelectedAgentState(agentId);
+    lsSet(AGENT_STORAGE_KEY, agentId);
   }, []);
+
+  useEffect(() => subscribeSharedChatUiState((state) => {
+    setPendingState(state.pending);
+    setInFlightState(state.inFlight);
+  }), []);
 
   const setActivePane = useCallback((next: ConvPaneState) => {
     setPane(next);
@@ -211,7 +273,7 @@ export default function Chat() {
   useEffect(() => {
     if (selectedAgent === null) return;
     if (agents.length === 0) return;
-    if (!agents.some((a) => a.name === selectedAgent)) {
+    if (!agents.some((a) => a.id === selectedAgent)) {
       setSelectedAgent(null);
     }
   }, [agents, selectedAgent, setSelectedAgent]);
@@ -223,6 +285,16 @@ export default function Chat() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const pendingConversationId = _sharedChatUiState.pending?.conversationId;
+    if (!pendingConversationId || pendingConversationId === "(draft)") return;
+    if (pane.kind === "loading" || pane.kind === "loaded" || pane.kind === "err") {
+      if (pane.id === pendingConversationId) return;
+    }
+    setActivePane({ kind: "loading", id: pendingConversationId });
+    void loadConvDetail(pendingConversationId);
+  }, [pane, loadConvDetail, setActivePane, pending]);
 
   // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
   // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
@@ -284,9 +356,44 @@ export default function Chat() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [pane, selectedAgent, setSelectedAgent]);
 
+  useEffect(() => {
+    const query = extractReferenceQuery(input);
+    if (!query) {
+      setReferencePicker(null);
+      return;
+    }
+    if (query.startsWith("@session:")) {
+      const items = convs
+        .slice(0, 8)
+        .map((c) => ({
+          value: `@session:${c.id}`,
+          label: `${c.title?.trim() || "(untitled)"} · ${c.id}`,
+          kind: "session",
+        }))
+        .filter((item) => item.value.startsWith(query));
+      setReferencePicker(items.length ? { query, items, index: 0 } : null);
+      return;
+    }
+    if (query.startsWith("@file:") || ["@file:", "@url:", "@diff", "@session:"].some((prefix) => prefix.startsWith(query))) {
+      let cancelled = false;
+      void api.completeReference(query).then(({ items }) => {
+        if (!cancelled) {
+          setReferencePicker(items.length ? { query, items, index: 0 } : null);
+        }
+      }).catch(() => {
+        if (!cancelled) setReferencePicker(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setReferencePicker(null);
+  }, [input, convs]);
+
   const startNewChat = useCallback(async () => {
-    abortRef.current?.abort();
-    setPending(null);
+    _sharedAbortController?.abort();
+    setSharedPending(null);
+    setSharedInFlight(false);
     setSelectedAgent(null);
     try {
       const conv = await api.createConversation({});
@@ -309,8 +416,9 @@ export default function Chat() {
       if (pane.kind !== "draft" && pane.kind !== "loading" && pane.kind !== "err") {
         if (pane.id === id) return;
       }
-      abortRef.current?.abort();
-      setPending(null);
+      _sharedAbortController?.abort();
+      setSharedPending(null);
+      setSharedInFlight(false);
       void loadConvDetail(id);
     },
     [pane, loadConvDetail],
@@ -331,7 +439,7 @@ export default function Chat() {
         (pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err") &&
         pane.id === id
       ) {
-        setPending(null);
+        setSharedPending(null);
         setActivePane({ kind: "draft" });
       }
       void loadConvs();
@@ -381,7 +489,7 @@ export default function Chat() {
     if (pane.kind !== "draft" && pane.kind !== "loaded") return;
 
     setInput("");
-    setInFlight(true);
+    setSharedInFlight(true);
 
     // 0. 若 draft → 先创建 conversation
     let convId: string;
@@ -398,14 +506,15 @@ export default function Chat() {
         });
       } catch (e) {
         const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        setPending({
+        setSharedPending({
           userText: text,
+          conversationId: "(draft)",
           blocks: [],
           status: "error",
           errorMsg: `创建会话失败: ${msg}`,
           meta: null,
         });
-        setInFlight(false);
+        setSharedInFlight(false);
         return;
       }
     } else {
@@ -413,8 +522,9 @@ export default function Chat() {
     }
 
     // 1. 显示 pending 行(blocks 起步空,onEvent 渐进 append)
-    setPending({
+    setSharedPending({
       userText: text,
+      conversationId: convId,
       blocks: [],
       status: "streaming",
       errorMsg: null,
@@ -422,11 +532,11 @@ export default function Chat() {
     });
 
     // 2. 取 sampling:从 agent 绑定的 provider_id 找 entry
-    const agentObj = agents.find((a) => a.name === selectedAgent);
-    const entryName = agentObj?.provider_id ?? null;
+    const agentObj = agents.find((a) => a.id === selectedAgent);
+    const entryId = agentObj?.provider_id ?? null;
     const entry =
       providersState.kind === "ok"
-        ? providersState.data.entries.find((e) => e.name === entryName)
+        ? providersState.data.entries.find((e) => e.id === entryId)
         : undefined;
     const sampling = samplingFromEntry(entry);
 
@@ -434,7 +544,7 @@ export default function Chat() {
     const newMessages: ChatTurnMsg[] = [{ role: "user", content: text }];
 
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    _sharedAbortController = ctrl;
 
     try {
       const result = await runTurn(newMessages, {
@@ -446,56 +556,88 @@ export default function Chat() {
         agentProfile: selectedAgent,
         signal: ctrl.signal,
         onEvent: (ev) => {
-          setPending((cur) => (cur ? { ...cur, blocks: applyEvent(cur.blocks, ev) } : cur));
+          setSharedPending(
+            _sharedChatUiState.pending
+              ? { ..._sharedChatUiState.pending, blocks: applyEvent(_sharedChatUiState.pending.blocks, ev) }
+              : null,
+          );
         },
       });
 
-      setPending((cur) =>
-        cur
+      setSharedPending(
+        _sharedChatUiState.pending
           ? {
-              ...cur,
+              ..._sharedChatUiState.pending,
               status: result.aborted ? "aborted" : "done",
               meta: {
                 inputTokens: result.inputTokens,
                 outputTokens: result.outputTokens,
                 latencyMs: result.latencyMs,
-                model: entryName ?? "?",
+                model: entryId ?? "?",
               },
             }
-          : cur,
+          : null,
       );
-
-      // 4. 成功 → 重拉 canonical messages(含 tool_use/tool_result blocks)
-      if (!result.aborted) {
-        await loadConvDetail(convId);
-        void loadConvs();
-        setPending(null);
-      }
     } catch (e) {
       const msg = e instanceof ChatError ? e.message : extractErr(e);
-      setPending((cur) =>
-        cur ? { ...cur, status: "error", errorMsg: msg } : cur,
+      setSharedPending(
+        _sharedChatUiState.pending
+          ? { ..._sharedChatUiState.pending, status: "error", errorMsg: msg }
+          : null,
       );
     } finally {
-      setInFlight(false);
-      abortRef.current = null;
+      setSharedInFlight(false);
+      _sharedAbortController = null;
     }
   }, [input, inFlight, selectedAgent, agents, pane, providersState, setActivePane, loadConvDetail, loadConvs]);
 
   const handleStop = useCallback(() => {
-    abortRef.current?.abort();
+    _sharedAbortController?.abort();
   }, []);
 
   const handleRetry = useCallback(() => {
     if (inFlight || !pending) return;
     if (pending.status !== "error" && pending.status !== "aborted") return;
     const text = pending.userText;
-    setPending(null);
+    setSharedPending(null);
     setInput(text);
   }, [inFlight, pending]);
 
+  useEffect(() => {
+    if (!pending || pending.status !== "done") return;
+    if (pane.kind !== "loaded") return;
+    if (pending.conversationId !== pane.id) return;
+    void (async () => {
+      await loadConvDetail(pane.id);
+      await loadConvs();
+      if (
+        _sharedChatUiState.pending?.conversationId === pane.id &&
+        _sharedChatUiState.pending?.status === "done"
+      ) {
+        setSharedPending(null);
+      }
+    })();
+  }, [pending, pane, loadConvDetail, loadConvs]);
+
+  const applyReferenceSuggestion = useCallback((item: ReferenceSuggestion) => {
+    setInput((cur) => `${replaceReferenceQuery(cur, item.value)} `);
+    setReferencePicker(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const len = textareaRef.current?.value.length ?? 0;
+      textareaRef.current?.setSelectionRange(len, len);
+    });
+  }, []);
+
   const activeId =
     pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err" ? pane.id : null;
+  const visiblePending =
+    pending &&
+    (((pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err") &&
+      pending.conversationId === pane.id) ||
+      (pane.kind === "draft" && pending.conversationId === "(draft)"))
+      ? pending
+      : null;
 
   return (
     <section className="flex h-full gap-3">
@@ -613,12 +755,13 @@ export default function Chat() {
           ref={scrollRef}
           className="mb-3 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/20 p-4"
         >
-          <MessagesView pane={pane} pending={pending} onRetry={handleRetry} />
+          <MessagesView pane={pane} pending={visiblePending} onRetry={handleRetry} />
         </div>
 
         <div className="flex gap-2">
-          <div className="flex-1">
+          <div className="relative flex-1">
             <Textarea
+              ref={textareaRef}
               value={input}
               placeholder={
                 selectedAgent === null
@@ -627,6 +770,32 @@ export default function Chat() {
               }
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
+                if (referencePicker && referencePicker.items.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setReferencePicker((cur) =>
+                      cur ? { ...cur, index: (cur.index + 1) % cur.items.length } : cur,
+                    );
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setReferencePicker((cur) =>
+                      cur ? { ...cur, index: (cur.index - 1 + cur.items.length) % cur.items.length } : cur,
+                    );
+                    return;
+                  }
+                  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                    e.preventDefault();
+                    void applyReferenceSuggestion(referencePicker.items[referencePicker.index]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setReferencePicker(null);
+                    return;
+                  }
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (canSend) void handleSend();
@@ -635,8 +804,40 @@ export default function Chat() {
               disabled={inFlight}
               className="min-h-20 flex-1"
             />
+            {referencePicker && (
+              <div className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-md border border-border bg-background shadow-lg">
+                <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  reference suggestions
+                </div>
+                <ul className="max-h-56 overflow-y-auto py-1">
+                  {referencePicker.items.map((item, index) => (
+                    <li key={`${item.kind}:${item.value}`}>
+                      <button
+                        type="button"
+                        className={
+                          "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/50 " +
+                          (index === referencePicker.index ? "bg-muted/60" : "")
+                        }
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyReferenceSuggestion(item)}
+                      >
+                        <span className="truncate">{item.label}</span>
+                        <span className="ml-3 shrink-0 font-mono text-[11px] text-muted-foreground">
+                          {item.kind}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {selectedAgent === null && (
               <p className="mt-2 text-xs text-muted-foreground">请先选择 `agent_profile`。</p>
+            )}
+            {selectedAgent !== null && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                输入 `@` 可补全 `@file:`、`@session:`、`@url:`、`@diff`。冒号后可带空格，发送前会自动按引用格式解析。
+              </p>
             )}
           </div>
           {inFlight ? (
@@ -681,9 +882,9 @@ function EntryRow({
   }
 
   const agent = agents.find((a) => a.name === selectedAgent);
-  const providerName = agent?.provider_id ?? null;
-  const promptName = agent?.prompt_id ?? null;
-  const toolsetName = agent?.toolset_id ?? null;
+    const providerName = agent?.provider_label ?? agent?.provider_id ?? null;
+    const promptName = agent?.prompt_label ?? agent?.prompt_id ?? null;
+    const toolsetName = agent?.toolset_label ?? agent?.toolset_id ?? null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">
@@ -700,7 +901,7 @@ function EntryRow({
         <SelectContent>
           <SelectItem value={AGENT_NONE}>(none)</SelectItem>
           {agents.map((a) => (
-            <SelectItem key={a.name} value={a.name}>
+            <SelectItem key={a.id} value={a.id}>
               {a.name}
             </SelectItem>
           ))}
@@ -733,10 +934,22 @@ function MessagesView({
     );
   }
   if (pane.kind === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading conversation…</p>;
+    return pending ? (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">Loading conversation…</p>
+        <PendingBubble pending={pending} onRetry={onRetry} />
+      </div>
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading conversation…</p>
+    );
   }
   if (pane.kind === "err") {
-    return (
+    return pending ? (
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">无法读取对话:{pane.message}</p>
+        <PendingBubble pending={pending} onRetry={onRetry} />
+      </div>
+    ) : (
       <p className="text-sm text-destructive">无法读取对话:{pane.message}</p>
     );
   }

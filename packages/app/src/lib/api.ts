@@ -31,6 +31,7 @@ export interface Conversation {
   id: string;
   title: string | null;
   agent_profile: string | null;
+  last_model?: string | null;
   created_at: string;
   updated_at: string;
   message_count: number;
@@ -61,6 +62,12 @@ export interface Message {
   seq?: number;
   created_at?: string;
   provider_snapshot?: string | null;
+}
+
+export interface ReferenceSuggestion {
+  value: string;
+  label: string;
+  kind: string;
 }
 
 export interface Tool {
@@ -654,6 +661,9 @@ const apiCore = {
   getConversation(conversation_id: string): Promise<{ conversation: Conversation; messages: Message[] }> {
     return rpc("get_conversation", { conversation_id });
   },
+  completeReference(query: string): Promise<{ items: ReferenceSuggestion[] }> {
+    return rpc("complete_reference", { query });
+  },
 
   renameConversation(conversation_id: string, title: string | null): Promise<{ conversation: Conversation }> {
     return rpc("rename_conversation", { conversation_id, title });
@@ -688,6 +698,7 @@ const apiCore = {
     return Promise.resolve({
       id,
       title: req.title ?? null,
+      agent_profile: null,
       last_model: null,
       message_count: 0,
       created_at: now,

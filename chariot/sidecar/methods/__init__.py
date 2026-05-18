@@ -177,6 +177,7 @@ def register_methods(
     from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
+    from chariot.sidecar.methods.reference import ReferenceMethods
     from chariot.sidecar.methods.rl import RLMethods
     from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.task import TaskMethods
@@ -269,6 +270,9 @@ def register_methods(
     server.method("add_tool")(tools.add)
     server.method("delete_tool")(tools.delete)
     server.method("update_tool")(tools.update)
+
+    references = ReferenceMethods(runtime)
+    server.method("complete_reference")(references.complete)
 
     toolsets = ToolsetMethods(runtime)
     server.method("list_toolsets")(toolsets.list_)

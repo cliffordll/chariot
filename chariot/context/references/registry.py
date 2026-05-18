@@ -41,9 +41,10 @@ REFERENCE_RESOLVERS: dict[str, type[BaseReferenceResolver]] = {
 
 
 # 匹配 @file:key / @diff:key / @url:key / @session:key
+# 冒号后允许出现若干空白,兼容 `@url: https://...` 这类更自然的写法。
 # key 字符集:任何非空白(简单宽松;具体安全校验在 resolver 内部做)
 _REFERENCE_PATTERN = re.compile(
-    r"@(?P<type>file|diff|url|session):(?P<key>\S*)",
+    r"@(?P<type>file|diff|url|session):\s*(?P<key>\S*)",
 )
 
 

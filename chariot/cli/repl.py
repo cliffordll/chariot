@@ -48,13 +48,17 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style
 from ulid import ULID
 
 from chariot.cli.context import ChatContext, ChatError
@@ -66,6 +70,149 @@ _ULID_RE = re.compile(r"^[0-9A-Z]{26}$")
 """ULID 26 字符;偏宽:Crockford base32 严格排除 I / L / O / U,但 chariot 整体不收紧。"""
 
 
+class _ChatReplCompleter(Completer):
+    """REPL 输入补全。
+
+    - `/` 开头:补全 slash 命令
+    - `@` token:补全 reference keyword;`@file:` 额外做 cwd 下路径补全
+    """
+
+    _REFERENCE_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "@file:",
+        "@url:",
+        "@diff",
+        "@session:",
+    )
+
+    def __init__(
+        self,
+        *,
+        slash_commands: list[str],
+        cwd: Path,
+        agent_ids_getter: Callable[[], tuple[str, ...]] | None = None,
+        skill_names_getter: Callable[[], tuple[str, ...]] | None = None,
+        conversation_ids_getter: Callable[[], tuple[str, ...]] | None = None,
+    ) -> None:
+        self._slash_commands = tuple(slash_commands)
+        self._cwd = cwd
+        self._agent_ids_getter = agent_ids_getter or (lambda: ())
+        self._skill_names_getter = skill_names_getter or (lambda: ())
+        self._conversation_ids_getter = conversation_ids_getter or (lambda: ())
+
+    def get_completions(self, document: Document, complete_event: object) -> Iterable[Completion]:
+        text = document.text_before_cursor
+        if text.startswith("/"):
+            yield from self._complete_slash_command(text)
+            return
+        token = self._extract_reference_token(text)
+        if token is None:
+            return
+        if token.startswith("@file:"):
+            yield from self._complete_file_reference(token)
+            return
+        if token.startswith("@session:"):
+            yield from self._complete_session_reference(token)
+            return
+        yield from self._complete_reference_keyword(token)
+
+    def _complete_slash_command(self, text: str) -> Iterable[Completion]:
+        if text.startswith("/agent "):
+            arg = text[len("/agent ") :]
+            yield from self._complete_values(
+                arg,
+                self._agent_ids_getter(),
+                meta="agent id",
+                extra=("clear",),
+            )
+            return
+        if text.startswith("/skill "):
+            arg = text[len("/skill ") :]
+            yield from self._complete_values(
+                arg,
+                self._skill_names_getter(),
+                meta="skill",
+                extra=("clear",),
+            )
+            return
+        if text.startswith("/conversation ") or text.startswith("/convo "):
+            prefix = "/conversation " if text.startswith("/conversation ") else "/convo "
+            arg = text[len(prefix) :]
+            yield from self._complete_values(
+                arg,
+                self._conversation_ids_getter(),
+                meta="conversation id",
+                extra=("new", "off"),
+            )
+            return
+        for command in self._slash_commands:
+            if command.startswith(text):
+                yield Completion(command, start_position=-len(text), display_meta="command")
+
+    @staticmethod
+    def _extract_reference_token(text: str) -> str | None:
+        token = text.rsplit(maxsplit=1)[-1] if text else ""
+        return token if token.startswith("@") else None
+
+    def _complete_reference_keyword(self, token: str) -> Iterable[Completion]:
+        for prefix in self._REFERENCE_PREFIXES:
+            if prefix.startswith(token):
+                yield Completion(prefix, start_position=-len(token), display_meta="reference")
+
+    def _complete_session_reference(self, token: str) -> Iterable[Completion]:
+        prefix = "@session:"
+        arg = token[len(prefix) :]
+        for conv_id in self._conversation_ids_getter():
+            candidate = f"{prefix}{conv_id}"
+            if candidate.startswith(token):
+                yield Completion(candidate, start_position=-len(token), display_meta="conversation")
+
+    def _complete_file_reference(self, token: str) -> Iterable[Completion]:
+        prefix = "@file:"
+        raw_path = token[len(prefix) :]
+        base_dir, partial_name = self._split_file_prefix(raw_path)
+        target_dir = (self._cwd / base_dir).resolve(strict=False)
+        try:
+            target_dir.relative_to(self._cwd.resolve())
+        except ValueError:
+            return
+        if not target_dir.exists() or not target_dir.is_dir():
+            return
+        for candidate in sorted(target_dir.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+            if not candidate.name.startswith(partial_name):
+                continue
+            rel_path = candidate.relative_to(self._cwd).as_posix()
+            if candidate.is_dir():
+                rel_path += "/"
+            yield Completion(
+                f"{prefix}{rel_path}",
+                start_position=-len(token),
+                display_meta="dir" if candidate.is_dir() else "file",
+            )
+
+    @staticmethod
+    def _split_file_prefix(raw_path: str) -> tuple[Path, str]:
+        normalized = raw_path.replace("\\", "/")
+        if not normalized or normalized.endswith("/"):
+            return Path(normalized), ""
+        base, _, tail = normalized.rpartition("/")
+        return Path(base), tail
+
+    @staticmethod
+    def _complete_values(
+        token: str,
+        values: Iterable[str],
+        *,
+        meta: str,
+        extra: tuple[str, ...] = (),
+    ) -> Iterable[Completion]:
+        seen: set[str] = set()
+        for value in (*extra, *values):
+            if value in seen or not value.startswith(token):
+                continue
+            seen.add(value)
+            yield Completion(value, start_position=-len(token), display_meta=meta)
+
+
 @dataclass
 class ChatRepl:
     """终端 REPL 会话。持有一个 `ChatContext`,循环读输入并分派命令。"""
@@ -74,6 +221,15 @@ class ChatRepl:
 
     # U+203A 单右尖引号,和普通 > 视觉上有区别,便于识别 REPL 提示符
     _PROMPT: ClassVar[str] = "› "
+    _STYLE: ClassVar[Style] = Style.from_dict(
+        {
+            "completion-menu": "bg:#10161e #d7dde8",
+            "completion-menu.completion.current": "bg:#2f6feb #ffffff",
+            "completion-menu.meta": "bg:#10161e #7f8ea3",
+            "completion-menu.multi-column-meta": "bg:#10161e #7f8ea3",
+            "bottom-toolbar": "bg:#1c2430 #c8d2e2",
+        }
+    )
 
     _HISTORY_PATH: ClassVar[Path] = Path.home() / ".chariot" / "repl_history"
     """REPL 输入历史文件,跨 session 持久化。位置跟 `chariot.db` 同根。"""
@@ -121,6 +277,10 @@ class ChatRepl:
         "  /help                  本说明"
     )
 
+    _completion_agent_ids: tuple[str, ...] = ()
+    _completion_skill_names: tuple[str, ...] = ()
+    _completion_conversation_ids: tuple[str, ...] = ()
+
     async def _refresh_conversation_config(self) -> None:
         """每轮输入前重新查 DB,恢复 conversation 最新 agent 配置。
         若用户中途在 UI 改了,CLI REPL 能同步到最新值。DB 是 canonical 真源。
@@ -160,6 +320,7 @@ class ChatRepl:
         session = self._make_prompt_session()
 
         while True:
+            await self._refresh_completion_cache()
             try:
                 line = await session.prompt_async(self._PROMPT)
             except (EOFError, KeyboardInterrupt):
@@ -181,18 +342,43 @@ class ChatRepl:
 
             await self._one_turn(line)
 
+    async def _refresh_completion_cache(self) -> None:
+        from chariot.services.agent import AgentService
+
+        agents = await AgentService(self.ctx.agent).list_agents()
+        self._completion_agent_ids = tuple(entry.id for entry in agents)
+        self._completion_skill_names = (
+            tuple(skill.name for skill in self.ctx.agent.skill_registry.list_all())
+            if self.ctx.agent.skill_registry is not None
+            else ()
+        )
+        conversations = await ConversationService(self.ctx.agent).list_conversations(limit=20)
+        self._completion_conversation_ids = tuple(conv.id for conv in conversations)
+
     def _make_prompt_session(self) -> PromptSession[str]:
-        """搭一个 PromptSession:历史持久化 + slash 命令 Tab 补全。"""
+        """搭一个 PromptSession:历史、自动建议、菜单式补全、底部状态栏。"""
         self._HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
         return PromptSession(
             history=FileHistory(str(self._HISTORY_PATH)),
-            completer=WordCompleter(
-                self._SLASH_COMMANDS,
-                ignore_case=False,
-                sentence=False,
+            auto_suggest=AutoSuggestFromHistory(),
+            completer=_ChatReplCompleter(
+                slash_commands=self._SLASH_COMMANDS,
+                cwd=Path.cwd(),
+                agent_ids_getter=lambda: self._completion_agent_ids,
+                skill_names_getter=lambda: self._completion_skill_names,
+                conversation_ids_getter=lambda: self._completion_conversation_ids,
             ),
-            complete_while_typing=False,
+            style=self._STYLE,
+            bottom_toolbar=self._bottom_toolbar,
+            reserve_space_for_menu=8,
+            complete_while_typing=True,
         )
+
+    def _bottom_toolbar(self) -> str:
+        agent = self.ctx.agent_profile or "(none)"
+        conversation = self.ctx.conversation_id or "stateless"
+        skill = self.ctx.skill or "(default)"
+        return f" agent: {agent} | conversation: {conversation} | skill: {skill} | Tab:补全  Ctrl-R:历史 "
 
     async def _one_turn(self, user_text: str) -> None:
         """发一轮请求;失败撤回 user,避免污染后续上下文。
@@ -369,7 +555,8 @@ class ChatRepl:
             return
         rows = [
             (
-                e.agent_label or e.id,
+                e.id or "-",
+                e.name,
                 e.role or "-",
                 e.prompt_label or e.prompt_id or "-",
                 e.toolset_label or e.toolset_id or "-",
@@ -379,7 +566,7 @@ class ChatRepl:
             for e in entries
         ]
         Renderer.table(
-            ["agent", "role", "prompt", "toolset", "provider", ""],
+            ["id", "name", "role", "prompt", "toolset", "provider", ""],
             rows,
             title="agent profiles",
         )
