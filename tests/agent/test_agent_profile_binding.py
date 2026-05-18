@@ -1,4 +1,4 @@
-"""phase 4 binding tests:agent_profile -> provider_id / prompt_id / tool_profile。"""
+"""phase 4 binding tests:agent_profile -> provider_id / prompt_id / toolset_id。"""
 
 from __future__ import annotations
 
@@ -181,10 +181,12 @@ class TestAgentProfileBinding:
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools=tools)
         async with sessionmaker() as session:
             await ToolsetRepo(session).create(name="fs_safe", members=["read_file", "list_dir"])
+            toolset = await ToolsetRepo(session).get_entry("fs_safe")
+            assert toolset is not None
             await TaskRepo(session).create_agent_profile(
                 name="safe",
                 role="reader",
-                tool_profile="fs_safe",
+                toolset_id=toolset.id,
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="safe"))]
         assert any(e.kind == "stream_done" for e in events)
@@ -198,10 +200,12 @@ class TestAgentProfileBinding:
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools=tools)
         async with sessionmaker() as session:
             await ToolsetRepo(session).create(name="none")
+            toolset = await ToolsetRepo(session).get_entry("none")
+            assert toolset is not None
             await TaskRepo(session).create_agent_profile(
                 name="tooless",
                 role="x",
-                tool_profile="none",
+                toolset_id=toolset.id,
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="tooless"))]
         assert any(e.kind == "stream_done" for e in events)
@@ -216,7 +220,7 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="bad",
                 role="x",
-                tool_profile="ghost_toolset",
+                toolset_id="ghost_toolset",
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="bad"))]
         assert any(e.kind == "stream_done" for e in events)

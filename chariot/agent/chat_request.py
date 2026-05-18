@@ -130,7 +130,7 @@ class ChatRequest:
     """0.7.2-tool+ AgentProfile name 引用;非 None 时 AIAgent 解析后:
     - profile.provider_id 覆盖 req.provider_name
     - profile.prompt_id 决定 prompt 注入(取代 get_active_bundle 兜底)
-    - profile.tool_profile 决定 toolset filter(取代全量挂载 tools)
+    - profile.toolset_id 决定 toolset filter(取代全量挂载 tools)
     dangling reference(profile name 不存在)走 fallback,不阻断 task。
     """
 
@@ -148,7 +148,7 @@ class ChatRequest:
     通过 `SkillActivator` 把 `<skill>` 块拼进 system + 按 manifest.allowed_tools /
     forbidden_tools 过滤工具列表。
 
-    - None(常态):走 prompt bundle + 全量工具(或 agent_profile.tool_profile 过滤)
+    - None(常态):走 prompt bundle + 全量工具(或 agent_profile.toolset_id 过滤)
     - agent_profile.default_skill 非空且本字段为 None → AIAgent 透传 profile 字段
     - dangling reference(skill name 不存在 / disabled)走 fallback,不阻断
 

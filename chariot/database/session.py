@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import (
 from ulid import ULID
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 
 def _db_url(db_path: Path) -> str:
@@ -83,7 +83,7 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         current = 2
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
-    if current not in {0, 1, 2, 3, 4, 5, 6, CURRENT_SCHEMA_VERSION}:
+    if current not in {0, 1, 2, 3, 4, 5, 6, 7, CURRENT_SCHEMA_VERSION}:
         raise RuntimeError(
             f"DB schema version {current} 不在 squash 后支持的自动升级集合内; "
             "当前仅支持 v0/v1 新装或历史 0.1.0 库、以及已到 v28/v29 的现有库"
@@ -238,19 +238,6 @@ async def _backfill_toolset_identity(engine: AsyncEngine) -> None:
                 """
             )
         )
-        await conn.execute(
-            text(
-                """
-                UPDATE agent_profiles
-                SET toolset_id = (
-                    SELECT ts.id FROM toolsets AS ts
-                    WHERE ts.name = agent_profiles.tool_profile
-                )
-                WHERE tool_profile IS NOT NULL
-                  AND (toolset_id IS NULL OR toolset_id = '')
-                """
-            )
-        )
 
 
 async def _normalize_agent_profile_prompt_id_schema(engine: AsyncEngine) -> None:
@@ -285,7 +272,6 @@ async def _normalize_agent_profile_prompt_id_schema(engine: AsyncEngine) -> None
                         id TEXT UNIQUE,
                         role TEXT NOT NULL,
                         prompt_id TEXT,
-                        tool_profile TEXT,
                         toolset_id TEXT,
                         provider_id TEXT,
                         budget TEXT NOT NULL DEFAULT '{}',
@@ -307,7 +293,6 @@ async def _normalize_agent_profile_prompt_id_schema(engine: AsyncEngine) -> None
                         id,
                         role,
                         prompt_id,
-                        tool_profile,
                         toolset_id,
                         provider_id,
                         budget,
@@ -323,7 +308,97 @@ async def _normalize_agent_profile_prompt_id_schema(engine: AsyncEngine) -> None
                         id,
                         role,
                         prompt_id,
-                        tool_profile,
+                        toolset_id,
+                        provider_id,
+                        budget,
+                        meta,
+                        reflection_enabled,
+                        reflection_max_retries,
+                        default_skill,
+                        created_at,
+                        updated_at
+                    FROM agent_profiles
+                    """
+                )
+            )
+            await conn.execute(text("DROP TABLE agent_profiles"))
+            await conn.execute(text("ALTER TABLE agent_profiles__new RENAME TO agent_profiles"))
+            await conn.execute(text("CREATE UNIQUE INDEX idx_agent_profiles_id ON agent_profiles(id)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_role ON agent_profiles(role)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)"))
+
+
+async def _normalize_agent_profile_toolset_id_schema(engine: AsyncEngine) -> None:
+    # `tool_profile` 只在这里作为旧库兼容列名出现:
+    # 若历史库还没迁到 `toolset_id`,启动时先回填稳定 id,再重建表删掉旧列。
+    async with engine.begin() as conn:
+        columns = (await conn.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        column_names = {str(row["name"]) for row in columns}
+
+        if "toolset_id" not in column_names:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN toolset_id TEXT"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)"))
+            column_names.add("toolset_id")
+
+        if "tool_profile" in column_names:
+            await conn.execute(
+                text(
+                    """
+                    UPDATE agent_profiles
+                    SET toolset_id = (
+                        SELECT ts.id FROM toolsets AS ts
+                        WHERE ts.name = agent_profiles.tool_profile
+                    )
+                    WHERE tool_profile IS NOT NULL
+                      AND (toolset_id IS NULL OR toolset_id = '')
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE agent_profiles__new (
+                        name TEXT PRIMARY KEY,
+                        id TEXT UNIQUE,
+                        role TEXT NOT NULL,
+                        prompt_id TEXT,
+                        toolset_id TEXT,
+                        provider_id TEXT,
+                        budget TEXT NOT NULL DEFAULT '{}',
+                        meta TEXT NOT NULL DEFAULT '{}',
+                        reflection_enabled INTEGER NOT NULL DEFAULT 0,
+                        reflection_max_retries INTEGER NOT NULL DEFAULT 2,
+                        default_skill TEXT,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO agent_profiles__new (
+                        name,
+                        id,
+                        role,
+                        prompt_id,
+                        toolset_id,
+                        provider_id,
+                        budget,
+                        meta,
+                        reflection_enabled,
+                        reflection_max_retries,
+                        default_skill,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        name,
+                        id,
+                        role,
+                        prompt_id,
                         toolset_id,
                         provider_id,
                         budget,
@@ -428,6 +503,7 @@ class DBState:
         await _ensure_toolset_identity_schema(engine)
         await _backfill_toolset_identity(engine)
         await _normalize_agent_profile_prompt_id_schema(engine)
+        await _normalize_agent_profile_toolset_id_schema(engine)
         await _ensure_job_identity_schema(engine)
         await _backfill_job_identity(engine)
         cls.engine = engine

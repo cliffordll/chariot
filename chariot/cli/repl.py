@@ -363,13 +363,13 @@ class ChatRepl:
                 e.name,
                 e.role or "-",
                 e.provider_id or "-",
-                e.tool_profile or "-",
+                e.toolset_id or "-",
                 "← current" if e.name == self.ctx.agent_profile else "",
             )
             for e in entries
         ]
         Renderer.table(
-            ["name", "role", "provider", "tool_profile", ""],
+            ["name", "role", "provider", "toolset_id", ""],
             rows,
             title="agent profiles",
         )

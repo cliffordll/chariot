@@ -10,7 +10,7 @@
 - `<skill name="...">{prompt}</skill>` 块**追加**在已有 `system` 文本之后
   (先 prompt bundle 再 skill,让 skill 是"最后一层提示")
 - tool 过滤:`ChatRequest.tools` 已经被 `_inject_default_tools` / agent_profile.
-  tool_profile 处理过 → activator 再过一次 skill.tool_filter,**取交集 + 减
+  toolset_id 处理过 → activator 再过一次 skill.tool_filter,**取交集 + 减
   forbidden**(两层过滤独立,manifest.forbidden_tools 永远剔除)
 """
 

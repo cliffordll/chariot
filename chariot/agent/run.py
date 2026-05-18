@@ -464,7 +464,7 @@ class AIAgent:
         yield error event 退出。`req.agent_profile` 非空时先解析 binding:
         - `profile.provider_id` 覆盖 `req.provider_name`
         - `profile.prompt_id` 由 `_prepare_request` 拣对应 bundle
-        - `profile.tool_profile` 由 `_inject_default_tools` 做 toolset filter
+        - `profile.toolset_id` 由 `_inject_default_tools` 做 toolset filter
         dangling reference 走 fallback 不阻断。
 
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
@@ -617,7 +617,7 @@ class AIAgent:
 
         0.8.8+ 行为变更:没有配置 toolset 或 dangling toolset → allowed_tools=None,
         在 _inject_default_tools 阶段会关闭工具调用(不挂载任何工具)。
-        工具调用必须通过 agent_profile.tool_profile 显式配置。
+        工具调用必须通过 agent_profile.toolset_id 显式配置。
         """
         if req.agent_profile is None or self._sessionmaker is None:
             return _NO_BINDING
@@ -628,11 +628,11 @@ class AIAgent:
             profile = await AgentService(session).get_agent(req.agent_profile)
             if profile is None:
                 return _NO_BINDING
-            if profile.tool_profile is None:
+            if profile.toolset_id is None:
                 return _AgentBinding(agent_profile=profile, allowed_tools=None)
-            toolset = await ToolsetService(session).get_entry(profile.tool_profile)
+            toolset = await ToolsetService(session).get_entry(profile.toolset_id)
             if toolset is None:
-                # toolset 名引用不存在 → fallback 到空工具(不挂载)
+                # toolset id 引用不存在 → fallback 到空工具(不挂载)
                 return _AgentBinding(agent_profile=profile, allowed_tools=None)
             return _AgentBinding(agent_profile=profile, allowed_tools=frozenset(toolset.members))
 
@@ -939,7 +939,7 @@ class AIAgent:
         req.tools 是 list → 用调用方指定的(透传)。
 
         0.8.8+ 行为变更:没有配置 toolset(allowed_tools is None) → 不挂载任何工具,
-        工具调用必须显式通过 agent_profile.tool_profile 配置。
+        工具调用必须显式通过 agent_profile.toolset_id 配置。
         """
         if req.tools is not None:
             return req  # 调用方已指定(含 [] 关闭工具)

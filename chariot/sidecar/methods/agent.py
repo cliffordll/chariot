@@ -34,7 +34,7 @@ class AgentMethods(MethodBase):
         name = self._require_str(params, "name")
         role = self._require_str(params, "role")
         prompt_id = self._optional_str(params, "prompt_id")
-        tool_profile = self._optional_str(params, "tool_profile")
+        toolset_id = self._optional_str(params, "toolset_id")
         provider_id = self._provider_binding(params)
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
@@ -45,7 +45,7 @@ class AgentMethods(MethodBase):
                 name=name,
                 role=role,
                 prompt_id=prompt_id,
-                tool_profile=tool_profile,
+                toolset_id=toolset_id,
                 provider_id=provider_id,
                 budget=budget,
                 meta=meta,
@@ -61,7 +61,7 @@ class AgentMethods(MethodBase):
         role = self._optional_str(params, "role")
         # 三个 binding 字段走 clearable 语义:key 缺席 → UNSET(skip);null → 清空;str → set
         prompt_id = self._clearable_str(params, "prompt_id")
-        tool_profile = self._clearable_str(params, "tool_profile")
+        toolset_id = self._clearable_str(params, "toolset_id")
         provider_id = self._clearable_provider_binding(params)
         budget = self._optional_dict(params, "budget")
         meta = self._optional_dict(params, "meta")
@@ -73,7 +73,7 @@ class AgentMethods(MethodBase):
                 rename=rename,
                 role=role,
                 prompt_id=prompt_id,
-                tool_profile=tool_profile,
+                toolset_id=toolset_id,
                 provider_id=provider_id,
                 budget=budget,
                 meta=meta,

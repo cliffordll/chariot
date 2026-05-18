@@ -67,7 +67,7 @@ def test_agent_add_and_show() -> None:
             "planner",
             "--role",
             "planner",
-            "--tool-profile",
+            "--toolset-id",
             "default",
             "--provider-id",
             "mock",
@@ -89,7 +89,7 @@ def test_agent_update_and_remove() -> None:
     result = runner.invoke(app, ["agent", "add", "--name", "planner", "--role", "planner"])
     assert result.exit_code == 0
 
-    result = runner.invoke(app, ["agent", "update", "planner", "--role", "executor", "--tool-profile", "default"])
+    result = runner.invoke(app, ["agent", "update", "planner", "--role", "executor", "--toolset-id", "default"])
     assert result.exit_code == 0
     assert "~ planner executor" in _plain(result.output)
 

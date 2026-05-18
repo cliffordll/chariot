@@ -80,7 +80,7 @@ async def test_list_agents_returns_created_profiles(server: JsonRpcServer, agent
     await AgentService(agent).create_agent(
         name="planner",
         role="planner",
-        tool_profile="default",
+        toolset_id="default",
         provider_id="mock",
     )
 
@@ -98,7 +98,7 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
         {
             "name": "planner",
             "role": "planner",
-            "tool_profile": "default",
+            "toolset_id": "default",
             "provider_id": "mock",
             "budget": {"max_steps": 5},
         },
@@ -151,10 +151,10 @@ async def test_update_and_delete_agent(server: JsonRpcServer) -> None:
     updated = await _call(
         server,
         "update_agent",
-        {"name": "planner", "role": "executor", "tool_profile": "default"},
+        {"name": "planner", "role": "executor", "toolset_id": "default"},
     )
     assert updated["result"]["agent"]["role"] == "executor"
-    assert updated["result"]["agent"]["tool_profile"] == "default"
+    assert updated["result"]["agent"]["toolset_id"] == "default"
 
     deleted = await _call(server, "delete_agent", {"name": "planner"})
     assert deleted["result"]["deleted"] == "planner"
@@ -181,7 +181,7 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
             "name": "researcher",
             "role": "research",
             "prompt_id": "research",
-            "tool_profile": "fs_safe",
+            "toolset_id": "fs_safe",
             "provider_id": "claude",
         },
     )
@@ -200,7 +200,7 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
     )
     assert cleared["result"]["agent"]["provider_id"] is None
     assert cleared["result"]["agent"]["prompt_id"] is not None
-    assert cleared["result"]["agent"]["tool_profile"] == "fs_safe"
+    assert cleared["result"]["agent"]["toolset_id"] == "fs_safe"
 
     # 重新 set
     reset = await _call(

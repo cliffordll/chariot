@@ -365,7 +365,7 @@ export interface AgentProfile {
   name: string;
   role: string;
   prompt_id: string | null;
-  tool_profile: string | null;
+  toolset_id: string | null;
   provider_id: string | null;
   budget: Record<string, unknown>;
   meta: Record<string, unknown>;
@@ -440,6 +440,7 @@ export interface PromptBundleDetail extends PromptBundle {
 }
 
 export interface Toolset {
+  id: string;
   name: string;
   description: string | null;
   members: string[];
@@ -1016,7 +1017,7 @@ const apiCore = {
     name: string;
     role: string;
     prompt_id?: string | null;
-    tool_profile?: string | null;
+    toolset_id?: string | null;
     provider_id?: string | null;
     budget?: Record<string, unknown>;
     meta?: Record<string, unknown>;
@@ -1032,7 +1033,7 @@ const apiCore = {
       rename?: string;
       role?: string | null;
       prompt_id?: string | null;
-      tool_profile?: string | null;
+      toolset_id?: string | null;
       provider_id?: string | null;
       budget?: Record<string, unknown>;
       meta?: Record<string, unknown>;

@@ -4,8 +4,8 @@ Update 语义需要区分两种 None:
 - 字段没传(skip)→ `UNSET` 哨兵
 - 字段传 null(用户清空 binding)→ `None`,落库 set NULL
 
-只有三个 binding 字段(prompt_id / tool_profile / provider_id)。
-其中 prompt 绑定只使用 `prompt_id`。
+只有三个 binding 字段(prompt_id / toolset_id / provider_id)。
+其中 prompt / toolset 绑定只使用 `prompt_id` / `toolset_id`。
 clearable;role/budget/meta 没有"清空到 NULL"语义,仍用 `None=skip`。
 B4 wave 3 加 reflection 字段(`reflection_enabled` / `reflection_max_retries`),
 仍走 `None=skip` 语义(bool / int 默认值有意义,不需要 clear)。
@@ -34,7 +34,7 @@ class AgentProfileStore(Protocol):
         name: str,
         role: str,
         prompt_id: str | None = None,
-        tool_profile: str | None = None,
+        toolset_id: str | None = None,
         provider_id: str | None = None,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
@@ -48,7 +48,7 @@ class AgentProfileStore(Protocol):
         name: str,
         role: str | None = None,
         prompt_id: ClearableStr = UNSET,
-        tool_profile: ClearableStr = UNSET,
+        toolset_id: ClearableStr = UNSET,
         provider_id: ClearableStr = UNSET,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
@@ -77,7 +77,7 @@ class AgentService:
         name: str,
         role: str,
         prompt_id: str | None = None,
-        tool_profile: str | None = None,
+        toolset_id: str | None = None,
         provider_id: str | None = None,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
@@ -88,7 +88,7 @@ class AgentService:
             name=name,
             role=role,
             prompt_id=prompt_id,
-            tool_profile=tool_profile,
+            toolset_id=toolset_id,
             provider_id=provider_id,
             budget=budget,
             meta=meta,
@@ -102,7 +102,7 @@ class AgentService:
         name: str,
         role: str | None = None,
         prompt_id: ClearableStr = UNSET,
-        tool_profile: ClearableStr = UNSET,
+        toolset_id: ClearableStr = UNSET,
         provider_id: ClearableStr = UNSET,
         budget: dict[str, object] | None = None,
         meta: dict[str, object] | None = None,
@@ -115,7 +115,7 @@ class AgentService:
         if (
             role is None
             and isinstance(prompt_id, _UnsetType)
-            and isinstance(tool_profile, _UnsetType)
+            and isinstance(toolset_id, _UnsetType)
             and isinstance(provider_id, _UnsetType)
             and budget is None
             and meta is None
@@ -127,7 +127,7 @@ class AgentService:
             name=name,
             role=role,
             prompt_id=prompt_id,
-            tool_profile=tool_profile,
+            toolset_id=toolset_id,
             provider_id=provider_id,
             budget=budget,
             meta=meta,

@@ -418,7 +418,6 @@ class AgentProfileRow(Base):
     id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     role: Mapped[str] = mapped_column(index=True)
     prompt_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    tool_profile: Mapped[str | None] = mapped_column(default=None)
     toolset_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None)
     budget: Mapped[str] = mapped_column(default="{}")

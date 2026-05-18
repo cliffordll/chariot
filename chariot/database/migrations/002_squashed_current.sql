@@ -283,7 +283,6 @@ CREATE TABLE agent_profiles (
     name TEXT PRIMARY KEY,
     role TEXT NOT NULL,
     prompt_id TEXT,
-    tool_profile TEXT,
     provider_id TEXT,
     budget TEXT NOT NULL DEFAULT '{}',
     meta TEXT NOT NULL DEFAULT '{}',

@@ -53,7 +53,7 @@ class TaskRepo:
         name: str,
         role: str,
         prompt_id: str | None = None,
-        tool_profile: str | None = None,
+        toolset_id: str | None = None,
         provider_id: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
@@ -66,12 +66,11 @@ class TaskRepo:
         if reflection_max_retries < 0:
             raise ConfigError(f"reflection_max_retries 必须 >= 0,got {reflection_max_retries}")
         prompt_id = await self._resolve_prompt_id(prompt_id)
-        toolset_id, tool_profile_name = await self._resolve_toolset_ref(tool_profile)
+        toolset_id = await self._resolve_toolset_id(toolset_id)
         row = AgentProfileRow(
             name=name,
             role=role,
             prompt_id=prompt_id,
-            tool_profile=tool_profile_name,
             toolset_id=toolset_id,
             provider_id=await self._resolve_provider_ref(provider_id),
             budget=self._serialize_object("budget", budget or {}),
@@ -103,7 +102,7 @@ class TaskRepo:
         name: str,
         role: str | None = None,
         prompt_id: ClearableStr = UNSET,
-        tool_profile: ClearableStr = UNSET,
+        toolset_id: ClearableStr = UNSET,
         provider_id: ClearableStr = UNSET,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
@@ -117,8 +116,8 @@ class TaskRepo:
             row.role = role
         if not isinstance(prompt_id, _UnsetType):
             row.prompt_id = await self._resolve_prompt_id(prompt_id)
-        if not isinstance(tool_profile, _UnsetType):
-            row.toolset_id, row.tool_profile = await self._resolve_toolset_ref(tool_profile)
+        if not isinstance(toolset_id, _UnsetType):
+            row.toolset_id = await self._resolve_toolset_id(toolset_id)
         if not isinstance(provider_id, _UnsetType):
             row.provider_id = await self._resolve_provider_ref(provider_id)
         if budget is not None:
@@ -396,22 +395,19 @@ class TaskRepo:
             return None, ref
         return row.id, row.name
 
-    async def _resolve_toolset_ref(self, ref: str | None) -> tuple[str | None, str | None]:
-        if ref is None:
-            return None, None
-        stmt = select(ToolsetRow).where((ToolsetRow.name == ref) | (ToolsetRow.id == ref))
+    async def _resolve_toolset_id(self, toolset_id: str | None) -> str | None:
+        if toolset_id is None:
+            return None
+        stmt = select(ToolsetRow).where(ToolsetRow.id == toolset_id)
         rows = (await self.session.execute(stmt)).scalars().all()
         if not rows:
-            return None, ref
+            return toolset_id
         if len(rows) == 1:
-            return rows[0].id, rows[0].name
-        exact_id = [row for row in rows if row.id == ref]
+            return rows[0].id
+        exact_id = [row for row in rows if row.id == toolset_id]
         if len(exact_id) == 1:
-            return exact_id[0].id, exact_id[0].name
-        exact_name = [row for row in rows if row.name == ref]
-        if len(exact_name) == 1:
-            return exact_name[0].id, exact_name[0].name
-        raise ConfigError(f"toolset 引用 {ref!r} 不唯一,请改用 id")
+            return exact_id[0].id
+        raise ConfigError(f"toolset id 引用 {toolset_id!r} 不唯一")
 
     async def _resolve_prompt_id(self, prompt_id: str | None) -> str | None:
         if prompt_id is None:
@@ -522,7 +518,6 @@ class TaskRepo:
             name=row.name,
             role=row.role,
             prompt_id=row.prompt_id,
-            tool_profile=row.tool_profile,
             toolset_id=row.toolset_id,
             provider_id=row.provider_id,
             budget=cls._deserialize_object("budget", row.budget),

@@ -63,7 +63,7 @@ def chat_cmd(
                 "agent_profile name;非空时 AIAgent 解析后用其 binding:"
                 "provider_id 覆盖 --provider、"
                 "prompt_id 决定 prompt、"
-                "tool_profile 做 toolset filter。"
+                "toolset_id 做 toolset filter。"
             ),
         ),
     ] = None,

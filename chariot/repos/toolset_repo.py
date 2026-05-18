@@ -9,7 +9,7 @@
 不做的事
 --------
 - **不校验 tool name 是否存在于 tools 表**:tool 注册是动态的,toolset 可以
-  引用未来才会注册的 tool name(跟 agent_profile.tool_profile 弱引用风格一致)
+  引用未来才会注册的 tool name(跟 `toolset_members` 的弱引用风格一致)
 - **不做 enabled 状态切换**:toolset 是 filter,不动 `tool.enabled`
   (详 docs/tool-profile-design.md "Toolset 的两种语义"一节)
 
@@ -33,7 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError
-from chariot.database.models import AgentProfileRow, ToolsetMemberRow, ToolsetRow
+from chariot.database.models import ToolsetMemberRow, ToolsetRow
 from chariot.models.toolset import Toolset
 
 
@@ -131,9 +131,6 @@ class ToolsetRepo:
         if old_name != new_name:
             await self.session.execute(
                 update(ToolsetMemberRow).where(ToolsetMemberRow.toolset_id == row.id).values(toolset_name=new_name)
-            )
-            await self.session.execute(
-                update(AgentProfileRow).where(AgentProfileRow.toolset_id == row.id).values(tool_profile=new_name)
             )
         try:
             await self.session.commit()

@@ -248,7 +248,7 @@ function AgentsListCard({
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Prompt ID</TableHead>
-              <TableHead>Tool profile</TableHead>
+              <TableHead>Toolset ID</TableHead>
               <TableHead>Provider profile</TableHead>
             </TableRow>
           </TableHeader>
@@ -263,7 +263,7 @@ function AgentsListCard({
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
                 <TableCell>{agent.prompt_id ?? "-"}</TableCell>
-                <TableCell>{agent.tool_profile ?? "-"}</TableCell>
+                <TableCell>{agent.toolset_id ?? "-"}</TableCell>
                 <TableCell>{agent.provider_id ?? "-"}</TableCell>
               </TableRow>
             ))}
@@ -296,7 +296,7 @@ function AgentDetailCard({
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{agent.role}</Badge>
               {agent.prompt_id && <Badge variant="outline">{agent.prompt_id}</Badge>}
-              {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
+              {agent.toolset_id && <Badge variant="secondary">{agent.toolset_id}</Badge>}
               {agent.provider_id && <Badge variant="outline">{agent.provider_id}</Badge>}
               {agent.reflection_enabled && (
                 <Badge variant="default">reflect ×{agent.reflection_max_retries}</Badge>
@@ -365,7 +365,7 @@ function CreateAgentDialog({
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [promptId, setPromptId] = useState("");
-  const [toolProfile, setToolProfile] = useState("");
+  const [toolsetId, setToolsetId] = useState("");
   const [providerProfile, setProviderProfile] = useState("");
   const [budget, setBudget] = useState("{}");
   const [meta, setMeta] = useState("{}");
@@ -391,7 +391,7 @@ function CreateAgentDialog({
         name,
         role,
         prompt_id: promptId || null,
-        tool_profile: toolProfile || null,
+        toolset_id: toolsetId || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
@@ -433,11 +433,11 @@ function CreateAgentDialog({
                 placeholder="(none)"
               />
             </Field>
-            <Field label="Tool profile">
+            <Field label="Toolset ID">
               <BindingSelect
-                value={toolProfile}
-                onChange={setToolProfile}
-                options={options.toolsets.map((toolset) => ({ value: toolset.name, label: toolset.name }))}
+                value={toolsetId}
+                onChange={setToolsetId}
+                options={options.toolsets.map((toolset) => ({ value: toolset.id, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -505,7 +505,7 @@ function EditAgentDialog({
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
   const [promptId, setPromptId] = useState(agent.prompt_id ?? "");
-  const [toolProfile, setToolProfile] = useState(agent.tool_profile ?? "");
+  const [toolsetId, setToolsetId] = useState(agent.toolset_id ?? "");
   const [providerProfile, setProviderProfile] = useState(agent.provider_id ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
   const [meta, setMeta] = useState(JSON.stringify(agent.meta, null, 2));
@@ -531,7 +531,7 @@ function EditAgentDialog({
         rename: name.trim() !== agent.name ? name.trim() : undefined,
         role,
         prompt_id: promptId || null,
-        tool_profile: toolProfile || null,
+        toolset_id: toolsetId || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
@@ -569,11 +569,11 @@ function EditAgentDialog({
                 placeholder="(none)"
               />
             </Field>
-            <Field label="Tool profile">
+            <Field label="Toolset ID">
               <BindingSelect
-                value={toolProfile}
-                onChange={setToolProfile}
-                options={options.toolsets.map((toolset) => ({ value: toolset.name, label: toolset.name }))}
+                value={toolsetId}
+                onChange={setToolsetId}
+                options={options.toolsets.map((toolset) => ({ value: toolset.id, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>

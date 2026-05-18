@@ -89,6 +89,7 @@ class TestMigrationV10:
         assert "id" in _columns(toolset_cols)
         assert "toolset_id" in _columns(member_cols)
         assert "toolset_id" in _columns(agent_profile_cols)
+        assert "tool_profile" not in _columns(agent_profile_cols)
 
     async def test_prompt_identity_columns_exist(self, session: AsyncSession) -> None:
         def _columns(rows: list[dict[str, object]]) -> set[str]:
@@ -308,7 +309,7 @@ class TestPlatformRepos:
         profile = await repo.create_agent_profile(
             name="planner",
             role="planner",
-            tool_profile="default",
+            toolset_id=toolset.id,
             provider_id="mock",
             budget={"max_steps": 3},
         )
@@ -380,11 +381,11 @@ class TestPlatformRepos:
         updated = await repo.update_agent_profile(
             name="planner",
             role="executor",
-            tool_profile="default",
+            toolset_id="default",
             meta={"scope": "repo"},
         )
         assert updated.role == "executor"
-        assert updated.tool_profile == "default"
+        assert updated.toolset_id == "default"
         assert updated.meta["scope"] == "repo"
         await repo.delete_agent_profile("planner")
         assert await repo.get_agent_profile("planner") is None
@@ -436,24 +437,22 @@ class TestPlatformRepos:
             name="a1",
             role="r",
             prompt_id=prompt.bundle_id,
-            tool_profile="fs_safe",
+            toolset_id=toolset.id,
             provider_id="claude",
         )
         # 1) 未传 prompt/tool/provider → 都保留;只改 role
         u1 = await repo.update_agent_profile(name="a1", role="executor")
         assert u1.prompt_id == prompt.bundle_id
-        assert u1.tool_profile == "fs_safe"
         assert u1.toolset_id == toolset.id
         assert u1.provider_id == "claude"
         # 2) 显式 None → 清空 provider,其它仍保留
         u2 = await repo.update_agent_profile(name="a1", provider_id=None)
         assert u2.provider_id is None
         assert u2.prompt_id == prompt.bundle_id
-        assert u2.tool_profile == "fs_safe"
+        assert u2.toolset_id == toolset.id
         # 3) 同时清两个
-        u3 = await repo.update_agent_profile(name="a1", prompt_id=None, tool_profile=None)
+        u3 = await repo.update_agent_profile(name="a1", prompt_id=None, toolset_id=None)
         assert u3.prompt_id is None
-        assert u3.tool_profile is None
         assert u3.toolset_id is None
         # 4) 重新 set
         u4 = await repo.update_agent_profile(name="a1", provider_id="ollama")

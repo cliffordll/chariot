@@ -683,7 +683,7 @@ function EntryRow({
   const agent = agents.find((a) => a.name === selectedAgent);
   const providerName = agent?.provider_id ?? null;
   const promptName = agent?.prompt_id ?? null;
-  const toolsetName = agent?.tool_profile ?? null;
+  const toolsetName = agent?.toolset_id ?? null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">

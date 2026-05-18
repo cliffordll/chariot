@@ -45,7 +45,6 @@ class AgentProfile:
     name: str
     role: str
     prompt_id: str | None = None
-    tool_profile: str | None = None
     toolset_id: str | None = None
     provider_id: str | None = None
     budget: dict[str, Any] = field(default_factory=dict)
@@ -68,7 +67,6 @@ class AgentProfile:
         role: str,
         provider_id: str | None = None,
         prompt_id: str | None = None,
-        tool_profile: str | None = None,
         toolset_id: str | None = None,
         budget: dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
@@ -83,7 +81,6 @@ class AgentProfile:
             name=name,
             role=role,
             prompt_id=prompt_id,
-            tool_profile=tool_profile,
             toolset_id=toolset_id,
             provider_id=provider_id,
             budget=budget or {},
