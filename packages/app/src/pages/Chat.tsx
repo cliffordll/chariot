@@ -271,6 +271,14 @@ function extractErr(e: unknown): string {
   return String(e);
 }
 
+function formatErrorBubbleText(errorType: string | null | undefined, errorMessage: string): string {
+  return `[error] ${errorType ?? "unknown_error"}: ${errorMessage}`;
+}
+
+function isErrorBubbleText(text: string): boolean {
+  return text.startsWith("[error] ");
+}
+
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -787,7 +795,6 @@ export default function Chat() {
       ...current,
       composerText: current.pending?.userText ?? current.composerText,
       turnStatus: "idle",
-      pending: null,
     }));
   }, [activeKey, patchSession, sessions]);
 
@@ -1239,8 +1246,16 @@ function MessageRow({ msg }: { msg: Message }) {
 }
 
 function AssistantTextBubble({ text }: { text: string }) {
+  const isError = isErrorBubbleText(text);
   return (
-    <div className="max-w-[85%] rounded-lg border border-border bg-background px-3 py-2 text-sm">
+    <div
+      className={
+        "max-w-[85%] rounded-lg border px-3 py-2 text-sm " +
+        (isError
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : "border-border bg-background")
+      }
+    >
       {text ? (
         <MarkdownText text={text} />
       ) : (
@@ -1407,9 +1422,7 @@ function PendingBubble({
           <span className="text-xs text-muted-foreground">[已中断]</span>
         )}
         {pending.status === "error" && pending.errorMsg && (
-          <div className="max-w-[85%] rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive">
-            {pending.errorMsg}
-          </div>
+          <AssistantTextBubble text={formatErrorBubbleText(null, pending.errorMsg)} />
         )}
         {(pending.status === "error" || pending.status === "aborted") && (
           <Button
