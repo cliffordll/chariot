@@ -217,6 +217,22 @@ async def _ensure_toolset_identity_schema(engine: AsyncEngine) -> None:
                 raise
 
 
+async def _ensure_trace_provider_call_links_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE trace_provider_calls ADD COLUMN prompt_trace_id TEXT",
+        "ALTER TABLE trace_provider_calls ADD COLUMN context_trace_id TEXT",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
 async def _backfill_toolset_identity(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         rows = (await conn.execute(text("SELECT name, id FROM toolsets ORDER BY name"))).mappings().all()
@@ -416,6 +432,7 @@ class DBState:
         await _ensure_toolset_identity_schema(engine)
         await _backfill_toolset_identity(engine)
         await _normalize_agent_profile_toolset_id_schema(engine)
+        await _ensure_trace_provider_call_links_schema(engine)
         await _ensure_job_identity_schema(engine)
         await _backfill_job_identity(engine)
         cls.engine = engine

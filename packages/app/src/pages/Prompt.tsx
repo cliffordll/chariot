@@ -41,10 +41,7 @@ export default function Prompt() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<PromptBundle | null>(null);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
-  const [traces, setTraces] = useState<PromptTrace[]>([]);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
-  const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
-  const [traceDetails, setTraceDetails] = useState<Record<string, PromptTrace>>({});
   const [bundleDialog, setBundleDialog] = useState<BundleDialogMode>({ kind: "closed" });
 
   const loadBundles = useCallback(async () => {
@@ -64,25 +61,18 @@ export default function Prompt() {
 
   const loadSelected = useCallback(async (name: string) => {
     try {
-      const [bundleRes, versionsRes, tracesRes] = await Promise.all([
+      const [bundleRes, versionsRes] = await Promise.all([
         api.getPromptBundle(name),
         api.listPromptVersions(name),
-        api.listPromptTraces({ bundle_name: name, limit: 20, offset: 0 }),
       ]);
       setDetail(bundleRes.bundle);
       setVersions(versionsRes.versions);
-      setTraces(tracesRes.traces);
       setExpandedVersionId(null);
-      setExpandedTraceId(null);
-      setTraceDetails({});
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setDetail(null);
       setVersions([]);
-      setTraces([]);
       setExpandedVersionId(null);
-      setExpandedTraceId(null);
-      setTraceDetails({});
       setState({ kind: "err", message: msg });
     }
   }, []);
@@ -113,29 +103,6 @@ export default function Prompt() {
     [refreshAll],
   );
 
-  const inspectTrace = useCallback(async (trace: PromptTrace) => {
-    if (expandedTraceId === trace.id && traceDetails[trace.id]) {
-      setExpandedTraceId(null);
-      return;
-    }
-    if (traceDetails[trace.id]) {
-      setExpandedTraceId(trace.id);
-      return;
-    }
-    try {
-      const result = await api.inspectPrompt(trace.id);
-      setTraceDetails((cur) => ({ ...cur, [trace.id]: result.trace }));
-      setExpandedTraceId(trace.id);
-    } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setTraceDetails((cur) => ({
-        ...cur,
-        [trace.id]: { ...trace, request: { error: msg } as Record<string, unknown> },
-      }));
-      setExpandedTraceId(trace.id);
-    }
-  }, [expandedTraceId, traceDetails]);
-
   const openEdit = useCallback(() => {
     if (detail) setBundleDialog({ kind: "edit", bundle: detail });
   }, [detail]);
@@ -146,7 +113,7 @@ export default function Prompt() {
         <div>
           <h1 className="text-2xl font-semibold">Prompt</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage prompt bundles, versions, and traces.
+            Manage prompt bundles and versions.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -307,68 +274,6 @@ export default function Prompt() {
                 </div>
               </Card>
 
-              <Card title="Traces" subtitle="Single-line overview. Click inspect to view details.">
-                <div className="overflow-hidden rounded-md border border-border">
-                  <table className="w-full table-fixed text-sm">
-                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <tr>
-                        <th className="w-[24%] px-3 py-2">trace</th>
-                        <th className="w-[18%] px-3 py-2">version</th>
-                        <th className="w-[22%] px-3 py-2">provider</th>
-                        <th className="w-[18%] px-3 py-2">created</th>
-                        <th className="w-[18%] px-3 py-2 text-right">action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {traces.map((trace) => {
-                        const expanded = expandedTraceId === trace.id;
-                        const detailTrace = traceDetails[trace.id] ?? trace;
-                        return (
-                          <Fragment key={trace.id}>
-                            <tr className={"border-t border-border " + (expanded ? "bg-primary/5" : "")}>
-                              <td className="px-3 py-2 align-top">
-                                <div className="font-mono text-xs">{trace.id.slice(0, 10)}...</div>
-                                <div className="mt-1 truncate text-xs text-muted-foreground">
-                                  {trace.conversation_id ?? "-"}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <div className="font-mono text-xs">{trace.version}</div>
-                                <div className="mt-1 truncate text-xs text-muted-foreground">{trace.model ?? "-"}</div>
-                              </td>
-                              <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
-                                {trace.provider_snapshot}
-                              </td>
-                              <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
-                                {formatDate(trace.created_at)}
-                              </td>
-                              <td className="px-3 py-2 text-right">
-                                <Button
-                                  variant={expanded ? "default" : "outline"}
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => void inspectTrace(trace)}
-                                >
-                                  {expanded ? "Hide" : "Inspect"}
-                                </Button>
-                              </td>
-                            </tr>
-                            {expanded && (
-                              <tr className="border-t border-border bg-muted/20">
-                                <td colSpan={5} className="px-3 py-3">
-                                  <div className="mx-auto w-full max-w-2xl">
-                                    <TracePanel trace={detailTrace} />
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
             </div>
           </section>
         </div>
@@ -559,7 +464,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function TracePanel({ trace }: { trace: PromptTrace }) {
+export function TracePanel({ trace }: { trace: PromptTrace }) {
   return (
     <div className="space-y-4">
       <div className="space-y-1 border-b border-border/60 pb-3">

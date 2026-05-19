@@ -25,7 +25,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError
@@ -160,6 +160,22 @@ class TraceRepo:
             await self.session.commit()
         return cleaned
 
+    async def update_turn_links(
+        self,
+        turn_id: str,
+        *,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        row = await self.session.get(TraceTurnRow, turn_id)
+        if row is None:
+            return
+        if prompt_trace_id is not None:
+            row.prompt_trace_id = prompt_trace_id
+        if context_trace_id is not None:
+            row.context_trace_id = context_trace_id
+        await self.session.commit()
+
     # ---- 子事件 ----
 
     async def finalize_provider_call(
@@ -209,6 +225,8 @@ class TraceRepo:
         provider_id: str | None = None,
         provider_snapshot: str,
         model: str | None = None,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
         log_id: str | None = None,
         request_summary: dict[str, Any] | None = None,
         response_summary: dict[str, Any] | None = None,
@@ -222,6 +240,8 @@ class TraceRepo:
             provider_id=provider_id,
             provider_snapshot=provider_snapshot,
             model=model,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
             log_id=log_id,
             request_summary=self._serialize_json("request_summary", request_summary or {}),
             response_summary=self._serialize_json("response_summary", response_summary or {}),
@@ -363,6 +383,22 @@ class TraceRepo:
             checkpoints=tuple(checkpoints),
         )
 
+    async def get_turn_ordinal(self, turn_id: str) -> tuple[int, int] | None:
+        row = await self.session.get(TraceTurnRow, turn_id)
+        if row is None or row.conversation_id is None:
+            return None
+        total_stmt = select(func.count()).where(TraceTurnRow.conversation_id == row.conversation_id)
+        ordinal_stmt = select(func.count()).where(
+            TraceTurnRow.conversation_id == row.conversation_id,
+            or_(
+                TraceTurnRow.started_at < row.started_at,
+                and_(TraceTurnRow.started_at == row.started_at, TraceTurnRow.id <= row.id),
+            ),
+        )
+        total = int((await self.session.execute(total_stmt)).scalar_one())
+        ordinal = int((await self.session.execute(ordinal_stmt)).scalar_one())
+        return ordinal, total
+
     # ---- 内部 ----
 
     async def _require_turn(self, turn_id: str) -> TraceTurnRow:
@@ -468,6 +504,8 @@ class TraceRepo:
             provider_id=row.provider_id,
             provider_snapshot=row.provider_snapshot,
             model=row.model,
+            prompt_trace_id=row.prompt_trace_id,
+            context_trace_id=row.context_trace_id,
             log_id=row.log_id,
             request_summary=cls._deserialize_dict("request_summary", row.request_summary),
             response_summary=cls._deserialize_dict("response_summary", row.response_summary),

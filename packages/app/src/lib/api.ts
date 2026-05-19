@@ -546,11 +546,18 @@ export interface TraceCheckpoint {
   created_at: string;
 }
 
+export interface TraceExecutionGroup {
+  index: number;
+  provider_call: TraceProviderCall | null;
+  tool_calls: TraceToolCall[];
+}
+
 export interface TraceTree {
   turn: TraceTurn;
   provider_calls: TraceProviderCall[];
   tool_calls: TraceToolCall[];
   checkpoints: TraceCheckpoint[];
+  execution_groups: TraceExecutionGroup[];
 }
 
 export interface ListTracesParams {

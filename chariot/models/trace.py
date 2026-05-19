@@ -79,6 +79,9 @@ class TraceProviderCall:
     provider_id: str | None
     provider_snapshot: str
     model: str | None
+    # 保留兼容字段;当前主语义仍以 trace_turns 为准,未正式下沉到 provider-call 级。
+    prompt_trace_id: str | None
+    context_trace_id: str | None
     log_id: str | None
     request_summary: dict[str, Any]
     response_summary: dict[str, Any]
@@ -117,6 +120,15 @@ class TraceCheckpoint:
 
 
 @dataclass(frozen=True)
+class TraceExecutionGroup:
+    """一个执行分组:一次模型调用及其后续关联的工具调用。"""
+
+    index: int
+    provider_call: TraceProviderCall | None
+    tool_calls: tuple[TraceToolCall, ...] = ()
+
+
+@dataclass(frozen=True)
 class TraceTree:
     """一次 turn 的完整树形数据(查询用)。"""
 
@@ -124,3 +136,4 @@ class TraceTree:
     provider_calls: tuple[TraceProviderCall, ...] = ()
     tool_calls: tuple[TraceToolCall, ...] = ()
     checkpoints: tuple[TraceCheckpoint, ...] = ()
+    execution_groups: tuple[TraceExecutionGroup, ...] = ()

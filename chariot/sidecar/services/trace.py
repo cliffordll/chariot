@@ -6,6 +6,7 @@ from typing import Any
 
 from chariot.models.trace import (
     TraceCheckpoint,
+    TraceExecutionGroup,
     TraceProviderCall,
     TraceToolCall,
     TraceTree,
@@ -78,6 +79,7 @@ class TraceApi:
             "provider_calls": [cls.serialize_provider_call(pc) for pc in tree.provider_calls],
             "tool_calls": [cls.serialize_tool_call(tc) for tc in tree.tool_calls],
             "checkpoints": [cls.serialize_checkpoint(cp) for cp in tree.checkpoints],
+            "execution_groups": [cls.serialize_execution_group(group) for group in tree.execution_groups],
         }
 
     @staticmethod
@@ -153,4 +155,14 @@ class TraceApi:
             "kind": cp.kind.value,
             "snapshot_id": cp.snapshot_id,
             "created_at": cp.created_at.isoformat(),
+        }
+
+    @classmethod
+    def serialize_execution_group(cls, group: TraceExecutionGroup) -> dict[str, Any]:
+        return {
+            "index": group.index,
+            "provider_call": (
+                cls.serialize_provider_call(group.provider_call) if group.provider_call is not None else None
+            ),
+            "tool_calls": [cls.serialize_tool_call(tc) for tc in group.tool_calls],
         }

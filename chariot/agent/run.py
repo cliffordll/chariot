@@ -683,6 +683,8 @@ class AIAgent:
                     memory_entries,
                     memory_policy,
                 )
+                if turn is not None:
+                    await turn.update_links(prompt_trace_id=prompt_trace.id)
         else:
             req = self._normalize_request(req, provider, binding)
             req = await self._maybe_expand_references(req)
@@ -808,6 +810,11 @@ class AIAgent:
             context_snapshot.id,
             prompt_trace_id=prompt_trace.id,
         )
+        if turn is not None:
+            await turn.update_links(
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
 
         loop = AgentLoop(
             provider=provider,

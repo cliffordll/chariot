@@ -418,6 +418,8 @@ CREATE TABLE trace_provider_calls (
     provider_id TEXT,
     provider_snapshot TEXT NOT NULL,
     model TEXT,
+    prompt_trace_id TEXT,
+    context_trace_id TEXT,
     log_id TEXT,
     request_summary TEXT NOT NULL DEFAULT '{}',
     response_summary TEXT NOT NULL DEFAULT '{}',

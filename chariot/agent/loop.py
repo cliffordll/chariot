@@ -45,6 +45,8 @@ class AgentLoop:
         todo_store: Any | None = None,
         agent_profile: str | None = None,
         provider_snapshot: str | None = None,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -61,6 +63,8 @@ class AgentLoop:
         self._turn = turn
         self._agent_profile = agent_profile
         self._provider_snapshot = provider_snapshot  # provider 展示快照,用于持久化 last_provider;None = 不记录
+        self._prompt_trace_id = prompt_trace_id
+        self._context_trace_id = context_trace_id
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -78,6 +82,8 @@ class AgentLoop:
                 self._turn.begin_provider_call(
                     provider_snapshot=self._provider_snapshot or self._provider.config.name,
                     model=self._provider.config.model,
+                    prompt_trace_id=self._prompt_trace_id,
+                    context_trace_id=self._context_trace_id,
                 )
                 if self._turn is not None
                 else None

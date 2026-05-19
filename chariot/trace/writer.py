@@ -55,6 +55,9 @@ class ProviderCallHandle:
     provider_id: str | None
     provider_snapshot: str
     model: str | None
+    # 保留兼容写入口;当前 prompt/context trace 主关联仍写在 trace_turns,未正式下沉。
+    prompt_trace_id: str | None
+    context_trace_id: str | None
     started_at: datetime
     _start_perf: float
     id: str | None = None
@@ -80,6 +83,8 @@ class ProviderCallHandle:
                     provider_id=self.provider_id,
                     provider_snapshot=self.provider_snapshot,
                     model=self.model,
+                    prompt_trace_id=self.prompt_trace_id,
+                    context_trace_id=self.context_trace_id,
                     log_id=log_id,
                     request_summary=request_summary or {},
                     response_summary=response_summary or {},
@@ -158,6 +163,9 @@ class TurnHandle:
         *,
         provider_snapshot: str,
         model: str | None = None,
+        # 兼容保留参数;当前默认不依赖 provider-call 级 trace 关联。
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
     ) -> ProviderCallHandle:
         return ProviderCallHandle(
             writer=self.writer,
@@ -165,6 +173,8 @@ class TurnHandle:
             provider_id=self.provider_id,
             provider_snapshot=provider_snapshot,
             model=model,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
             started_at=_utcnow(),
             _start_perf=time.perf_counter(),
         )
@@ -213,6 +223,26 @@ class TurnHandle:
                 await TraceRepo(session).merge_turn_meta(self.turn_id, patch)
         except Exception as exc:  # pragma: no cover - best-effort 容错
             _LOG.warning("trace merge_turn_meta write failed: %s", exc)
+
+    async def update_links(
+        self,
+        *,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        if self.turn_id is None or self.writer._disabled:
+            return
+        if prompt_trace_id is None and context_trace_id is None:
+            return
+        try:
+            async with self.writer._session() as session:
+                await TraceRepo(session).update_turn_links(
+                    self.turn_id,
+                    prompt_trace_id=prompt_trace_id,
+                    context_trace_id=context_trace_id,
+                )
+        except Exception as exc:  # pragma: no cover - best-effort 容错
+            _LOG.warning("trace update_turn_links write failed: %s", exc)
 
     async def finalize(
         self,

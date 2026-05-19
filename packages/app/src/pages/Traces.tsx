@@ -15,6 +15,8 @@ import {
 import {
   api,
   type ApiError,
+  type PromptTrace,
+  type TraceExecutionGroup,
   type TraceProviderCall,
   type TraceToolCall,
   type TraceTree,
@@ -30,7 +32,7 @@ type TracesState =
 type DetailState =
   | { kind: "idle" }
   | { kind: "loading"; id: string }
-  | { kind: "ok"; tree: TraceTree }
+  | { kind: "ok"; tree: TraceTree; promptTrace: PromptTrace | null; promptTraceError: string | null }
   | { kind: "err"; id: string; message: string };
 
 type Filters = {
@@ -55,7 +57,18 @@ export default function Traces() {
     setDetail({ kind: "loading", id });
     try {
       const tree = await api.viewTraceTree(id);
-      setDetail({ kind: "ok", tree });
+      let promptTrace: PromptTrace | null = null;
+      let promptTraceError: string | null = null;
+      const primaryPromptTraceId = tree.turn.prompt_trace_id;
+      if (primaryPromptTraceId) {
+        try {
+          const result = await api.inspectPrompt(primaryPromptTraceId);
+          promptTrace = result.trace;
+        } catch (e) {
+          promptTraceError = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+        }
+      }
+      setDetail({ kind: "ok", tree, promptTrace, promptTraceError });
     } catch (e) {
       const message = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setDetail({ kind: "err", id, message });
@@ -279,6 +292,22 @@ function TurnsListCard({
 }
 
 function TurnDetailInline({ detail }: { detail: DetailState }) {
+  const [sections, setSections] = useState({
+    promptTrace: false,
+    executionTimeline: false,
+    checkpoints: false,
+  });
+  const detailKey =
+    detail.kind === "ok" ? detail.tree.turn.id : detail.kind === "loading" || detail.kind === "err" ? detail.id : "idle";
+
+  useEffect(() => {
+    setSections({
+      promptTrace: false,
+      executionTimeline: false,
+      checkpoints: false,
+    });
+  }, [detailKey]);
+
   if (detail.kind === "idle") return null;
   if (detail.kind === "loading") return <div className="text-sm text-muted-foreground">Loading {detail.id}...</div>;
   if (detail.kind === "err") {
@@ -289,7 +318,7 @@ function TurnDetailInline({ detail }: { detail: DetailState }) {
     );
   }
 
-  const { turn, provider_calls, tool_calls, checkpoints } = detail.tree;
+  const { turn, provider_calls, tool_calls, checkpoints, execution_groups } = detail.tree;
 
   return (
     <div className="space-y-5">
@@ -318,15 +347,117 @@ function TurnDetailInline({ detail }: { detail: DetailState }) {
       </div>
 
       <ReflectionPanel meta={turn.meta} />
-      <SectionList
-        title={`Provider calls (${provider_calls.length})`}
-        items={provider_calls.map((pc, index) => formatProviderCall(pc, index + 1))}
-      />
-      <SectionList
-        title={`Tool calls (${tool_calls.length})`}
-        items={tool_calls.map((tc, index) => formatToolCall(tc, index + 1))}
-      />
-      <SectionList title={`Checkpoints (${checkpoints.length})`} items={checkpoints.map((cp) => ({ key: cp.id, line: `${cp.kind} @ ${formatDateTime(cp.created_at)}`, details: cp.snapshot_id ? `snapshot=${cp.snapshot_id}` : null }))} />
+      <CollapsibleSection
+        title="Turn prompt trace"
+        open={sections.promptTrace}
+        onToggle={() => setSections((current) => ({ ...current, promptTrace: !current.promptTrace }))}
+      >
+        <PromptTracePanel
+          promptTrace={detail.promptTrace}
+          promptTraceError={detail.promptTraceError}
+          promptTraceId={turn.prompt_trace_id}
+        />
+      </CollapsibleSection>
+      <CollapsibleSection
+        title={`Execution timeline (${provider_calls.length} model / ${tool_calls.length} tool)`}
+        open={sections.executionTimeline}
+        onToggle={() =>
+          setSections((current) => ({
+            ...current,
+            executionTimeline: !current.executionTimeline,
+          }))
+        }
+      >
+        <ExecutionGroupsPanel groups={execution_groups} />
+      </CollapsibleSection>
+      <CollapsibleSection
+        title={`Checkpoints (${checkpoints.length})`}
+        open={sections.checkpoints}
+        onToggle={() => setSections((current) => ({ ...current, checkpoints: !current.checkpoints }))}
+      >
+        <SectionList
+          items={checkpoints.map((cp) => ({
+            key: cp.id,
+            line: `${cp.kind} @ ${formatDateTime(cp.created_at)}`,
+            details: cp.snapshot_id ? `snapshot=${cp.snapshot_id}` : null,
+          }))}
+        />
+      </CollapsibleSection>
+    </div>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-md px-1 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+      >
+        <span>{title}</span>
+        <span aria-hidden="true" className="text-sm leading-none text-foreground/80">{open ? "▴" : "▾"}</span>
+      </button>
+      {open ? children : null}
+    </div>
+  );
+}
+
+function PromptTracePanel({
+  promptTrace,
+  promptTraceError,
+  promptTraceId,
+}: {
+  promptTrace: PromptTrace | null;
+  promptTraceError: string | null;
+  promptTraceId: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/10 p-4">
+      {promptTrace ? (
+        <div className="space-y-3">
+          <div className="text-[11px] text-muted-foreground">
+            Main prompt snapshot for this turn.
+          </div>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="font-mono text-[11px] break-all text-foreground">{promptTrace.id}</div>
+            <div>
+              {promptTrace.bundle_name}:{promptTrace.version} / {promptTrace.provider_snapshot}
+              {promptTrace.model ? ` / ${promptTrace.model}` : ""} / size {promptTrace.prompt_size}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Request</div>
+            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+              {JSON.stringify(promptTrace.request, null, 2)}
+            </pre>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source refs</div>
+            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+              {JSON.stringify(promptTrace.source_refs, null, 2)}
+            </pre>
+          </div>
+        </div>
+      ) : promptTraceError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          prompt trace load failed: {promptTraceError}
+        </div>
+      ) : promptTraceId ? (
+        <div className="font-mono text-xs text-muted-foreground">{promptTraceId}</div>
+      ) : (
+        <div className="text-xs text-muted-foreground">unavailable</div>
+      )}
     </div>
   );
 }
@@ -367,9 +498,9 @@ function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
   );
 }
 
-function formatProviderCall(pc: TraceProviderCall, index: number): { key: string; line: string; details: string | null } {
+function formatProviderCall(pc: TraceProviderCall): { key: string; line: string; details: string | null } {
   const err = pc.error_type ? `  error=${pc.error_type}` : "";
-  const line = `#${index}  ${pc.provider_snapshot}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
+  const line = `${pc.provider_snapshot}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
   const detailsParts: string[] = [];
   if (Object.keys(pc.request_summary).length) {
     detailsParts.push("request: " + JSON.stringify(pc.request_summary));
@@ -380,9 +511,9 @@ function formatProviderCall(pc: TraceProviderCall, index: number): { key: string
   return { key: pc.id, line, details: detailsParts.join("\n") || null };
 }
 
-function formatToolCall(tc: TraceToolCall, index: number): { key: string; line: string; details: string | null } {
+function formatToolCall(tc: TraceToolCall): { key: string; line: string; details: string | null } {
   const err = tc.error_message ? `  error=${tc.error_message}` : "";
-  const line = `#${index}  ${tc.tool_name}  [${tc.status}]  duration=${formatDuration(tc.duration_ms)}${err}`;
+  const line = `${tc.tool_name}  [${tc.status}]  duration=${formatDuration(tc.duration_ms)}${err}`;
   const detailsParts: string[] = [];
   if (Object.keys(tc.arguments).length) {
     detailsParts.push("args: " + JSON.stringify(tc.arguments));
@@ -393,16 +524,77 @@ function formatToolCall(tc: TraceToolCall, index: number): { key: string; line: 
   return { key: tc.id, line, details: detailsParts.join("\n") || null };
 }
 
+type ExecutionGroup = {
+  key: string;
+  index: number;
+  provider: { key: string; line: string; details: string | null } | null;
+  tools: { key: string; line: string; details: string | null }[];
+};
+
+function formatExecutionGroups(groups: readonly TraceExecutionGroup[]): ExecutionGroup[] {
+  return groups.map((group, idx) => ({
+    key: group.provider_call?.id ?? `orphan-tools-${idx}`,
+    index: group.index,
+    provider: group.provider_call ? formatProviderCall(group.provider_call) : null,
+    tools: group.tool_calls.map((tool) => formatToolCall(tool)),
+  }));
+}
+
+function ExecutionGroupsPanel({
+  groups,
+}: {
+  groups: readonly TraceExecutionGroup[];
+}) {
+  const formattedGroups = formatExecutionGroups(groups);
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/10 p-4">
+      {formattedGroups.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">(empty)</p>
+      ) : (
+        <div className="space-y-3">
+          {formattedGroups.map((group) => (
+            <div key={group.key} className="rounded-md border border-border/70 bg-background/80 p-3">
+              <div className="mb-2 font-mono text-[11px] leading-5 text-foreground">#{group.index}</div>
+              {group.provider && (
+                <div className="font-mono text-[11px] leading-5 text-foreground">model: {group.provider.line}</div>
+              )}
+              {group.provider?.details && (
+                <pre className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+                  {group.provider.details}
+                </pre>
+              )}
+              <div className="mt-3 space-y-2">
+                {group.tools.length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground">no tool calls</div>
+                ) : (
+                  group.tools.map((tool) => (
+                    <div key={tool.key} className="rounded-md border border-border/60 bg-muted/20 p-3">
+                      <div className="font-mono text-[11px] leading-5 text-foreground">tool: {tool.line}</div>
+                      {tool.details && (
+                        <pre className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+                          {tool.details}
+                        </pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionList({
-  title,
   items,
 }: {
-  title: string;
   items: { key: string; line: string; details: string | null }[];
 }) {
   return (
     <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</div>
       {items.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">(empty)</p>
       ) : (

@@ -202,6 +202,93 @@ class TestMigrationV10:
             assert default_provider_id is not None
         await dispose_db()
 
+    async def test_trace_provider_call_links_are_not_backfilled_from_conversation_history(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "trace-links.db"
+        sm = await init_db(db_path)
+        async with sm() as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO trace_turns (
+                        id, conversation_id, provider_snapshot, status, started_at, meta
+                    ) VALUES
+                        ('turn-1', 'conv-1', 'mock', 'completed', '2026-05-19 10:00:00+00:00', '{}'),
+                        ('turn-2', 'conv-1', 'mock', 'completed', '2026-05-19 10:05:00+00:00', '{}')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO trace_provider_calls (
+                        id, turn_id, provider_snapshot, request_summary, response_summary, started_at
+                    ) VALUES
+                        ('pc-1', 'turn-1', 'mock', '{}', '{}', '2026-05-19 10:00:01+00:00'),
+                        ('pc-2', 'turn-2', 'mock', '{}', '{}', '2026-05-19 10:05:01+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO prompt_traces (
+                        id, bundle_id, version_id, conversation_id, provider_snapshot, request, source_refs, prompt_size, created_at
+                    ) VALUES
+                        ('pt-1', 'bundle-1', 'version-1', 'conv-1', 'mock', '{}', '[]', 1, '2026-05-19 10:00:02+00:00'),
+                        ('pt-2', 'bundle-1', 'version-1', 'conv-1', 'mock', '{}', '[]', 1, '2026-05-19 10:05:02+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO context_snapshots (
+                        id, conversation_id, provider_snapshot, request, slices, source_refs, context_size, created_at
+                    ) VALUES
+                        ('snap-1', 'conv-1', 'mock', '{}', '[]', '[]', 1, '2026-05-19 10:00:01+00:00'),
+                        ('snap-2', 'conv-1', 'mock', '{}', '[]', '[]', 1, '2026-05-19 10:05:01+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO context_traces (
+                        id, snapshot_id, conversation_id, provider_snapshot, prompt_trace_id, policy, selected_refs, created_at
+                    ) VALUES
+                        ('ctx-1', 'snap-1', 'conv-1', 'mock', 'pt-1', '{}', '[]', '2026-05-19 10:00:03+00:00'),
+                        ('ctx-2', 'snap-2', 'conv-1', 'mock', 'pt-2', '{}', '[]', '2026-05-19 10:05:03+00:00')
+                    """
+                )
+            )
+            await session.commit()
+        await dispose_db()
+
+        sm = await init_db(db_path)
+        async with sm() as session:
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            """
+                        SELECT id, prompt_trace_id, context_trace_id
+                        FROM trace_provider_calls
+                        ORDER BY started_at ASC, id ASC
+                        """
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            assert rows[0]["id"] == "pc-1"
+            assert rows[0]["prompt_trace_id"] is None
+            assert rows[0]["context_trace_id"] is None
+            assert rows[1]["id"] == "pc-2"
+            assert rows[1]["prompt_trace_id"] is None
+            assert rows[1]["context_trace_id"] is None
+        await dispose_db()
+
 
 class TestPlatformRepos:
     async def test_provider_repo_default_slug_uses_type_and_name(self, session: AsyncSession) -> None:

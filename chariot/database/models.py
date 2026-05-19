@@ -566,6 +566,8 @@ class TraceProviderCallRow(Base):
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     model: Mapped[str | None] = mapped_column(default=None)
+    prompt_trace_id: Mapped[str | None] = mapped_column(default=None)
+    context_trace_id: Mapped[str | None] = mapped_column(default=None)
     log_id: Mapped[str | None] = mapped_column(default=None)
     request_summary: Mapped[str] = mapped_column(default="{}")
     response_summary: Mapped[str] = mapped_column(default="{}")
