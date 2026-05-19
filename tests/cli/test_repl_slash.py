@@ -96,7 +96,7 @@ def test_repl_completer_completes_reference_prefixes(tmp_path: Path) -> None:
     assert [c.text for c in completions] == ["@url:"]
 
     completions = list(completer.get_completions(Document(text="@d", cursor_position=2), object()))
-    assert [c.text for c in completions] == ["@diff"]
+    assert [c.text for c in completions] == ["@diff:"]
 
     completions = list(completer.get_completions(Document(text="@s", cursor_position=2), object()))
     assert [c.text for c in completions] == ["@session:"]

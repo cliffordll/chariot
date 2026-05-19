@@ -80,7 +80,7 @@ class _ChatReplCompleter(Completer):
     _REFERENCE_PREFIXES: ClassVar[tuple[str, ...]] = (
         "@file:",
         "@url:",
-        "@diff",
+        "@diff:",
         "@session:",
     )
 

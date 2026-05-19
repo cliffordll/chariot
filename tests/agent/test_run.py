@@ -12,15 +12,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
 from chariot.agent.run import AIAgent
+from chariot.database.session import dispose_db, init_db
 from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
 from chariot.services.provider import ProviderService
@@ -59,6 +62,38 @@ class _LimitedProvider(_CapturingProvider):
     )
 
 
+class _ConcurrentEchoProvider(BaseProvider):
+    def __init__(self, name: str = "concurrent") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _ConcurrentEchoProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        last_msg = req.messages[-1]
+        content = self._message_text(last_msg.content)
+        await asyncio.sleep(0.05)
+        yield ChatEvent.message_start(message_id=f"m-{content}", model=self.config.model)
+        yield ChatEvent.text_block_start(index=0)
+        yield ChatEvent.text_delta(f"echo:{content}", index=0)
+        yield ChatEvent.block_stop(index=0)
+        yield ChatEvent.message_delta_done(stop_reason="end_turn")
+        yield ChatEvent.message_done()
+
+    @staticmethod
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            return "".join(parts)
+        return str(content)
+
+
 class _StubTool(BaseTool):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -76,6 +111,16 @@ class _StubTool(BaseTool):
 
     async def execute(self, input: dict[str, Any]) -> dict[str, Any]:
         return {"type": "tool_result", "content": [{"type": "text", "text": "ok"}]}
+
+
+@pytest_asyncio.fixture
+async def sessionmaker(tmp_path: Path):
+    db_path = tmp_path / "chariot.db"
+    sm = await init_db(db_path)
+    try:
+        yield sm
+    finally:
+        await dispose_db()
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +310,36 @@ class TestStatefulPath:
         # sessionmaker=None → yield 'no_sessionmaker' error
         assert events[0].kind == "error"
         assert events[0].error_type == "no_sessionmaker"
+
+    async def test_different_conversations_run_concurrently(self, sessionmaker) -> None:
+        provider = _ConcurrentEchoProvider("p")
+        agent = AIAgent(
+            providers={"p": provider},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+
+        async def run_one(conversation_id: str, text: str) -> list[ChatEvent]:
+            req = ChatRequest(
+                provider_ref="p",
+                messages=[Message(role="user", content=text)],
+                conversation_id=conversation_id,
+            )
+            return [ev async for ev in agent.run_chat(req)]
+
+        left, right = await asyncio.gather(
+            run_one("01CONCURRENTLEFT0000000000", "left"),
+            run_one("01CONCURRENTRIGHT000000000", "right"),
+        )
+
+        for events, expected in ((left, "left"), (right, "right")):
+            assert any(ev.kind == "stream_done" for ev in events)
+            text_chunks = [
+                str((ev.delta or {}).get("text", ""))
+                for ev in events
+                if ev.kind == "content_block_delta" and (ev.delta or {}).get("type") == "text_delta"
+            ]
+            assert "".join(text_chunks) == f"echo:{expected}"
 
 
 # ---------------------------------------------------------------------------

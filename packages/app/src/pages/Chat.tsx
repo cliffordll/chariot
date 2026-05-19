@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,11 @@ interface ReferencePickerState {
   index: number;
 }
 
+interface ChatPageStoreState {
+  activeKey: string;
+  sessions: Record<string, SessionState>;
+}
+
 function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
   const p = entry?.params ?? {};
   const mt = p.max_tokens;
@@ -137,6 +142,60 @@ function makeDraftSession(selectedAgent: string | null): SessionState {
     pending: null,
     inFlight: false,
   };
+}
+
+function createInitialChatPageState(): ChatPageStoreState {
+  const initialActiveKey = lsGet(CONV_STORAGE_KEY) ?? DRAFT_KEY;
+  const initialDraftAgent = lsGet(DRAFT_AGENT_STORAGE_KEY);
+  return {
+    activeKey: initialActiveKey,
+    sessions: {
+      [DRAFT_KEY]: makeDraftSession(initialDraftAgent),
+      ...(initialActiveKey !== DRAFT_KEY
+        ? {
+            [initialActiveKey]: {
+              key: initialActiveKey,
+              conversationId: initialActiveKey,
+              conversation: null,
+              detailStatus: "loading",
+              detailError: null,
+              turnStatus: "idle",
+              messages: [],
+              composerText: "",
+              selectedAgent: null,
+              pending: null,
+              inFlight: false,
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+let chatPageStoreState: ChatPageStoreState = createInitialChatPageState();
+const chatPageStoreListeners = new Set<() => void>();
+const chatAbortControllers = new Map<string, AbortController>();
+
+function getChatPageStoreSnapshot(): ChatPageStoreState {
+  return chatPageStoreState;
+}
+
+function subscribeChatPageStore(listener: () => void): () => void {
+  chatPageStoreListeners.add(listener);
+  return () => {
+    chatPageStoreListeners.delete(listener);
+  };
+}
+
+function setChatPageStoreState(
+  updater: ChatPageStoreState | ((state: ChatPageStoreState) => ChatPageStoreState),
+): void {
+  const next = typeof updater === "function" ? updater(chatPageStoreState) : updater;
+  if (next === chatPageStoreState) return;
+  chatPageStoreState = next;
+  for (const listener of chatPageStoreListeners) {
+    listener();
+  }
 }
 
 function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
@@ -218,34 +277,13 @@ export default function Chat() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
   const [convsErr, setConvsErr] = useState<string | null>(null);
-  const initialActiveKey = lsGet(CONV_STORAGE_KEY) ?? DRAFT_KEY;
-  const initialDraftAgent = lsGet(DRAFT_AGENT_STORAGE_KEY);
-  const [activeKey, setActiveKey] = useState(initialActiveKey);
-  const [sessions, setSessions] = useState<Record<string, SessionState>>({
-    [DRAFT_KEY]: makeDraftSession(initialDraftAgent),
-    ...(initialActiveKey !== DRAFT_KEY
-      ? {
-          [initialActiveKey]: {
-            key: initialActiveKey,
-            conversationId: initialActiveKey,
-            conversation: null,
-            detailStatus: "loading",
-            detailError: null,
-            messages: [],
-            composerText: "",
-            selectedAgent: null,
-            pending: null,
-            inFlight: false,
-          },
-        }
-      : {}),
-  });
   const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const detailReqSeqRef = useRef<Record<string, number>>({});
   const turnReqSeqRef = useRef(0);
-  const abortControllersRef = useRef(new Map<string, AbortController>());
+  const { activeKey, sessions } = useSyncExternalStore(subscribeChatPageStore, getChatPageStoreSnapshot);
+  const initialActiveKeyRef = useRef(chatPageStoreState.activeKey);
 
   const activeSession = sessions[activeKey] ?? sessions[DRAFT_KEY];
   const pending = activeSession.pending;
@@ -257,10 +295,17 @@ export default function Chat() {
   const selectedAgent = activeSession.selectedAgent;
 
   const patchSession = useCallback((key: string, updater: (session: SessionState) => SessionState) => {
-    setSessions((cur) => {
-      const existing = cur[key] ?? (key === DRAFT_KEY ? makeDraftSession(lsGet(DRAFT_AGENT_STORAGE_KEY)) : null);
-      if (!existing) return cur;
-      return { ...cur, [key]: updater(existing) };
+    setChatPageStoreState((state) => {
+      const existing =
+        state.sessions[key] ?? (key === DRAFT_KEY ? makeDraftSession(lsGet(DRAFT_AGENT_STORAGE_KEY)) : null);
+      if (!existing) return state;
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [key]: updater(existing),
+        },
+      };
     });
   }, []);
 
@@ -302,67 +347,76 @@ export default function Chat() {
     const requestSeq = (detailReqSeqRef.current[id] ?? 0) + 1;
     detailReqSeqRef.current[id] = requestSeq;
     if (activate) {
-      setActiveKey(id);
+      setChatPageStoreState((state) => ({ ...state, activeKey: id }));
     }
-    setSessions((cur) => {
-      const existing = cur[id];
+    setChatPageStoreState((state) => {
+      const existing = state.sessions[id];
       const next: SessionState = existing ?? {
         key: id,
-            conversationId: id,
-            conversation: null,
-            detailStatus: "loading",
-            detailError: null,
-            turnStatus: "idle",
-            messages: [],
-            composerText: "",
-            selectedAgent: null,
-            pending: null,
+        conversationId: id,
+        conversation: null,
+        detailStatus: "loading",
+        detailError: null,
+        turnStatus: "idle",
+        messages: [],
+        composerText: "",
+        selectedAgent: null,
+        pending: null,
         inFlight: false,
       };
       return {
-        ...cur,
-        [id]: {
-          ...next,
-          detailStatus: preserveMessages && next.messages.length > 0 ? "loaded" : "loading",
-          detailError: null,
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [id]: {
+            ...next,
+            detailStatus: preserveMessages && next.messages.length > 0 ? "loaded" : "loading",
+            detailError: null,
+          },
         },
       };
     });
     try {
       const detail = await api.getConversation(id);
       if (detailReqSeqRef.current[id] !== requestSeq) return;
-      setSessions((cur) => {
-        const existing = cur[id];
-        if (!existing) return cur;
+      setChatPageStoreState((state) => {
+        const existing = state.sessions[id];
+        if (!existing) return state;
         const shouldClearPending =
           existing.pending !== null && hasCanonicalTurnEcho(detail.messages, existing.pending);
         return {
-          ...cur,
-          [id]: {
-            ...existing,
-            conversationId: id,
-            conversation: detail.conversation,
-            detailStatus: "loaded",
-            detailError: null,
-            messages: detail.messages,
-            selectedAgent: detail.conversation.agent_profile,
-            pending: shouldClearPending ? null : existing.pending,
-            inFlight: shouldClearPending ? false : existing.inFlight,
-            turnStatus: shouldClearPending ? "done" : existing.turnStatus,
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              conversationId: id,
+              conversation: detail.conversation,
+              detailStatus: "loaded",
+              detailError: null,
+              messages: detail.messages,
+              selectedAgent: detail.conversation.agent_profile,
+              pending: shouldClearPending ? null : existing.pending,
+              inFlight: shouldClearPending ? false : existing.inFlight,
+              turnStatus: shouldClearPending ? "done" : existing.turnStatus,
+            },
           },
         };
       });
     } catch (e) {
       if (detailReqSeqRef.current[id] !== requestSeq) return;
-      setSessions((cur) => {
-        const existing = cur[id];
-        if (!existing) return cur;
+      setChatPageStoreState((state) => {
+        const existing = state.sessions[id];
+        if (!existing) return state;
         return {
-          ...cur,
-          [id]: {
-            ...existing,
-            detailStatus: "error",
-            detailError: extractErr(e),
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              detailStatus: "error",
+              detailError: extractErr(e),
+            },
           },
         };
       });
@@ -391,10 +445,10 @@ export default function Chat() {
   }, [loadProviders, loadConvs]);
 
   useEffect(() => {
-    if (initialActiveKey !== DRAFT_KEY) {
-      void loadConversation(initialActiveKey, { activate: false });
+    if (initialActiveKeyRef.current !== DRAFT_KEY) {
+      void loadConversation(initialActiveKeyRef.current, { activate: false });
     }
-  }, [initialActiveKey, loadConversation]);
+  }, [loadConversation]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -420,7 +474,7 @@ export default function Chat() {
       setReferencePicker(items.length ? { query, items, index: 0 } : null);
       return;
     }
-    if (query.startsWith("@file:") || ["@file:", "@url:", "@diff", "@session:"].some((prefix) => prefix.startsWith(query))) {
+    if (query.startsWith("@file:") || ["@file:", "@url:", "@diff:", "@session:"].some((prefix) => prefix.startsWith(query))) {
       let cancelled = false;
       void api.completeReference(query).then(({ items }) => {
         if (!cancelled) {
@@ -441,21 +495,24 @@ export default function Chat() {
   }, [patchSession]);
 
   const startNewChat = useCallback(() => {
-    abortControllersRef.current.get(DRAFT_KEY)?.abort();
-    abortControllersRef.current.delete(DRAFT_KEY);
-    setSessions((cur) => ({
-      ...cur,
-      [DRAFT_KEY]: {
-        ...makeDraftSession(cur[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+    chatAbortControllers.get(DRAFT_KEY)?.abort();
+    chatAbortControllers.delete(DRAFT_KEY);
+    setChatPageStoreState((state) => ({
+      ...state,
+      sessions: {
+        ...state.sessions,
+        [DRAFT_KEY]: {
+          ...makeDraftSession(state.sessions[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+        },
       },
     }));
-    setActiveKey(DRAFT_KEY);
+    setChatPageStoreState((state) => ({ ...state, activeKey: DRAFT_KEY }));
   }, []);
 
   const selectConv = useCallback((id: string) => {
     if (activeKey === id) return;
     const existing = sessions[id];
-    setActiveKey(id);
+    setChatPageStoreState((state) => ({ ...state, activeKey: id }));
     if (!existing || existing.detailStatus === "error" || existing.messages.length === 0) {
       void loadConversation(id, { activate: false });
     }
@@ -469,15 +526,18 @@ export default function Chat() {
       alert(`删除失败: ${extractErr(e)}`);
       return;
     }
-    abortControllersRef.current.get(id)?.abort();
-    abortControllersRef.current.delete(id);
-    setSessions((cur) => {
-      const next = { ...cur };
-      delete next[id];
-      return next;
+    chatAbortControllers.get(id)?.abort();
+    chatAbortControllers.delete(id);
+    setChatPageStoreState((state) => {
+      const nextSessions = { ...state.sessions };
+      delete nextSessions[id];
+      return {
+        ...state,
+        sessions: nextSessions,
+      };
     });
     if (activeKey === id) {
-      setActiveKey(DRAFT_KEY);
+      setChatPageStoreState((state) => ({ ...state, activeKey: DRAFT_KEY }));
     }
     void loadConvs({ preserveList: true });
   }, [activeKey, loadConvs]);
@@ -514,18 +574,21 @@ export default function Chat() {
   const refreshAfterTurn = useCallback(async (key: string, conversationId: string, requestId: number) => {
     await loadConversation(conversationId, { activate: false, preserveMessages: true });
     await loadConvs({ preserveList: true });
-    setSessions((cur) => {
-      const session = cur[key];
+    setChatPageStoreState((state) => {
+      const session = state.sessions[key];
       if (!session?.pending || session.pending.requestId !== requestId || session.pending.status !== "done") {
-        return cur;
+        return state;
       }
       return {
-        ...cur,
-        [key]: {
-          ...session,
-          inFlight: false,
-          pending: null,
-          turnStatus: "done",
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [key]: {
+            ...session,
+            inFlight: false,
+            pending: null,
+            turnStatus: "done",
+          },
         },
       };
     });
@@ -574,24 +637,27 @@ export default function Chat() {
         setConvs((cur) => upsertConversation(cur, conversation));
         targetKey = conversation.id;
         conversationId = conversation.id;
-        setSessions((cur) => ({
-          ...cur,
-          [DRAFT_KEY]: makeDraftSession(cur[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
-          [conversation.id]: {
-            key: conversation.id,
-            conversationId: conversation.id,
-            conversation,
-            detailStatus: "loaded",
-            detailError: null,
-            turnStatus: "waiting",
-            messages: [],
-            composerText: "",
-            selectedAgent: agentForTurn,
-            pending: { ...pendingTurn, conversationId: conversation.id, baseMessageCount: 0 },
-            inFlight: true,
+        setChatPageStoreState((state) => ({
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [DRAFT_KEY]: makeDraftSession(state.sessions[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+            [conversation.id]: {
+              key: conversation.id,
+              conversationId: conversation.id,
+              conversation,
+              detailStatus: "loaded",
+              detailError: null,
+              turnStatus: "waiting",
+              messages: [],
+              composerText: "",
+              selectedAgent: agentForTurn,
+              pending: { ...pendingTurn, conversationId: conversation.id, baseMessageCount: 0 },
+              inFlight: true,
+            },
           },
         }));
-        setActiveKey(conversation.id);
+        setChatPageStoreState((state) => ({ ...state, activeKey: conversation.id }));
         api.updateConversationConfig(conversation.id, { agent_profile: agentForTurn }).catch(() => {});
       } catch (e) {
         patchSession(DRAFT_KEY, (current) => ({
@@ -618,7 +684,7 @@ export default function Chat() {
         : undefined;
     const sampling = samplingFromEntry(entry);
     const ctrl = new AbortController();
-    abortControllersRef.current.set(targetKey, ctrl);
+    chatAbortControllers.set(targetKey, ctrl);
 
     try {
       const result = await runTurn([{ role: "user", content: text } satisfies ChatTurnMsg], {
@@ -630,40 +696,46 @@ export default function Chat() {
         agentProfile: agentForTurn,
         signal: ctrl.signal,
         onEvent: (ev) => {
-          setSessions((cur) => {
-            const current = cur[targetKey];
-            if (!current?.pending || current.pending.requestId !== requestId) return cur;
+          setChatPageStoreState((state) => {
+            const current = state.sessions[targetKey];
+            if (!current?.pending || current.pending.requestId !== requestId) return state;
             return {
-              ...cur,
-              [targetKey]: {
-                ...current,
-                turnStatus: "streaming",
-                pending: {
-                  ...current.pending,
-                  blocks: applyEvent(current.pending.blocks, ev),
+              ...state,
+              sessions: {
+                ...state.sessions,
+                [targetKey]: {
+                  ...current,
+                  turnStatus: "streaming",
+                  pending: {
+                    ...current.pending,
+                    blocks: applyEvent(current.pending.blocks, ev),
+                  },
                 },
               },
             };
           });
         },
       });
-      setSessions((cur) => {
-        const current = cur[targetKey];
-        if (!current?.pending || current.pending.requestId !== requestId) return cur;
+      setChatPageStoreState((state) => {
+        const current = state.sessions[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return state;
         return {
-          ...cur,
-          [targetKey]: {
-            ...current,
-            inFlight: false,
-            turnStatus: result.aborted ? "aborted" : "refreshing",
-            pending: {
-              ...current.pending,
-              status: result.aborted ? "aborted" : "done",
-              meta: {
-                inputTokens: result.inputTokens,
-                outputTokens: result.outputTokens,
-                latencyMs: result.latencyMs,
-                model: entryId ?? "?",
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [targetKey]: {
+              ...current,
+              inFlight: false,
+              turnStatus: result.aborted ? "aborted" : "refreshing",
+              pending: {
+                ...current.pending,
+                status: result.aborted ? "aborted" : "done",
+                meta: {
+                  inputTokens: result.inputTokens,
+                  outputTokens: result.outputTokens,
+                  latencyMs: result.latencyMs,
+                  model: entryId ?? "?",
+                },
               },
             },
           },
@@ -673,30 +745,33 @@ export default function Chat() {
         void refreshAfterTurn(targetKey, conversationId, requestId);
       }
     } catch (e) {
-      setSessions((cur) => {
-        const current = cur[targetKey];
-        if (!current?.pending || current.pending.requestId !== requestId) return cur;
+      setChatPageStoreState((state) => {
+        const current = state.sessions[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return state;
         return {
-          ...cur,
-          [targetKey]: {
-            ...current,
-            inFlight: false,
-            turnStatus: "error",
-            pending: {
-              ...current.pending,
-              status: "error",
-              errorMsg: e instanceof ChatError ? e.message : extractErr(e),
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [targetKey]: {
+              ...current,
+              inFlight: false,
+              turnStatus: "error",
+              pending: {
+                ...current.pending,
+                status: "error",
+                errorMsg: e instanceof ChatError ? e.message : extractErr(e),
+              },
             },
           },
         };
       });
     } finally {
-      abortControllersRef.current.delete(targetKey);
+      chatAbortControllers.delete(targetKey);
     }
   }, [activeKey, agents, patchSession, providersState, refreshAfterTurn, sessions]);
 
   const handleStop = useCallback(() => {
-    abortControllersRef.current.get(activeKey)?.abort();
+    chatAbortControllers.get(activeKey)?.abort();
   }, [activeKey]);
 
   const handleRetry = useCallback(() => {
@@ -986,7 +1061,7 @@ export default function Chat() {
             )}
             {selectedAgent !== null && (
               <p className="mt-2 text-xs text-muted-foreground">
-                输入 `@` 可补全 `@file:`、`@session:`、`@url:`、`@diff`。冒号后可带空格，发送前会自动按引用格式解析。
+                输入 `@` 可补全 `@file:`、`@session:`、`@url:`、`@diff:`。冒号后可带空格，发送前会自动按引用格式解析。
               </p>
             )}
           </div>

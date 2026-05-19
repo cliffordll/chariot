@@ -23,7 +23,7 @@ class ReferenceMethods(MethodBase):
         for value, kind in (
             ("@file:", "file"),
             ("@url:", "url"),
-            ("@diff", "diff"),
+            ("@diff:", "diff"),
             ("@session:", "session"),
         ):
             if value.startswith(raw):
