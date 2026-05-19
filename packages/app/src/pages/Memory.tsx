@@ -1,7 +1,7 @@
-import { ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { JsonTree } from "@/components/collapsible-json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,11 +33,6 @@ export default function Memory() {
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
-  const [detailSections, setDetailSections] = useState({
-    memory: true,
-    events: true,
-    links: true,
-  });
 
   const load = useCallback(async (params: { kind: string | null; search: string | null }) => {
     setState({ kind: "loading" });
@@ -84,10 +79,6 @@ export default function Memory() {
     void load({ kind: kindFilter, search: searchFilter });
   }, [kindFilter, load, searchFilter]);
 
-  const toggleDetailSection = useCallback((section: "memory" | "events" | "links") => {
-    setDetailSections((cur) => ({ ...cur, [section]: !cur[section] }));
-  }, []);
-
   const inspect = useCallback(
     async (id: string) => {
       if (detail.kind !== "idle" && detail.id === id) {
@@ -108,7 +99,6 @@ export default function Memory() {
           events: eventRes.events,
           links: linkRes.links,
         });
-        setDetailSections({ memory: true, events: true, links: true });
       } catch (e) {
         setDetail({
           kind: "err",
@@ -215,13 +205,12 @@ export default function Memory() {
                     <TableHead className="w-20 text-center">pinned</TableHead>
                     <TableHead className="w-24 text-center">archived</TableHead>
                     <TableHead>text</TableHead>
-                    <TableHead className="w-24 text-right">action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {memories.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
                         No memory entries yet.
                       </TableCell>
                     </TableRow>
@@ -229,29 +218,65 @@ export default function Memory() {
                     memories.map((memory) => {
                       const active = detail.kind !== "idle" && detail.id === memory.id;
                       return (
-                        <TableRow key={memory.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {formatDate(memory.created_at)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{memory.kind}</TableCell>
-                          <TableCell className="text-center font-mono text-xs">
-                            {memory.pinned ? "yes" : "no"}
-                          </TableCell>
-                          <TableCell className="text-center font-mono text-xs">
-                            {memory.archived ? "yes" : "no"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{truncate(memory.text, 90)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant={active ? "default" : "outline"}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void inspect(memory.id)}
-                            >
-                              {active ? "Hide" : "Inspect"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
+                        <Fragment key={memory.id}>
+                          <TableRow
+                            className="cursor-pointer"
+                            data-state={active ? "selected" : undefined}
+                            onClick={() => void inspect(memory.id)}
+                          >
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {formatDate(memory.created_at)}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{memory.kind}</TableCell>
+                            <TableCell className="text-center font-mono text-xs">
+                              {memory.pinned ? "yes" : "no"}
+                            </TableCell>
+                            <TableCell className="text-center font-mono text-xs">
+                              {memory.archived ? "yes" : "no"}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{truncate(memory.text, 90)}</TableCell>
+                          </TableRow>
+                          {detail.kind === "loading" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-muted/10 px-4 py-4 text-sm text-muted-foreground">
+                                Loading memory detail...
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {detail.kind === "err" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-destructive/5 px-4 py-4 text-sm text-destructive">
+                                Unable to inspect {detail.id}: {detail.message}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {detail.kind === "ok" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-muted/10 px-4 py-4">
+                                <div className="space-y-4">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      memory
+                                    </Badge>
+                                    <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
+                                  </div>
+                                  <JsonBlock
+                                    title="Memory"
+                                    value={detail.memory}
+                                  />
+                                  <JsonBlock
+                                    title="Events"
+                                    value={detail.events}
+                                  />
+                                  <JsonBlock
+                                    title="Links"
+                                    value={detail.links}
+                                  />
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
                       );
                     })
                   )}
@@ -259,43 +284,6 @@ export default function Memory() {
               </Table>
             </div>
           </section>
-
-          {detail.kind === "loading" && (
-            <p className="text-sm text-muted-foreground">Loading memory detail...</p>
-          )}
-          {detail.kind === "err" && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              Unable to inspect {detail.id}: {detail.message}
-            </div>
-          )}
-          {detail.kind === "ok" && (
-            <section className="space-y-4 rounded-lg border border-border p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  memory
-                </Badge>
-                <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
-              </div>
-              <JsonBlock
-                title="Memory"
-                value={detail.memory}
-                expanded={detailSections.memory}
-                onToggle={() => toggleDetailSection("memory")}
-              />
-              <JsonBlock
-                title="Events"
-                value={detail.events}
-                expanded={detailSections.events}
-                onToggle={() => toggleDetailSection("events")}
-              />
-              <JsonBlock
-                title="Links"
-                value={detail.links}
-                expanded={detailSections.links}
-                onToggle={() => toggleDetailSection("links")}
-              />
-            </section>
-          )}
         </div>
       )}
     </section>
@@ -325,29 +313,18 @@ function SectionHeader({
 function JsonBlock({
   title,
   value,
-  expanded,
-  onToggle,
 }: {
   title: string;
   value: unknown;
-  expanded: boolean;
-  onToggle: () => void;
 }) {
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between rounded-md border border-border bg-muted/10 px-3 py-2 text-left hover:bg-muted/20"
-        onClick={onToggle}
-      >
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">{title}</h3>
-        <ChevronDown className={"h-3.5 w-3.5 text-muted-foreground transition " + (expanded ? "" : "-rotate-90")} />
-      </button>
-      {expanded && (
-        <pre className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(value, null, 2)}
-        </pre>
-      )}
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">{title}</h3>
+        <div className="max-h-[28rem] overflow-auto rounded-lg border border-border bg-background/80 p-3 text-xs font-mono">
+          <JsonTree value={value} />
+        </div>
+      </div>
     </div>
   );
 }

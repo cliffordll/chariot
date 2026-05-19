@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
   Dialog,
   DialogContent,
@@ -246,9 +247,7 @@ export default function Context() {
                             {expanded && (
                               <tr className="border-t border-border bg-muted/20">
                                 <td colSpan={4} className="px-3 py-3">
-                                  <pre className="overflow-auto rounded-md border border-border bg-background p-3 text-xs leading-5 whitespace-pre-wrap break-words">
-                                    {JSON.stringify(version.spec, null, 2)}
-                                  </pre>
+                                  <CollapsibleJson title="Spec JSON" value={version.spec} defaultExpanded maxHeightClassName="max-h-72" />
                                 </td>
                               </tr>
                             )}

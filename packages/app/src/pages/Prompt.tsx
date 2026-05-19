@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
   Dialog,
   DialogContent,
@@ -259,9 +260,7 @@ export default function Prompt() {
                                   {layers.length === 0 ? (
                                     <p className="text-xs text-muted-foreground">(no layers)</p>
                                   ) : (
-                                    <pre className="overflow-auto rounded-md border border-border bg-background p-3 text-xs leading-5 whitespace-pre-wrap break-words">
-                                      {JSON.stringify(layers, null, 2)}
-                                    </pre>
+                                    <CollapsibleJson title="Layers" value={layers} defaultExpanded maxHeightClassName="max-h-72" />
                                   )}
                                 </td>
                               </tr>
@@ -480,25 +479,14 @@ export function TracePanel({ trace }: { trace: PromptTrace }) {
         </div>
       </div>
 
-      <section className="space-y-2">
-        <div className="space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Request</h4>
-          <p className="text-xs text-muted-foreground">The final request snapshot sent to the model.</p>
-        </div>
-        <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(trace.request, null, 2)}
-        </pre>
-      </section>
-
-      <section className="space-y-2">
-        <div className="space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Source refs</h4>
-          <p className="text-xs text-muted-foreground">The full source_refs payload for this trace.</p>
-        </div>
-        <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(trace.source_refs, null, 2)}
-        </pre>
-      </section>
+      <div className="space-y-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Request</div>
+        <CollapsibleJson value={trace.request} defaultExpanded maxHeightClassName="max-h-72" />
+      </div>
+      <div className="space-y-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source refs</div>
+        <CollapsibleJson value={trace.source_refs} defaultExpanded maxHeightClassName="max-h-72" />
+      </div>
     </div>
   );
 }

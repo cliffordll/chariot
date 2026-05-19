@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -542,9 +543,7 @@ function SchemaBlock({ tool }: { tool: Tool }) {
           options 不合法 → 当前没有 schema;修正 options 后 Save。
         </p>
       ) : (
-        <pre className="max-h-48 overflow-auto rounded bg-background p-2 font-mono text-[11px] leading-snug">
-          {JSON.stringify(tool.schema_, null, 2)}
-        </pre>
+        <CollapsibleJson title="Anthropic schema JSON" value={tool.schema_} defaultExpanded maxHeightClassName="max-h-48" />
       )}
     </div>
   );

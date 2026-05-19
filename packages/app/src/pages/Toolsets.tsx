@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -520,14 +521,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function MetaBlock({ title, value }: { title: string; value: Record<string, unknown> }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-sm font-medium">{title}</div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-background/80 p-3 text-xs">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </div>
-  );
+  return <CollapsibleJson title={title} value={value} />;
 }
 
 function formatDateTime(value: string | null): string {

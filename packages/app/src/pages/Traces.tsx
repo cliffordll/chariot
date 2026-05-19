@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -469,15 +470,11 @@ function PromptTracePanel({
           </div>
           <div className="space-y-2">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Request</div>
-            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
-              {JSON.stringify(promptTrace.request, null, 2)}
-            </pre>
+            <CollapsibleJson value={promptTrace.request} defaultExpanded maxHeightClassName="max-h-72" />
           </div>
           <div className="space-y-2">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source refs</div>
-            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
-              {JSON.stringify(promptTrace.source_refs, null, 2)}
-            </pre>
+            <CollapsibleJson value={promptTrace.source_refs} defaultExpanded maxHeightClassName="max-h-72" />
           </div>
         </div>
       ) : promptTraceError ? (
@@ -518,22 +515,16 @@ function ContextTracePanel({
           </div>
           <div className="space-y-2">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Policy</div>
-            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
-              {JSON.stringify(contextData.trace.policy, null, 2)}
-            </pre>
+            <CollapsibleJson value={contextData.trace.policy} defaultExpanded maxHeightClassName="max-h-72" />
           </div>
           <div className="space-y-2">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Selected refs</div>
-            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
-              {JSON.stringify(contextData.trace.selected_refs, null, 2)}
-            </pre>
+            <CollapsibleJson value={contextData.trace.selected_refs} defaultExpanded maxHeightClassName="max-h-72" />
           </div>
           {contextData.snapshot && (
             <div className="space-y-2">
               <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Snapshot</div>
-              <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
-                {JSON.stringify(contextData.snapshot, null, 2)}
-              </pre>
+              <CollapsibleJson value={contextData.snapshot} defaultExpanded maxHeightClassName="max-h-72" />
             </div>
           )}
         </div>
