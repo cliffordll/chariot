@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api, type ContextInspectResult, type ContextSnapshot, type ContextTrace } from "@/lib/api";
+import { api, type ContextInspectResult, type ContextSnapshot } from "@/lib/api";
 
 type LoadState =
   | { kind: "loading" }
@@ -27,7 +27,6 @@ type DetailState =
 export default function Context() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [snapshots, setSnapshots] = useState<ContextSnapshot[]>([]);
-  const [traces, setTraces] = useState<ContextTrace[]>([]);
   const [conversationDraft, setConversationDraft] = useState("");
   const [conversationFilter, setConversationFilter] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
@@ -35,17 +34,12 @@ export default function Context() {
   const load = useCallback(async (conversation_id: string | null) => {
     setState({ kind: "loading" });
     try {
-      const [snapRes, traceRes] = await Promise.all([
-        api.listContextSnapshots({ conversation_id: conversation_id ?? undefined, limit: 50, offset: 0 }),
-        api.listContextTraces({ conversation_id: conversation_id ?? undefined, limit: 50, offset: 0 }),
-      ]);
+      const snapRes = await api.listContextSnapshots({ conversation_id: conversation_id ?? undefined, limit: 50, offset: 0 });
       setSnapshots(snapRes.snapshots);
-      setTraces(traceRes.traces);
       setState({ kind: "ok" });
       setDetail({ kind: "idle" });
     } catch (e) {
       setSnapshots([]);
-      setTraces([]);
       setDetail({ kind: "idle" });
       setState({ kind: "err", message: e instanceof Error ? e.message : String(e) });
     }
@@ -58,9 +52,8 @@ export default function Context() {
   const summary = useMemo(
     () => ({
       snapshots: snapshots.length,
-      traces: traces.length,
     }),
-    [snapshots.length, traces.length],
+    [snapshots.length],
   );
 
   const applyFilter = useCallback(() => {
@@ -138,7 +131,6 @@ export default function Context() {
           </Button>
           <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
             <Badge variant="outline">{summary.snapshots} snapshots</Badge>
-            <Badge variant="outline">{summary.traces} traces</Badge>
           </div>
         </div>
       </div>
@@ -210,64 +202,6 @@ export default function Context() {
             </div>
           </section>
 
-          <section className="space-y-3">
-            <SectionHeader
-              title="Traces"
-              subtitle="Selection trace for each snapshot. Click inspect to view the linked prompt trace reference."
-              count={traces.length}
-            />
-            <div className="overflow-hidden rounded-lg border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-44">created_at</TableHead>
-                    <TableHead className="w-56">snapshot</TableHead>
-                    <TableHead>conversation</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>model</TableHead>
-                    <TableHead className="w-24 text-right">action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {traces.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                        No context traces yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    traces.map((trace) => {
-                      const active = detail.kind !== "idle" && detail.id === trace.id;
-                      return (
-                        <TableRow key={trace.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {formatDate(trace.created_at)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{trace.snapshot_id}</TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {trace.conversation_id ?? "-"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{trace.provider_snapshot}</TableCell>
-                          <TableCell className="font-mono text-xs">{trace.model ?? "-"}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant={active ? "default" : "outline"}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void inspect(trace.id)}
-                            >
-                              {active ? "Hide" : "Inspect"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </section>
-
           {detail.kind === "loading" && (
             <p className="text-sm text-muted-foreground">Loading context detail...</p>
           )}
@@ -280,20 +214,15 @@ export default function Context() {
             <section className="rounded-lg border border-border p-4">
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="font-mono text-[10px]">
-                  context
+                  snapshot
                 </Badge>
                 <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4">
                 <DetailBlock
                   title="Snapshot"
                   subtitle="Raw snapshot payload with request, slices, and source refs."
                   value={detail.data.snapshot}
-                />
-                <DetailBlock
-                  title="Trace"
-                  subtitle="Raw trace payload with policy and selected refs."
-                  value={detail.data.trace}
                 />
               </div>
             </section>

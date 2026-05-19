@@ -15,6 +15,7 @@ import {
 import {
   api,
   type ApiError,
+  type ContextInspectResult,
   type PromptTrace,
   type TraceExecutionGroup,
   type TraceProviderCall,
@@ -32,7 +33,14 @@ type TracesState =
 type DetailState =
   | { kind: "idle" }
   | { kind: "loading"; id: string }
-  | { kind: "ok"; tree: TraceTree; promptTrace: PromptTrace | null; promptTraceError: string | null }
+  | {
+      kind: "ok";
+      tree: TraceTree;
+      promptTrace: PromptTrace | null;
+      promptTraceError: string | null;
+      contextData: ContextInspectResult | null;
+      contextError: string | null;
+    }
   | { kind: "err"; id: string; message: string };
 
 type Filters = {
@@ -59,6 +67,8 @@ export default function Traces() {
       const tree = await api.viewTraceTree(id);
       let promptTrace: PromptTrace | null = null;
       let promptTraceError: string | null = null;
+      let contextData: ContextInspectResult | null = null;
+      let contextError: string | null = null;
       const primaryPromptTraceId = tree.turn.prompt_trace_id;
       if (primaryPromptTraceId) {
         try {
@@ -68,7 +78,15 @@ export default function Traces() {
           promptTraceError = e instanceof Error ? (e as ApiError).message || e.message : String(e);
         }
       }
-      setDetail({ kind: "ok", tree, promptTrace, promptTraceError });
+      const primaryContextTraceId = tree.turn.context_trace_id;
+      if (primaryContextTraceId) {
+        try {
+          contextData = await api.inspectContext(primaryContextTraceId);
+        } catch (e) {
+          contextError = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+        }
+      }
+      setDetail({ kind: "ok", tree, promptTrace, promptTraceError, contextData, contextError });
     } catch (e) {
       const message = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setDetail({ kind: "err", id, message });
@@ -294,6 +312,7 @@ function TurnsListCard({
 function TurnDetailInline({ detail }: { detail: DetailState }) {
   const [sections, setSections] = useState({
     promptTrace: false,
+    contextTrace: false,
     executionTimeline: false,
     checkpoints: false,
   });
@@ -303,6 +322,7 @@ function TurnDetailInline({ detail }: { detail: DetailState }) {
   useEffect(() => {
     setSections({
       promptTrace: false,
+      contextTrace: false,
       executionTimeline: false,
       checkpoints: false,
     });
@@ -356,6 +376,17 @@ function TurnDetailInline({ detail }: { detail: DetailState }) {
           promptTrace={detail.promptTrace}
           promptTraceError={detail.promptTraceError}
           promptTraceId={turn.prompt_trace_id}
+        />
+      </CollapsibleSection>
+      <CollapsibleSection
+        title="Turn context trace"
+        open={sections.contextTrace}
+        onToggle={() => setSections((current) => ({ ...current, contextTrace: !current.contextTrace }))}
+      >
+        <ContextTracePanel
+          contextData={detail.contextData}
+          contextError={detail.contextError}
+          contextTraceId={turn.context_trace_id}
         />
       </CollapsibleSection>
       <CollapsibleSection
@@ -455,6 +486,63 @@ function PromptTracePanel({
         </div>
       ) : promptTraceId ? (
         <div className="font-mono text-xs text-muted-foreground">{promptTraceId}</div>
+      ) : (
+        <div className="text-xs text-muted-foreground">unavailable</div>
+      )}
+    </div>
+  );
+}
+
+function ContextTracePanel({
+  contextData,
+  contextError,
+  contextTraceId,
+}: {
+  contextData: ContextInspectResult | null;
+  contextError: string | null;
+  contextTraceId: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/10 p-4">
+      {contextData?.trace ? (
+        <div className="space-y-3">
+          <div className="text-[11px] text-muted-foreground">
+            Main context selection snapshot for this turn.
+          </div>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="font-mono text-[11px] break-all text-foreground">{contextData.trace.id}</div>
+            <div>
+              snapshot {contextData.trace.snapshot_id} / {contextData.trace.provider_snapshot}
+              {contextData.trace.model ? ` / ${contextData.trace.model}` : ""}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Policy</div>
+            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+              {JSON.stringify(contextData.trace.policy, null, 2)}
+            </pre>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Selected refs</div>
+            <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+              {JSON.stringify(contextData.trace.selected_refs, null, 2)}
+            </pre>
+          </div>
+          {contextData.snapshot && (
+            <div className="space-y-2">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Snapshot</div>
+              <pre className="max-h-72 overflow-auto rounded-md border border-border/70 bg-background/80 p-3 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+                {JSON.stringify(contextData.snapshot, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      ) : contextError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          context trace load failed: {contextError}
+        </div>
+      ) : contextTraceId ? (
+        <div className="font-mono text-xs text-muted-foreground">{contextTraceId}</div>
       ) : (
         <div className="text-xs text-muted-foreground">unavailable</div>
       )}
