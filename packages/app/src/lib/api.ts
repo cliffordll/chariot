@@ -505,6 +505,8 @@ export interface TraceTurn {
   duration_ms: number | null;
   started_at: string;
   finished_at: string | null;
+  provider_calls_count: number;
+  tool_calls_count: number;
   meta: Record<string, unknown>;
 }
 

@@ -25,7 +25,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError
@@ -312,7 +312,15 @@ class TraceRepo:
             stmt = stmt.where(TraceTurnRow.status == status.value)
         stmt = stmt.limit(limit).offset(offset)
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self._turn_row_to_entry(row) for row in rows]
+        counts = await self._list_turn_call_counts([row.id for row in rows])
+        return [
+            self._turn_row_to_entry(
+                row,
+                provider_calls_count=counts.get(row.id, {}).get("provider_calls_count", 0),
+                tool_calls_count=counts.get(row.id, {}).get("tool_calls_count", 0),
+            )
+            for row in rows
+        ]
 
     async def list_provider_calls(self, turn_id: str) -> list[TraceProviderCall]:
         stmt = (
@@ -392,8 +400,36 @@ class TraceRepo:
             raise ConfigError(f"trace {label} JSON 顶层必须是 object")
         return cast(dict[str, Any], data)
 
+    async def _list_turn_call_counts(self, turn_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not turn_ids:
+            return {}
+        provider_stmt = (
+            select(TraceProviderCallRow.turn_id, func.count().label("count"))
+            .where(TraceProviderCallRow.turn_id.in_(turn_ids))
+            .group_by(TraceProviderCallRow.turn_id)
+        )
+        tool_stmt = (
+            select(TraceToolCallRow.turn_id, func.count().label("count"))
+            .where(TraceToolCallRow.turn_id.in_(turn_ids))
+            .group_by(TraceToolCallRow.turn_id)
+        )
+        provider_rows = (await self.session.execute(provider_stmt)).all()
+        tool_rows = (await self.session.execute(tool_stmt)).all()
+        counts: dict[str, dict[str, int]] = {turn_id: {} for turn_id in turn_ids}
+        for turn_id, count in provider_rows:
+            counts[turn_id]["provider_calls_count"] = int(count)
+        for turn_id, count in tool_rows:
+            counts[turn_id]["tool_calls_count"] = int(count)
+        return counts
+
     @classmethod
-    def _turn_row_to_entry(cls, row: TraceTurnRow) -> TraceTurn:
+    def _turn_row_to_entry(
+        cls,
+        row: TraceTurnRow,
+        *,
+        provider_calls_count: int = 0,
+        tool_calls_count: int = 0,
+    ) -> TraceTurn:
         return TraceTurn(
             id=row.id,
             conversation_id=row.conversation_id,
@@ -419,6 +455,8 @@ class TraceRepo:
             duration_ms=row.duration_ms,
             started_at=row.started_at,
             finished_at=row.finished_at,
+            provider_calls_count=provider_calls_count,
+            tool_calls_count=tool_calls_count,
             meta=cls._deserialize_dict("meta", row.meta),
         )
 

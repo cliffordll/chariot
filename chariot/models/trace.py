@@ -65,6 +65,8 @@ class TraceTurn:
     duration_ms: int | None
     started_at: datetime
     finished_at: datetime | None
+    provider_calls_count: int = 0
+    tool_calls_count: int = 0
     meta: dict[str, Any] = field(default_factory=dict)
 
 

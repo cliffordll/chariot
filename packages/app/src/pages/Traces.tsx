@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,7 +75,7 @@ export default function Traces() {
         setState({ kind: "ok", turns });
         const d = detailRef.current;
         const currentId = d.kind === "ok" ? d.tree.turn.id : d.kind === "loading" || d.kind === "err" ? d.id : null;
-        const target = preferredId ?? currentId ?? turns[0]?.id ?? null;
+        const target = preferredId ?? currentId;
         if (target) {
           void loadTree(target);
         } else {
@@ -89,6 +89,17 @@ export default function Traces() {
     },
     [filters, loadTree],
   );
+
+  const handleSelectTurn = useCallback((id: string) => {
+    const current = detailRef.current;
+    const currentId =
+      current.kind === "ok" ? current.tree.turn.id : current.kind === "loading" || current.kind === "err" ? current.id : null;
+    if (currentId === id) {
+      setDetail({ kind: "idle" });
+      return;
+    }
+    void loadTree(id);
+  }, [loadTree]);
 
   useEffect(() => {
     void load();
@@ -134,10 +145,12 @@ export default function Traces() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(24rem,1.2fr)]">
-        <TurnsListCard state={state} selectedId={selectedId(detail)} onSelect={loadTree} />
-        <TurnDetailCard detail={detail} />
-      </div>
+      <TurnsListCard
+        state={state}
+        detail={detail}
+        selectedId={selectedId(detail)}
+        onSelect={handleSelectTurn}
+      />
     </section>
   );
 }
@@ -191,10 +204,12 @@ function FiltersBar({
 
 function TurnsListCard({
   state,
+  detail,
   selectedId,
   onSelect,
 }: {
   state: TracesState;
+  detail: DetailState;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -202,7 +217,10 @@ function TurnsListCard({
   if (state.kind === "err") return <Panel title="Recent Turns" tone="danger">{state.message}</Panel>;
 
   return (
-    <Panel title="Recent Turns" subtitle={`${state.turns.length} turns`}>
+    <Panel
+      title="Recent Turns"
+      subtitle={`${state.turns.length} turns · M=模型调用次数 / T=工具调用次数`}
+    >
       {state.turns.length === 0 ? (
         <p className="text-sm text-muted-foreground">No trace turns yet. Run a chat to populate.</p>
       ) : (
@@ -210,30 +228,48 @@ function TurnsListCard({
           <TableHeader>
             <TableRow>
               <TableHead>Status</TableHead>
-              <TableHead>Provider</TableHead>
+              <TableHead>Reason</TableHead>
+              <TableHead>Calls</TableHead>
+              <TableHead>Conversation</TableHead>
+              <TableHead>Turn</TableHead>
               <TableHead>Started</TableHead>
-              <TableHead>Duration</TableHead>
-              <TableHead>Tokens</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {state.turns.map((t) => (
-              <TableRow
-                key={t.id}
-                data-state={selectedId === t.id ? "selected" : undefined}
-                className="cursor-pointer"
-                onClick={() => onSelect(t.id)}
-              >
-                <TableCell>
-                  <StatusBadge status={t.status} />
-                </TableCell>
-                <TableCell>{t.provider_snapshot}{t.model ? `/${t.model}` : ""}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{formatDateTime(t.started_at)}</TableCell>
-                <TableCell className="text-xs">{formatDuration(t.duration_ms)}</TableCell>
-                <TableCell className="text-xs">
-                  {(t.input_tokens ?? "-")}/{(t.output_tokens ?? "-")}
-                </TableCell>
-              </TableRow>
+              <Fragment key={t.id}>
+                <TableRow
+                  data-state={selectedId === t.id ? "selected" : undefined}
+                  className="cursor-pointer"
+                  onClick={() => onSelect(t.id)}
+                >
+                  <TableCell>
+                    <StatusBadge status={t.status} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {t.stop_reason ?? "-"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    M{t.provider_calls_count} / T{t.tool_calls_count}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {t.conversation_id ?? "-"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {t.id}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDateTime(t.started_at)}</TableCell>
+                </TableRow>
+                {selectedId === t.id && detail.kind !== "idle" && (
+                  <TableRow className="bg-muted/20">
+                    <TableCell colSpan={6} className="p-0">
+                      <div className="p-4">
+                        <TurnDetailInline detail={detail} />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             ))}
           </TableBody>
         </Table>
@@ -242,47 +278,56 @@ function TurnsListCard({
   );
 }
 
-function TurnDetailCard({ detail }: { detail: DetailState }) {
-  if (detail.kind === "idle") return <Panel title="Turn Detail">Select a turn to expand.</Panel>;
-  if (detail.kind === "loading") return <Panel title="Turn Detail">Loading {detail.id}...</Panel>;
-  if (detail.kind === "err") return <Panel title="Turn Detail" tone="danger">{detail.message}</Panel>;
+function TurnDetailInline({ detail }: { detail: DetailState }) {
+  if (detail.kind === "idle") return null;
+  if (detail.kind === "loading") return <div className="text-sm text-muted-foreground">Loading {detail.id}...</div>;
+  if (detail.kind === "err") {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        {detail.message}
+      </div>
+    );
+  }
 
   const { turn, provider_calls, tool_calls, checkpoints } = detail.tree;
 
   return (
-    <Panel title="Turn Detail" subtitle={turn.id}>
-      <div className="space-y-5">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={turn.status} />
-            <Badge variant="outline">{turn.provider_snapshot}{turn.model ? `/${turn.model}` : ""}</Badge>
-            {turn.stop_reason && <Badge variant="secondary">{turn.stop_reason}</Badge>}
-            {turn.agent_profile && <Badge variant="outline">agent: {turn.agent_profile}</Badge>}
-          </div>
-          {turn.error_type && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              {turn.error_type}: {turn.error_message || ""}
-            </div>
-          )}
-          <div className="grid gap-1 text-sm text-muted-foreground">
-            <span>started: {formatDateTime(turn.started_at)}</span>
-            <span>finished: {formatDateTime(turn.finished_at)}</span>
-            <span>duration: {formatDuration(turn.duration_ms)}</span>
-            <span>
-              tokens in/out: {turn.input_tokens ?? "-"}/{turn.output_tokens ?? "-"}
-              {turn.cost_usd !== null ? ` · cost: $${turn.cost_usd.toFixed(6)} (${turn.cost_status})` : ""}
-            </span>
-            {turn.conversation_id && <span>conversation: {turn.conversation_id}</span>}
-            {turn.task_id && <span>task: {turn.task_id}</span>}
-          </div>
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>status: {turn.status}</span>
+          <span>reason: {turn.stop_reason ?? "-"}</span>
+          <span>provider: {turn.provider_snapshot}{turn.model ? `/${turn.model}` : ""}</span>
+          {turn.agent_profile && <span>agent: {turn.agent_profile}</span>}
         </div>
-
-        <ReflectionPanel meta={turn.meta} />
-        <SectionList title={`Provider calls (${provider_calls.length})`} items={provider_calls.map(formatProviderCall)} />
-        <SectionList title={`Tool calls (${tool_calls.length})`} items={tool_calls.map(formatToolCall)} />
-        <SectionList title={`Checkpoints (${checkpoints.length})`} items={checkpoints.map((cp) => ({ key: cp.id, line: `${cp.kind} @ ${formatDateTime(cp.created_at)}`, details: cp.snapshot_id ? `snapshot=${cp.snapshot_id}` : null }))} />
+        {turn.error_type && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {turn.error_type}: {turn.error_message || ""}
+          </div>
+        )}
+        <div className="grid gap-1 text-xs text-muted-foreground">
+          <span>started: {formatDateTime(turn.started_at)}</span>
+          <span>finished: {formatDateTime(turn.finished_at)}</span>
+          <span>duration: {formatDuration(turn.duration_ms)}</span>
+          <span>
+            tokens in/out: {turn.input_tokens ?? "-"}/{turn.output_tokens ?? "-"}
+            {turn.cost_usd !== null ? ` · cost: $${turn.cost_usd.toFixed(6)} (${turn.cost_status})` : ""}
+          </span>
+          {turn.task_id && <span>task: {turn.task_id}</span>}
+        </div>
       </div>
-    </Panel>
+
+      <ReflectionPanel meta={turn.meta} />
+      <SectionList
+        title={`Provider calls (${provider_calls.length})`}
+        items={provider_calls.map((pc, index) => formatProviderCall(pc, index + 1))}
+      />
+      <SectionList
+        title={`Tool calls (${tool_calls.length})`}
+        items={tool_calls.map((tc, index) => formatToolCall(tc, index + 1))}
+      />
+      <SectionList title={`Checkpoints (${checkpoints.length})`} items={checkpoints.map((cp) => ({ key: cp.id, line: `${cp.kind} @ ${formatDateTime(cp.created_at)}`, details: cp.snapshot_id ? `snapshot=${cp.snapshot_id}` : null }))} />
+    </div>
   );
 }
 
@@ -297,7 +342,7 @@ function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
   const reason = typeof meta.reflection_previous_reason === "string" ? meta.reflection_previous_reason : "";
   return (
     <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-sm font-medium">Reflection (B4)</div>
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground">Reflection</div>
       <div className="space-y-1 text-xs">
         <div>
           <span className="font-mono text-muted-foreground">iteration:</span> {iteration}
@@ -314,7 +359,7 @@ function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
         {reason && (
           <div className="pt-1">
             <span className="font-mono text-muted-foreground">reason:</span>
-            <pre className="mt-1 whitespace-pre-wrap break-all text-[11px]">{reason}</pre>
+            <pre className="mt-1 text-xs leading-5 whitespace-pre-wrap break-all">{reason}</pre>
           </div>
         )}
       </div>
@@ -322,9 +367,9 @@ function ReflectionPanel({ meta }: { meta: Record<string, unknown> }) {
   );
 }
 
-function formatProviderCall(pc: TraceProviderCall): { key: string; line: string; details: string | null } {
+function formatProviderCall(pc: TraceProviderCall, index: number): { key: string; line: string; details: string | null } {
   const err = pc.error_type ? `  error=${pc.error_type}` : "";
-  const line = `${pc.provider_snapshot}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
+  const line = `#${index}  ${pc.provider_snapshot}${pc.model ? "/" + pc.model : ""}  latency=${formatDuration(pc.latency_ms)}${err}`;
   const detailsParts: string[] = [];
   if (Object.keys(pc.request_summary).length) {
     detailsParts.push("request: " + JSON.stringify(pc.request_summary));
@@ -335,9 +380,9 @@ function formatProviderCall(pc: TraceProviderCall): { key: string; line: string;
   return { key: pc.id, line, details: detailsParts.join("\n") || null };
 }
 
-function formatToolCall(tc: TraceToolCall): { key: string; line: string; details: string | null } {
+function formatToolCall(tc: TraceToolCall, index: number): { key: string; line: string; details: string | null } {
   const err = tc.error_message ? `  error=${tc.error_message}` : "";
-  const line = `${tc.tool_name}  [${tc.status}]  duration=${formatDuration(tc.duration_ms)}${err}`;
+  const line = `#${index}  ${tc.tool_name}  [${tc.status}]  duration=${formatDuration(tc.duration_ms)}${err}`;
   const detailsParts: string[] = [];
   if (Object.keys(tc.arguments).length) {
     detailsParts.push("args: " + JSON.stringify(tc.arguments));
@@ -357,15 +402,19 @@ function SectionList({
 }) {
   return (
     <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-sm font-medium">{title}</div>
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</div>
       {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">(empty)</p>
+        <p className="text-[11px] text-muted-foreground">(empty)</p>
       ) : (
         <div className="space-y-2">
           {items.map((item) => (
-            <div key={item.key} className="rounded bg-background/80 p-3 text-xs">
-              <div className="font-mono">{item.line}</div>
-              {item.details && <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] text-muted-foreground">{item.details}</pre>}
+            <div key={item.key} className="rounded-md border border-border/70 bg-background/80 p-3 text-[11px]">
+              <div className="font-mono leading-5 text-foreground">{item.line}</div>
+              {item.details && (
+                <pre className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-5 whitespace-pre-wrap break-all text-muted-foreground">
+                  {item.details}
+                </pre>
+              )}
             </div>
           ))}
         </div>

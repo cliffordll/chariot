@@ -107,6 +107,8 @@ class TraceApi:
             "duration_ms": turn.duration_ms,
             "started_at": turn.started_at.isoformat(),
             "finished_at": turn.finished_at.isoformat() if turn.finished_at is not None else None,
+            "provider_calls_count": turn.provider_calls_count,
+            "tool_calls_count": turn.tool_calls_count,
             "meta": turn.meta,
         }
 
