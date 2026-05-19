@@ -5,7 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest_asyncio
+from sqlalchemy import select
+from sqlalchemy import text as sa_text
 
+from chariot.database.models import (
+    ContextSnapshotRow,
+    ContextTraceRow,
+    MemoryLinkRow,
+    PromptTraceRow,
+    TraceCheckpointRow,
+    TraceProviderCallRow,
+    TraceToolCallRow,
+    TraceTurnRow,
+)
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.conversation_repo import ConversationRepo
 
@@ -141,10 +153,185 @@ async def test_delete_conversation_removes_from_fts(sessionmaker) -> None:
     assert hits == []
 
 
+async def test_delete_conversation_cascades_related_records(sessionmaker) -> None:
+    async with sessionmaker() as session:
+        repo = ConversationRepo(session)
+        await repo.create("01CONV")
+        await repo.create("01OTHER")
+        await repo.append_message("01CONV", "user", "delete me too")
+        await repo.append_message("01OTHER", "user", "keep me")
+
+        snapshot = ContextSnapshotRow(
+            id="snapshot-conv",
+            conversation_id="01CONV",
+            provider_snapshot="mock",
+        )
+        prompt_trace = PromptTraceRow(
+            id="prompt-trace-conv",
+            bundle_id="bundle-1",
+            version_id="version-1",
+            conversation_id="01CONV",
+            provider_snapshot="mock",
+        )
+        session.add_all(
+            [
+                snapshot,
+                prompt_trace,
+                ContextTraceRow(
+                    id="context-trace-conv",
+                    snapshot_id="snapshot-conv",
+                    conversation_id="01CONV",
+                    provider_snapshot="mock",
+                    prompt_trace_id="prompt-trace-conv",
+                ),
+                TraceTurnRow(
+                    id="turn-conv",
+                    conversation_id="01CONV",
+                    provider_snapshot="mock",
+                    status="completed",
+                ),
+                TraceProviderCallRow(
+                    id="provider-call-conv",
+                    turn_id="turn-conv",
+                    provider_snapshot="mock",
+                ),
+                TraceToolCallRow(
+                    id="tool-call-conv",
+                    turn_id="turn-conv",
+                    tool_name="read_file",
+                    status="completed",
+                ),
+                TraceCheckpointRow(
+                    id="checkpoint-conv",
+                    turn_id="turn-conv",
+                    kind="after_model",
+                ),
+                MemoryLinkRow(
+                    memory_id="memory-conv",
+                    link_type="conversation",
+                    link_value="01CONV",
+                ),
+                MemoryLinkRow(
+                    memory_id="memory-other-type",
+                    link_type="message",
+                    link_value="01CONV",
+                ),
+                TraceTurnRow(
+                    id="turn-other",
+                    conversation_id="01OTHER",
+                    provider_snapshot="mock",
+                    status="completed",
+                ),
+                TraceProviderCallRow(
+                    id="provider-call-other",
+                    turn_id="turn-other",
+                    provider_snapshot="mock",
+                ),
+                MemoryLinkRow(
+                    memory_id="memory-other-conversation",
+                    link_type="conversation",
+                    link_value="01OTHER",
+                ),
+            ],
+        )
+        await session.commit()
+
+        await repo.delete("01CONV")
+
+        assert (
+            await session.scalar(
+                select(TraceTurnRow.id).where(TraceTurnRow.id == "turn-conv"),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(TraceProviderCallRow.id).where(
+                    TraceProviderCallRow.id == "provider-call-conv",
+                ),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(TraceToolCallRow.id).where(TraceToolCallRow.id == "tool-call-conv"),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(TraceCheckpointRow.id).where(
+                    TraceCheckpointRow.id == "checkpoint-conv",
+                ),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(PromptTraceRow.id).where(PromptTraceRow.conversation_id == "01CONV"),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(ContextSnapshotRow.id).where(
+                    ContextSnapshotRow.conversation_id == "01CONV",
+                ),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(ContextTraceRow.id).where(ContextTraceRow.conversation_id == "01CONV"),
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(MemoryLinkRow.id).where(
+                    MemoryLinkRow.link_type == "conversation",
+                    MemoryLinkRow.link_value == "01CONV",
+                ),
+            )
+            is None
+        )
+
+        assert (
+            await session.scalar(
+                select(TraceTurnRow.id).where(TraceTurnRow.id == "turn-other"),
+            )
+            == "turn-other"
+        )
+        assert (
+            await session.scalar(
+                select(TraceProviderCallRow.id).where(
+                    TraceProviderCallRow.id == "provider-call-other",
+                ),
+            )
+            == "provider-call-other"
+        )
+        assert (
+            await session.scalar(
+                select(MemoryLinkRow.id).where(
+                    MemoryLinkRow.link_type == "message",
+                    MemoryLinkRow.link_value == "01CONV",
+                ),
+            )
+            is not None
+        )
+        assert (
+            await session.scalar(
+                select(MemoryLinkRow.id).where(
+                    MemoryLinkRow.link_type == "conversation",
+                    MemoryLinkRow.link_value == "01OTHER",
+                ),
+            )
+            is not None
+        )
+
+
 async def test_rebuild_fts_recovers_orphan_state(sessionmaker) -> None:
     """模拟 FTS 跟 messages 不同步:手动清 messages_fts → rebuild_fts 全量回填。"""
-    from sqlalchemy import text as sa_text
-
     async with sessionmaker() as session:
         repo = ConversationRepo(session)
         await repo.create("01CONV")

@@ -141,6 +141,12 @@ def test_conversation_show_requires_id() -> None:
     assert result.exit_code != 0
 
 
+@pytest.mark.parametrize("argv", [["conversation", "rm"], ["conversation", "remove"]])
+def test_conversation_rm_and_remove_are_not_supported(argv: list[str]) -> None:
+    result = runner.invoke(app, argv)
+    assert result.exit_code != 0
+
+
 def test_provider_use_requires_name() -> None:
     result = runner.invoke(app, ["provider", "use"])
     assert result.exit_code != 0

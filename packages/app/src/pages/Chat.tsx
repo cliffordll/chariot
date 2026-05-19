@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, Pencil, RotateCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
@@ -289,6 +289,7 @@ export default function Chat() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
   const [convsErr, setConvsErr] = useState<string | null>(null);
+  const [refreshingConvIds, setRefreshingConvIds] = useState<string[]>([]);
   const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -573,6 +574,18 @@ export default function Chat() {
     void loadConversation(id, { activate: false, preserveMessages: true });
   }, [loadConversation, loadConvs, patchSession]);
 
+  const handleRefreshConv = useCallback(async (id: string) => {
+    setRefreshingConvIds((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    try {
+      await Promise.all([
+        loadConvs({ preserveList: true }),
+        loadConversation(id, { activate: false, preserveMessages: true }),
+      ]);
+    } finally {
+      setRefreshingConvIds((cur) => cur.filter((item) => item !== id));
+    }
+  }, [loadConversation, loadConvs]);
+
   const handleSelectAgent = useCallback((name: string | null) => {
     const key = activeKey;
     patchSession(key, (session) => ({ ...session, selectedAgent: name }));
@@ -852,10 +865,11 @@ export default function Chat() {
             <Button
               variant="outline"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2.5 text-xs"
               onClick={() => void loadConvs()}
+              title="refresh conversations"
             >
-              ⟳
+              <RotateCw className="h-2 w-2" />
             </Button>
           </div>
         </div>
@@ -888,6 +902,7 @@ export default function Chat() {
             </li>
             {convs.map((c) => {
               const session = sessions[c.id];
+              const isRefreshing = refreshingConvIds.includes(c.id);
               const isStreaming =
                 session?.turnStatus === "waiting" ||
                 session?.turnStatus === "streaming" ||
@@ -932,28 +947,40 @@ export default function Chat() {
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-col items-center opacity-0 transition group-hover:opacity-100">
+                  <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition group-hover:opacity-100">
                     <button
                       type="button"
-                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-60"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleRefreshConv(c.id);
+                      }}
+                      title="refresh"
+                      disabled={isRefreshing}
+                    >
+                      <RotateCw className={"h-3 w-3 " + (isRefreshing ? "animate-spin" : "")} />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleRenameConv(c.id, c.title);
                       }}
                       title="rename"
                     >
-                      ✎
+                      <Pencil className="h-3 w-3" />
                     </button>
                     <button
                       type="button"
-                      className="text-[10px] text-muted-foreground hover:text-destructive"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleDeleteConv(c.id);
                       }}
                       title="delete"
                     >
-                      ×
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 </li>

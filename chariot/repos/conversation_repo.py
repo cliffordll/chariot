@@ -45,7 +45,18 @@ from chariot.agent.config import (
     DuplicateConversationId,
 )
 from chariot.agent.exceptions import ConversationLockTimeout
-from chariot.database.models import ConversationRow, MessageRow
+from chariot.database.models import (
+    ContextSnapshotRow,
+    ContextTraceRow,
+    ConversationRow,
+    MemoryLinkRow,
+    MessageRow,
+    PromptTraceRow,
+    TraceCheckpointRow,
+    TraceProviderCallRow,
+    TraceToolCallRow,
+    TraceTurnRow,
+)
 
 
 @dataclass(frozen=True)
@@ -242,10 +253,49 @@ class ConversationRepo:
         row = await self._find_row(conversation_id)
         if row is None:
             raise ConversationNotFound(f"未知 conversation id: {conversation_id!r}")
+        turn_ids = list(
+            (
+                await self.session.execute(
+                    select(TraceTurnRow.id).where(TraceTurnRow.conversation_id == conversation_id),
+                )
+            )
+            .scalars()
+            .all(),
+        )
         # v17:同步清 FTS5(参数化绑定避 SQL injection)
         await self.session.execute(
             text("DELETE FROM messages_fts WHERE conversation_id = :cid"),
             {"cid": conversation_id},
+        )
+        if turn_ids:
+            await self.session.execute(
+                sa_delete(TraceProviderCallRow).where(TraceProviderCallRow.turn_id.in_(turn_ids)),
+            )
+            await self.session.execute(
+                sa_delete(TraceToolCallRow).where(TraceToolCallRow.turn_id.in_(turn_ids)),
+            )
+            await self.session.execute(
+                sa_delete(TraceCheckpointRow).where(TraceCheckpointRow.turn_id.in_(turn_ids)),
+            )
+        await self.session.execute(
+            sa_delete(TraceTurnRow).where(TraceTurnRow.conversation_id == conversation_id),
+        )
+        await self.session.execute(
+            sa_delete(PromptTraceRow).where(PromptTraceRow.conversation_id == conversation_id),
+        )
+        await self.session.execute(
+            sa_delete(ContextTraceRow).where(ContextTraceRow.conversation_id == conversation_id),
+        )
+        await self.session.execute(
+            sa_delete(ContextSnapshotRow).where(
+                ContextSnapshotRow.conversation_id == conversation_id,
+            ),
+        )
+        await self.session.execute(
+            sa_delete(MemoryLinkRow).where(
+                MemoryLinkRow.link_type == "conversation",
+                MemoryLinkRow.link_value == conversation_id,
+            ),
         )
         await self.session.execute(
             sa_delete(MessageRow).where(MessageRow.conversation_id == conversation_id),
