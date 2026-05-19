@@ -5,16 +5,15 @@
 - v1:`logs` 表(请求流水)
 - v2(0.3.0):`models` 表 + `settings`(KV)—— 模型配置 DB 化
 - v3(0.3.1):`models` 加 `params` 列;drop `settings` 表(active 概念删除,
-  client 在 body.model 写 entry name 直接路由)
+  client 在 body.model 写 provider 路由引用)
 - v4(0.4.0):加 `conversations / messages / tools` 三表 —— 多轮会话层 +
   Tool 层。messages.role 仅 `user / assistant`(Anthropic 协议原生两种),
   tool_use / tool_result 嵌入 content blocks 数组;tools 4 条 seeded fixture
 - v5(0.6.0):`models` rename → `providers`,`messages.model_name` rename →
-  `provider_name`,`logs.model` rename → `provider`(0.6.0 抽象层已是
+  `provider_snapshot`,`logs.model` rename → `provider`(0.6.0 抽象层已是
   BaseProvider,DB 层跟上;`ChatRequest.model` / options.model 仍叫 model
   对齐 Claude API)
-- v6(0.6.0):`providers` 加 `is_default` 列(同 commit 落 `ProviderRepo.get_default
-  / set_default / unset_default` + CLI `provider use` / `provider show` 命令)
+- v6(0.6.0):`providers` 加 `is_default` 列(历史默认 provider 方案)
 - v7(0.6.5+):平台基础设施最小落点 —— `memories / eval_runs / eval_cases /
   audit_events / checkpoints / skills`
 - v8(0.6.5+):`messages.id` 从自增 int 升到文本主键;新写入消息直接用 ULID
@@ -25,9 +24,18 @@
 - v15(0.7.2-task):`job_runs`
 - v16(0.7.2-tool):`toolsets / toolset_members`(命名 toolset + agent 绑定)
 - v17(0.8.0-evolution):`trace_turns / trace_provider_calls / trace_tool_calls / trace_checkpoints`(Phase B1 trace 平台)
+- v26(0.8.9-provider-identity):`providers` 切到 `id + slug + name`,`settings`
+  单行表承载 `default_provider_id`;provider 真实关系统一转 `provider_id`
+- v27(0.8.10-agent-profile-identity):`agent_profiles.id` + `tasks` /
+  `scheduled_jobs`.`agent_profile_id`
+- v28(0.8.11-auxiliary-identity):`auxiliary_clients.id`
+- v29(0.8.12-toolset-identity):`toolsets.id` + `toolset_members.toolset_id` +
+  `agent_profiles.toolset_id`
+- v30(0.8.13-job-identity):`scheduled_jobs.id` + `job_runs.job_id`
 主键:
 - `LogEntry.id` 是 32 字符 UUID4 hex(`default=` 插入时生成)
-- `ProviderRow.id` / `ToolRow.id` 是自增 int(name 才是用户面 ID)
+- `ToolRow.id` 是自增 int(name 才是用户面 ID)
+- `ProviderRow.id` 是文本主键(0.8.9 起 provider 稳定身份)
 - `ConversationRow.id` / `MessageRow.id` 是 26 字符 ULID 字符串(历史迁移前的旧
   message 行会保留 legacy 文本 id)
 """
@@ -86,19 +94,27 @@ class ProviderRow(Base):
       Anthropic SDK 透传字段,不在重命名范围
     - `params`:JSON,runtime sampling 默认值(temperature / top_p / max_tokens 等),
       0.3.1 加;客户端发请求时若 body 缺字段,前端从此处填(server 不主动注入)
-    - `is_default`(v7 起):0/1;`chariot chat` 不传 `--provider` 时走默认行
-      (是 `is_default=1` 那条)。约束:同时至多一行为 1(由 `ProviderRepo.set_default`
-      原子保证 —— 清所有 + 置选中)
+    - `slug`(v26 起):对外稳定引用(ASCII / CLI / API)
+    - `name`(v26 起):可编辑展示名,不再承担稳定身份
     """
 
     __tablename__ = "providers"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(unique=True, index=True)
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    slug: Mapped[str] = mapped_column(unique=True, index=True)
+    name: Mapped[str] = mapped_column(index=True)
     type: Mapped[str]
     options: Mapped[str]  # JSON-serialized dict
     params: Mapped[str]  # JSON-serialized dict;migration v3 列默认 '{}'
-    is_default: Mapped[int] = mapped_column(default=0)  # 0/1;v7 起 schema 落,逻辑后续 commit
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class SettingsRow(Base):
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    default_provider_id: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
@@ -129,8 +145,8 @@ class MessageRow(Base):
     - `content`:JSON,原样存 anthropic content(字符串或 blocks 数组);
       `SELECT * ORDER BY seq` 直接构成 Anthropic messages 数组,零翻译成本
     - `seq`:会话内单调 0 起;`(conversation_id, seq)` UNIQUE
-    - `provider_name`:仅 role='assistant' 行非空,记本轮用的 provider entry name
-      (v6 起;v4~v5 时叫 `model_name`)
+    - `provider_snapshot`:仅 role='assistant' 行非空,记录本轮展示用 provider 快照;
+      不再承担稳定关系键语义(v6 起;v4~v5 时叫 `model_name`)
     - 不设 FK:cascade delete 由 `ConversationRepo.delete()` 手动 DELETE FROM messages
       WHERE conversation_id = ?,行为不依赖 SQLite PRAGMA foreign_keys 全局开关
     """
@@ -142,7 +158,7 @@ class MessageRow(Base):
     seq: Mapped[int]
     role: Mapped[str]  # 'user' | 'assistant'
     content: Mapped[str]  # JSON-serialized;str 或 list[dict]
-    provider_name: Mapped[str | None] = mapped_column(default=None)
+    provider_snapshot: Mapped[str | None] = mapped_column("provider_snapshot", default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
@@ -294,7 +310,8 @@ class ProviderHealthRow(Base):
 
     __tablename__ = "provider_health"
 
-    provider_name: Mapped[str] = mapped_column(primary_key=True)
+    provider_id: Mapped[str] = mapped_column(primary_key=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     last_ok: Mapped[int] = mapped_column(default=1)
     latency_ms: Mapped[int | None] = mapped_column(default=None)
     error_code: Mapped[str | None] = mapped_column(default=None)
@@ -332,7 +349,10 @@ class PromptVersionRow(Base):
 
 
 class PromptTraceRow(Base):
-    """`prompt_traces` 琛?turn 鐨勭粓鏋滃拰鏉ユ簮蹇呯暀銆?"""
+    """`prompt_traces` 表:记录每轮 prompt 解析结果与来源。
+
+    `provider_id` 是真实关系;`provider_snapshot` 保留当时展示名快照。
+    """
 
     __tablename__ = "prompt_traces"
 
@@ -340,7 +360,8 @@ class PromptTraceRow(Base):
     bundle_id: Mapped[str] = mapped_column(index=True)
     version_id: Mapped[str] = mapped_column(index=True)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name: Mapped[str] = mapped_column(index=True)
+    provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     request: Mapped[str] = mapped_column(default="{}")  # JSON-serialized ChatRequest
     source_refs: Mapped[str] = mapped_column(default="[]")  # JSON-serialized list
@@ -349,11 +370,17 @@ class PromptTraceRow(Base):
 
 
 class ContextSnapshotRow(Base):
+    """`context_snapshots` 表:记录一次上下文装配快照。
+
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
+    """
+
     __tablename__ = "context_snapshots"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name: Mapped[str] = mapped_column(index=True)
+    provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     request: Mapped[str] = mapped_column(default="{}")
     slices: Mapped[str] = mapped_column(default="[]")
@@ -363,12 +390,20 @@ class ContextSnapshotRow(Base):
 
 
 class ContextTraceRow(Base):
+    """`context_traces` 表:记录上下文选择/压缩策略的执行痕迹。
+
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
+    """
+
     __tablename__ = "context_traces"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     snapshot_id: Mapped[str] = mapped_column(index=True)
+    bundle_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    version_id: Mapped[str | None] = mapped_column(default=None, index=True)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
-    provider_name: Mapped[str] = mapped_column(index=True)
+    provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
     model: Mapped[str | None] = mapped_column(default=None)
     prompt_trace_id: Mapped[str | None] = mapped_column(default=None, index=True)
     policy: Mapped[str] = mapped_column(default="{}")
@@ -376,14 +411,41 @@ class ContextTraceRow(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
+class ContextBundleRow(Base):
+    __tablename__ = "context_bundles"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(default=None)
+    is_active: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class ContextVersionRow(Base):
+    __tablename__ = "context_versions"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    bundle_id: Mapped[str] = mapped_column(index=True)
+    version: Mapped[str] = mapped_column(index=True)
+    spec: Mapped[str] = mapped_column(default="{}")
+    is_active: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
 class AgentProfileRow(Base):
+    """`agent_profiles` 表。"""
+
     __tablename__ = "agent_profiles"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     role: Mapped[str] = mapped_column(index=True)
-    prompt_bundle: Mapped[str | None] = mapped_column(default=None)
-    tool_profile: Mapped[str | None] = mapped_column(default=None)
-    provider_profile: Mapped[str | None] = mapped_column(default=None)
+    prompt_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    context_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    toolset_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_id: Mapped[str | None] = mapped_column(default=None)
     budget: Mapped[str] = mapped_column(default="{}")
     meta: Mapped[str] = mapped_column(default="{}")
     # B4 wave 3:reflection 开关 + retry 预算(默认关,跟 ChatRequest 默认对齐)
@@ -403,6 +465,7 @@ class TaskRow(Base):
     kind: Mapped[str] = mapped_column(index=True)
     status: Mapped[str] = mapped_column(index=True)
     agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    agent_profile_id: Mapped[str | None] = mapped_column(default=None, index=True)
     parent_task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     owner: Mapped[str | None] = mapped_column(default=None)
     meta: Mapped[str] = mapped_column(default="{}")
@@ -430,10 +493,12 @@ class ScheduledJobRow(Base):
     __tablename__ = "scheduled_jobs"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     goal: Mapped[str]
     cron: Mapped[str]
     enabled: Mapped[int] = mapped_column(default=1)
     agent_profile: Mapped[str | None] = mapped_column(default=None, index=True)
+    agent_profile_id: Mapped[str | None] = mapped_column(default=None, index=True)
     last_run_status: Mapped[str | None] = mapped_column(default=None)
     last_run_at: Mapped[datetime | None] = mapped_column(default=None)
     next_run_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -447,6 +512,7 @@ class JobRunRow(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     job_name: Mapped[str] = mapped_column(index=True)
+    job_id: Mapped[str | None] = mapped_column(default=None, index=True)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     status: Mapped[str] = mapped_column(index=True)
     error: Mapped[str | None] = mapped_column(default=None)
@@ -458,6 +524,7 @@ class ToolsetRow(Base):
     __tablename__ = "toolsets"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     description: Mapped[str | None] = mapped_column(default=None)
     meta: Mapped[str] = mapped_column(default="{}")
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
@@ -466,13 +533,22 @@ class ToolsetRow(Base):
 
 class ToolsetMemberRow(Base):
     __tablename__ = "toolset_members"
-    __table_args__ = (Index("idx_toolset_members_tool_name", "tool_name"),)
+    __table_args__ = (
+        Index("idx_toolset_members_tool_name", "tool_name"),
+        Index("idx_toolset_members_toolset_id", "toolset_id"),
+    )
 
     toolset_name: Mapped[str] = mapped_column(primary_key=True)
+    toolset_id: Mapped[str | None] = mapped_column(default=None)
     tool_name: Mapped[str] = mapped_column(primary_key=True)
 
 
 class TraceTurnRow(Base):
+    """`trace_turns` 表:记录一次 chat turn 的执行总览。
+
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
+    """
+
     __tablename__ = "trace_turns"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
@@ -480,7 +556,8 @@ class TraceTurnRow(Base):
     agent_profile: Mapped[str | None] = mapped_column(default=None)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     task_run_id: Mapped[str | None] = mapped_column(default=None)
-    provider_name: Mapped[str]
+    provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     model: Mapped[str | None] = mapped_column(default=None)
     prompt_trace_id: Mapped[str | None] = mapped_column(default=None)
     context_trace_id: Mapped[str | None] = mapped_column(default=None)
@@ -502,13 +579,21 @@ class TraceTurnRow(Base):
 
 
 class TraceProviderCallRow(Base):
+    """`trace_provider_calls` 表:记录单次 provider 调用。
+
+    `provider_id` 是真实关系;`provider_snapshot` 保留展示名快照。
+    """
+
     __tablename__ = "trace_provider_calls"
     __table_args__ = (Index("idx_trace_provider_calls_turn", "turn_id"),)
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     turn_id: Mapped[str]
-    provider_name: Mapped[str]
+    provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    provider_snapshot: Mapped[str] = mapped_column("provider_snapshot")
     model: Mapped[str | None] = mapped_column(default=None)
+    prompt_trace_id: Mapped[str | None] = mapped_column(default=None)
+    context_trace_id: Mapped[str | None] = mapped_column(default=None)
     log_id: Mapped[str | None] = mapped_column(default=None)
     request_summary: Mapped[str] = mapped_column(default="{}")
     response_summary: Mapped[str] = mapped_column(default="{}")
@@ -542,15 +627,16 @@ class AuxiliaryClientRow(Base):
     """`auxiliary_clients` 表(v19,B3 wave 2):副 model 路由表。
 
     - `name`:业务面 ID(主键),如 'summarizer' / 'critic_aux'
-    - `provider_entry`:指向 `providers.name`(运行时校验,不加 FK)
-    - `model`:可空;空时回退到 provider_entry options.model
+    - `provider_id`:绑定 provider 身份
+    - `model`:可空;空时回退到 provider options.model
     - `params`:JSON sampling 默认值;独立预算,避免摘要把主任务 token 预算吃光
     """
 
     __tablename__ = "auxiliary_clients"
 
     name: Mapped[str] = mapped_column(primary_key=True)
-    provider_entry: Mapped[str]
+    id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
+    provider_id: Mapped[str]
     model: Mapped[str | None] = mapped_column(default=None)
     params: Mapped[str] = mapped_column(default="{}")  # JSON-serialized dict
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)

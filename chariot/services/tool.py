@@ -27,8 +27,8 @@ class ToolService:
     async def list_enabled(self) -> list[ToolEntry]:
         return await self._repo.list_enabled()
 
-    async def get_entry(self, name: str) -> ToolEntry | None:
-        return await self._repo.get_entry(name)
+    async def get_entry(self, ref: str) -> ToolEntry | None:
+        return await self._repo.get_entry(ref)
 
     # ---- write ----
 

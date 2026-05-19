@@ -55,6 +55,44 @@ async def test_expand_multiple_refs_in_one_message(tmp_path: Path) -> None:
     assert "[content of b.md]" in content
 
 
+async def test_expand_reference_with_space_after_colon(tmp_path: Path) -> None:
+    expander = _build_expander(tmp_path)
+    msgs = [Message(role="user", content="check @file: a.md please")]
+    out = await expander.expand(msgs)
+    content = out[0].content
+    assert isinstance(content, str)
+    assert "[content of a.md]" in content
+
+
+async def test_expand_diff_without_colon(tmp_path: Path) -> None:
+    expander = ReferenceExpander(
+        cwd=tmp_path,
+        allowed_domains=frozenset(),
+        sessionmaker=None,
+        resolvers={"diff": _StubResolver()},
+    )
+    msgs = [Message(role="user", content="review @diff please")]
+    out = await expander.expand(msgs)
+    content = out[0].content
+    assert isinstance(content, str)
+    assert 'type="stub"' in content
+    assert "[content of ]" in content
+
+
+async def test_expand_diff_with_colon_and_space(tmp_path: Path) -> None:
+    expander = ReferenceExpander(
+        cwd=tmp_path,
+        allowed_domains=frozenset(),
+        sessionmaker=None,
+        resolvers={"diff": _StubResolver()},
+    )
+    msgs = [Message(role="user", content="review @diff: HEAD~1 please")]
+    out = await expander.expand(msgs)
+    content = out[0].content
+    assert isinstance(content, str)
+    assert "[content of HEAD~1]" in content
+
+
 async def test_expand_failed_resolver_yields_error_block(tmp_path: Path) -> None:
     expander = _build_expander(tmp_path)
     msgs = [Message(role="user", content="see @file:fail")]

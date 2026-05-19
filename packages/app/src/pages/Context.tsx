@@ -1,101 +1,102 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { api, type ContextInspectResult, type ContextSnapshot, type ContextTrace } from "@/lib/api";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  api,
+  type ApiError,
+  type ContextBundle,
+  type ContextBundleDetail,
+  type ContextVersion,
+} from "@/lib/api";
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ok" }
+  | { kind: "ok"; bundles: ContextBundle[] }
   | { kind: "err"; message: string };
 
-type DetailState =
-  | { kind: "idle" }
-  | { kind: "loading"; id: string }
-  | { kind: "ok"; id: string; data: ContextInspectResult }
-  | { kind: "err"; id: string; message: string };
+type BundleDialogMode =
+  | { kind: "closed" }
+  | { kind: "add" }
+  | { kind: "edit"; bundle: ContextBundle };
 
 export default function Context() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [snapshots, setSnapshots] = useState<ContextSnapshot[]>([]);
-  const [traces, setTraces] = useState<ContextTrace[]>([]);
-  const [conversationDraft, setConversationDraft] = useState("");
-  const [conversationFilter, setConversationFilter] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ContextBundleDetail | null>(null);
+  const [versions, setVersions] = useState<ContextVersion[]>([]);
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+  const [bundleDialog, setBundleDialog] = useState<BundleDialogMode>({ kind: "closed" });
 
-  const load = useCallback(async (conversation_id: string | null) => {
+  const loadBundles = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const [snapRes, traceRes] = await Promise.all([
-        api.listContextSnapshots({ conversation_id: conversation_id ?? undefined, limit: 50, offset: 0 }),
-        api.listContextTraces({ conversation_id: conversation_id ?? undefined, limit: 50, offset: 0 }),
-      ]);
-      setSnapshots(snapRes.snapshots);
-      setTraces(traceRes.traces);
-      setState({ kind: "ok" });
-      setDetail({ kind: "idle" });
+      const { bundles } = await api.listContextBundles();
+      setState({ kind: "ok", bundles });
+      setSelected((cur) => {
+        if (cur && bundles.some((bundle) => bundle.name === cur)) return cur;
+        return bundles[0]?.name ?? null;
+      });
     } catch (e) {
-      setSnapshots([]);
-      setTraces([]);
-      setDetail({ kind: "idle" });
-      setState({ kind: "err", message: e instanceof Error ? e.message : String(e) });
+      const message = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setState({ kind: "err", message });
+    }
+  }, []);
+
+  const loadSelected = useCallback(async (name: string) => {
+    try {
+      const [bundleRes, versionsRes] = await Promise.all([
+        api.getContextBundle(name),
+        api.listContextVersions(name),
+      ]);
+      setDetail(bundleRes.bundle);
+      setVersions(versionsRes.versions);
+      setExpandedVersionId(null);
+    } catch (e) {
+      const message = e instanceof Error ? (e as ApiError).message || e.message : String(e);
+      setDetail(null);
+      setVersions([]);
+      setExpandedVersionId(null);
+      setState({ kind: "err", message });
     }
   }, []);
 
   useEffect(() => {
-    void load(conversationFilter);
-  }, [load, conversationFilter]);
+    void loadBundles();
+  }, [loadBundles]);
 
-  const summary = useMemo(
-    () => ({
-      snapshots: snapshots.length,
-      traces: traces.length,
-    }),
-    [snapshots.length, traces.length],
+  useEffect(() => {
+    if (selected) void loadSelected(selected);
+  }, [selected, loadSelected]);
+
+  const selectedBundle = useMemo(
+    () => (state.kind === "ok" ? state.bundles.find((bundle) => bundle.name === selected) ?? null : null),
+    [state, selected],
   );
 
-  const applyFilter = useCallback(() => {
-    const next = conversationDraft.trim();
-    setConversationFilter(next === "" ? null : next);
-  }, [conversationDraft]);
+  const refreshAll = useCallback(async () => {
+    await loadBundles();
+    if (selected) await loadSelected(selected);
+  }, [loadBundles, loadSelected, selected]);
 
-  const clearFilter = useCallback(() => {
-    setConversationDraft("");
-    setConversationFilter(null);
-  }, []);
-
-  const refresh = useCallback(() => {
-    void load(conversationFilter);
-  }, [conversationFilter, load]);
-
-  const inspect = useCallback(
-    async (id: string) => {
-      if (detail.kind !== "idle" && detail.id === id) {
-        setDetail({ kind: "idle" });
-        return;
-      }
-      setDetail({ kind: "loading", id });
-      try {
-        const data = await api.inspectContext(id);
-        setDetail({ kind: "ok", id, data });
-      } catch (e) {
-        setDetail({
-          kind: "err",
-          id,
-          message: e instanceof Error ? e.message : String(e),
-        });
-      }
+  const activateBundle = useCallback(
+    async (name: string, version?: string) => {
+      await api.activateContextBundle({ name, version });
+      await refreshAll();
     },
-    [detail],
+    [refreshAll],
   );
 
   return (
@@ -104,42 +105,16 @@ export default function Context() {
         <div>
           <h1 className="text-2xl font-semibold">Context</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Read-only viewer for context snapshots and traces.
+            Manage context bundles and inspect runtime snapshots.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh}>
+          <Button size="sm" onClick={() => setBundleDialog({ kind: "add" })}>
+            + New bundle
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void refreshAll()}>
             Refresh
           </Button>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-64 flex-1 space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">
-              conversation filter
-            </label>
-            <Input
-              value={conversationDraft}
-              onChange={(e) => setConversationDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyFilter();
-                }
-              }}
-              placeholder="Optional conversation id"
-            />
-          </div>
-          <Button onClick={applyFilter}>Apply</Button>
-          <Button variant="outline" onClick={clearFilter}>
-            Clear
-          </Button>
-          <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">{summary.snapshots} snapshots</Badge>
-            <Badge variant="outline">{summary.traces} traces</Badge>
-          </div>
         </div>
       </div>
 
@@ -152,197 +127,301 @@ export default function Context() {
 
       {state.kind === "ok" && (
         <div className="space-y-6">
-          <section className="space-y-3">
-            <SectionHeader
-              title="Snapshots"
-              subtitle="Turn-level context snapshots. Click inspect to open the raw payload."
-              count={snapshots.length}
-            />
-            <div className="overflow-hidden rounded-lg border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-44">created_at</TableHead>
-                    <TableHead className="w-56">conversation</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>model</TableHead>
-                    <TableHead className="w-24 text-right">size</TableHead>
-                    <TableHead className="w-24 text-right">action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {snapshots.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                        No context snapshots yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    snapshots.map((snapshot) => {
-                      const active = detail.kind !== "idle" && detail.id === snapshot.id;
-                      return (
-                        <TableRow key={snapshot.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {formatDate(snapshot.created_at)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {snapshot.conversation_id ?? "-"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{snapshot.provider_name}</TableCell>
-                          <TableCell className="font-mono text-xs">{snapshot.model ?? "-"}</TableCell>
-                          <TableCell className="text-right font-mono text-xs">{snapshot.context_size}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant={active ? "default" : "outline"}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void inspect(snapshot.id)}
-                            >
-                              {active ? "Hide" : "Inspect"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </section>
-
-          <section className="space-y-3">
-            <SectionHeader
-              title="Traces"
-              subtitle="Selection trace for each snapshot. Click inspect to view the linked prompt trace reference."
-              count={traces.length}
-            />
-            <div className="overflow-hidden rounded-lg border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-44">created_at</TableHead>
-                    <TableHead className="w-56">snapshot</TableHead>
-                    <TableHead>conversation</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>model</TableHead>
-                    <TableHead className="w-24 text-right">action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {traces.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                        No context traces yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    traces.map((trace) => {
-                      const active = detail.kind !== "idle" && detail.id === trace.id;
-                      return (
-                        <TableRow key={trace.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {formatDate(trace.created_at)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{trace.snapshot_id}</TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {trace.conversation_id ?? "-"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{trace.provider_name}</TableCell>
-                          <TableCell className="font-mono text-xs">{trace.model ?? "-"}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant={active ? "default" : "outline"}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void inspect(trace.id)}
-                            >
-                              {active ? "Hide" : "Inspect"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </section>
-
-          {detail.kind === "loading" && (
-            <p className="text-sm text-muted-foreground">Loading context detail...</p>
-          )}
-          {detail.kind === "err" && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              Unable to inspect {detail.id}: {detail.message}
-            </div>
-          )}
-          {detail.kind === "ok" && (
+          <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
             <section className="rounded-lg border border-border p-4">
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  context
-                </Badge>
-                <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Bundles
+                </h2>
+                <Badge variant="outline">{state.bundles.length}</Badge>
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <DetailBlock
-                  title="Snapshot"
-                  subtitle="Raw snapshot payload with request, slices, and source refs."
-                  value={detail.data.snapshot}
-                />
-                <DetailBlock
-                  title="Trace"
-                  subtitle="Raw trace payload with policy and selected refs."
-                  value={detail.data.trace}
-                />
-              </div>
+              {state.bundles.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No context bundle yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {state.bundles.map((bundle) => {
+                    const active = bundle.name === selected;
+                    return (
+                      <li
+                        key={bundle.name}
+                        className={
+                          "rounded-md border px-3 py-2 transition-colors " +
+                          (active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40")
+                        }
+                      >
+                        <button type="button" className="w-full text-left" onClick={() => setSelected(bundle.name)}>
+                          <div className="flex items-center gap-2">
+                            <code className="font-mono text-sm">{bundle.name}</code>
+                            {bundle.is_active && <Badge>active</Badge>}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            version {bundle.active_version ?? "-"} · {bundle.version_count} versions
+                          </div>
+                          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                            {bundle.description || "No description"}
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </section>
-          )}
+
+            <section className="space-y-6">
+              <div className="rounded-lg border border-border p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-semibold">
+                    {detail?.name ?? selectedBundle?.name ?? "(no selection)"}
+                  </h2>
+                  {detail?.is_active && <Badge>active</Badge>}
+                  {detail?.active_version && <Badge variant="outline">{detail.active_version}</Badge>}
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => detail && setBundleDialog({ kind: "edit", bundle: detail })}
+                      disabled={!detail}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void activateBundle(detail?.name ?? "")}
+                      disabled={!detail}
+                    >
+                      Activate bundle
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Info label="description" value={detail?.description || "-"} />
+                  <Info label="current version" value={detail?.active_version || "-"} />
+                  <Info label="versions" value={String(detail?.version_count ?? 0)} />
+                  <Info label="updated_at" value={formatDate(detail?.updated_at ?? "")} />
+                </div>
+              </div>
+
+              <Card title="Versions" subtitle="Expand a version row to inspect its context policy spec.">
+                <div className="overflow-hidden rounded-md border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2">version</th>
+                        <th className="px-3 py-2">active</th>
+                        <th className="px-3 py-2">updated</th>
+                        <th className="px-3 py-2 text-right">action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {versions.map((version) => {
+                        const expanded = expandedVersionId === version.id;
+                        return (
+                          <Fragment key={version.id}>
+                            <tr className={"border-t border-border " + (expanded ? "bg-primary/5" : "")}>
+                              <td className="px-3 py-2 font-mono">{version.version}</td>
+                              <td className="px-3 py-2">{version.is_active ? "yes" : "no"}</td>
+                              <td className="px-3 py-2 text-xs text-muted-foreground">{formatDate(version.updated_at)}</td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setExpandedVersionId((cur) => (cur === version.id ? null : version.id))}
+                                  >
+                                    {expanded ? "Hide spec" : "Show spec"}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => void activateBundle(version.bundle_name, version.version)}
+                                  >
+                                    Activate
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr className="border-t border-border bg-muted/20">
+                                <td colSpan={4} className="px-3 py-3">
+                                  <CollapsibleJson title="Spec JSON" value={version.spec} defaultExpanded maxHeightClassName="max-h-72" />
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </section>
+          </div>
         </div>
+      )}
+
+      {bundleDialog.kind !== "closed" && (
+        <BundleDialog
+          mode={bundleDialog}
+          onClose={() => setBundleDialog({ kind: "closed" })}
+          onSaved={async (preferredName?: string) => {
+            setBundleDialog({ kind: "closed" });
+            await loadBundles();
+            if (preferredName) {
+              setSelected(preferredName);
+              await loadSelected(preferredName);
+            } else {
+              await refreshAll();
+            }
+          }}
+        />
       )}
     </section>
   );
 }
 
-function SectionHeader({
+function Card({
   title,
   subtitle,
-  count,
+  children,
 }: {
   title: string;
   subtitle: string;
-  count: number;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between gap-3">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
+    <div className="rounded-lg border border-border p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
-      <Badge variant="outline">{count}</Badge>
+      {children}
     </div>
   );
 }
 
-function DetailBlock({
-  title,
-  subtitle,
-  value,
-}: {
-  title: string;
-  subtitle: string;
-  value: ContextInspectResult["snapshot"] | ContextInspectResult["trace"];
-}) {
+function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">{title}</h3>
-        <p className="text-xs text-muted-foreground">{subtitle}</p>
-      </div>
-      <pre className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+    <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm">{value}</div>
     </div>
+  );
+}
+
+function BundleDialog({
+  mode,
+  onClose,
+  onSaved,
+}: {
+  mode: Exclude<BundleDialogMode, { kind: "closed" }>;
+  onClose: () => void;
+  onSaved: (preferredName?: string) => void | Promise<void>;
+}) {
+  const editing = mode.kind === "edit";
+  const [name, setName] = useState(editing ? mode.bundle.name : "");
+  const [rename, setRename] = useState(editing ? mode.bundle.name : "");
+  const [description, setDescription] = useState(editing ? (mode.bundle.description ?? "") : "");
+  const [specText, setSpecText] = useState(
+    JSON.stringify(
+      {
+        version: "v1",
+        name: "default_context_policy",
+        include_conversation_history: true,
+        include_runtime_state: true,
+        include_memory_state: true,
+        include_tool_state: true,
+        include_skill_state: true,
+        include_provider_state: true,
+        include_policy_state: true,
+        trimmed: false,
+      },
+      null,
+      2,
+    ),
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    let spec: Record<string, unknown> | null = null;
+    try {
+      const value = JSON.parse(specText.trim());
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("spec must be a JSON object");
+      }
+      spec = value as Record<string, unknown>;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      if (editing) {
+        await api.updateContextBundle({
+          name,
+          rename: rename.trim() !== name ? rename.trim() : null,
+          description,
+          spec,
+        });
+        await onSaved(rename.trim() || name);
+      } else {
+        await api.addContextBundle({
+          name: name.trim(),
+          description: description.trim() || null,
+          spec,
+        });
+        await onSaved(name.trim());
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{editing ? "Edit context bundle" : "New context bundle"}</DialogTitle>
+          <DialogDescription>
+            {editing ? "Update bundle metadata and create a new version spec." : "Create a versioned context bundle."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Name</Label>
+              <Input
+                value={editing ? rename : name}
+                onChange={(e) => (editing ? setRename(e.target.value) : setName(e.target.value))}
+                placeholder="default"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description</Label>
+              <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Context policy bundle" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Spec JSON</Label>
+            <Textarea value={specText} onChange={(e) => setSpecText(e.target.value)} className="min-h-80 font-mono text-xs" />
+          </div>
+          {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button onClick={() => void submit()} disabled={submitting}>
+            {submitting ? (editing ? "Saving..." : "Creating...") : editing ? "Save changes" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -1,7 +1,7 @@
 """AIAgent — 内核主入口。
 
 职责:
-1. 持有 `name → BaseProvider` 实例字典(从 DB providers 表装载)
+1. 持有 `provider ref(id / slug) → BaseProvider` 实例字典
 2. 持有 `name → BaseTool` 实例字典(从 DB tools 表装载)
 3. `run_chat(req)` 主入口:路由 + default tools 注入 + 锁包装 + 委托 AgentLoop
 
@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from collections.abc import AsyncIterator
@@ -26,12 +27,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 from chariot.agent.chat_event import ChatEvent
-from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
+from chariot.agent.chat_request import ChatRequest, ToolSchema
 from chariot.agent.conversation_lock import ConversationLockManager
 from chariot.agent.exceptions import ConversationLockTimeout
 from chariot.agent.loop import AgentLoop
-from chariot.memory.capture import MemoryCaptureService
 from chariot.memory.policy import MemoryPolicy
+from chariot.models.provider import ProviderEntry
 from chariot.providers.contract import normalize_request
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from chariot.guardrails.approval import ApprovalPolicy
     from chariot.models.agent import AgentProfile
     from chariot.providers.base import BaseProvider
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.services.conversation import ConversationHistoryStore
     from chariot.skills import SkillRegistry
     from chariot.skills.propose_service import SkillProposeService
     from chariot.tools.base import BaseTool
@@ -107,6 +108,7 @@ class AIAgent:
         providers: dict[str, BaseProvider],
         tools: dict[str, BaseTool],
         sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+        provider_entries: dict[str, ProviderEntry] | None = None,
         context_compressor: ContextCompressor | None = None,
         reference_expander: ReferenceExpander | None = None,
         critic_agent: CriticAgent | None = None,
@@ -124,6 +126,19 @@ class AIAgent:
         from chariot.trace import TraceWriter
 
         self._providers = dict(providers)
+        self._provider_entries = dict(provider_entries or {})
+        if not self._provider_entries:
+            self._provider_entries = {
+                ref: ProviderEntry(
+                    id=ref,
+                    slug=ref,
+                    name=ref,
+                    type=getattr(provider.config, "name", ref),
+                    options={},
+                    params={},
+                )
+                for ref, provider in self._providers.items()
+            }
         self._tools = dict(tools)
         self._sessionmaker = sessionmaker
         # Phase B1:trace 写入入口。best-effort,失败不阻断主链路;
@@ -178,12 +193,12 @@ class AIAgent:
         k8s 通用术语)。
 
         `provider_overrides`(0.6.5 起):per-session 注入到 entry.options 的 patch
-        dict,形如 `{"claude": {"base_url": X, "api_key": Y}}`。merge 进 entry.options
+        dict,按 provider id / slug 指定。merge 进 entry.options
         后传给 `ProviderRegistry.build`,Provider 内部从 merged options 算 ClientSpec
         命中或新建 client(共享 ClientCache)。CLI 一次性进程也走这条路径,只是
         session_key 固定 `"process"`。
 
-        首次启动表为空 → 自动 seed:`providers` 插一条 mock entry,`tools` 插
+        首次启动表为空 → 自动 seed:`providers` 插一条 Mock provider,`tools` 插
         4 条 disabled fixture(read_file / list_dir / shell_exec / http_get)。
         seeded 工具默认 disabled,所以新装的 AIAgent 无 tool;mock provider
         已可用。
@@ -196,32 +211,41 @@ class AIAgent:
         from chariot.context.compressor import ContextCompressor
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
-        from chariot.repos.auxiliary_repo import AuxiliaryRepo
-        from chariot.repos.prompt_repo import PromptRepo
-        from chariot.repos.provider_repo import ProviderRepo
-        from chariot.repos.tool_repo import ToolRepo
+        from chariot.services.auxiliary import AuxiliaryService
+        from chariot.services.context import ContextService
+        from chariot.services.prompt import PromptService
+        from chariot.services.provider import ProviderService
+        from chariot.services.tool import ToolService
         from chariot.tools.registry import ToolRegistry
 
         sm = await init_db(db_path)
         async with sm() as session:
-            await ProviderRepo(session).seed_if_empty()
-            await ToolRepo(session).sync_builtin_tools()
-            await PromptRepo(session).seed_if_empty()
+            await ProviderService(session).seed_if_empty()
+            await ToolService(session).sync_builtin_tools()
+            await PromptService(session).seed_if_empty()
+            await ContextService(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
-            aux_entries = await AuxiliaryRepo(session).list_entries()
+            aux_entries = await AuxiliaryService(session).list_entries()
             # B5 wave 3:装 capabilities(从 DB 装 enable_self_mod;yolo 是
             # per-process bootstrap 入参,不读 DB 的 yolo 行)
             capabilities = await Capabilities.from_db(session, yolo=yolo)
 
         overrides = provider_overrides or {}
-        providers: dict[str, BaseProvider] = {
-            entry.name: ProviderRegistry.build(
+        providers: dict[str, BaseProvider] = {}
+        provider_entries: dict[str, ProviderEntry] = {}
+        for entry in cfg.providers:
+            provider = ProviderRegistry.build(
                 entry.type,
-                {**entry.options, **overrides.get(entry.name, {})},
+                {
+                    **entry.options,
+                    **overrides.get(entry.id, {}),
+                    **overrides.get(entry.slug, {}),
+                },
             )
-            for entry in cfg.providers
-        }
+            for ref in (entry.id, entry.slug):
+                providers[ref] = provider
+                provider_entries[ref] = entry
         tools: dict[str, BaseTool] = {}
         for entry in tool_cfg.tools:
             try:
@@ -232,12 +256,12 @@ class AIAgent:
                 _LOG.warning("skip invalid custom tool during bootstrap: %s", entry.name, exc_info=True)
 
         # B3 wave 2:装 ContextCompressor —— auxiliary_clients 表里有 'summarizer'
-        # 且其 provider_entry 已装时构造,否则保持 None(运行时跳过压缩)。
+        # 且其 provider_id 已装时构造,否则保持 None(运行时跳过压缩)。
         compressor: ContextCompressor | None = None
         for aux_entry in aux_entries:
             if aux_entry.name != "summarizer":
                 continue
-            aux_provider = providers.get(aux_entry.provider_entry)
+            aux_provider = providers.get(aux_entry.provider_id)
             if aux_provider is None:
                 break  # dangling reference,fallback noop
             compressor = ContextCompressor(
@@ -256,7 +280,7 @@ class AIAgent:
         )
 
         # B4 wave 1:装 CriticAgent —— auxiliary_clients 表里有 'critic' 行就装上,
-        # dangling provider_entry / 找不到行 → None(reflection 路径退化 noop)。
+        # dangling provider_id / 找不到行 → None(reflection 路径退化 noop)。
         from chariot.agent.reflection import CriticAgent
 
         critic = CriticAgent.from_auxiliary_clients(aux_entries, providers)
@@ -303,6 +327,7 @@ class AIAgent:
             providers=providers,
             tools=tools,
             sessionmaker=sm,
+            provider_entries=provider_entries,
             context_compressor=compressor,
             reference_expander=expander,
             critic_agent=critic,
@@ -328,26 +353,30 @@ class AIAgent:
                 return frozenset(d.lower() for d in http_tool.allowed_domains)
         return frozenset()
 
-    # ---- 资源访问(供 surface 直调 repo) ----
-
-    @property
-    def session_maker(self) -> async_sessionmaker[AsyncSession]:
-        """暴露 sessionmaker 给 surface(CLI / sidecar)直调 repo;未装载抛 RuntimeError。
-
-        典型用法::
-
-            async with agent.session_maker() as session:
-                repo = ConversationRepo(session)
-                entries = await repo.list_entries()
-        """
-        if self._sessionmaker is None:
-            raise RuntimeError("AIAgent 未装载 sessionmaker;先调 AIAgent.bootstrap(db_path)")
-        return self._sessionmaker
-
     @property
     def providers(self) -> dict[str, BaseProvider]:
         """已装载的 provider 字典(只读视图;surface 仅用于 status / 列表展示)。"""
         return dict(self._providers)
+
+    @property
+    def provider_entries(self) -> tuple[ProviderEntry, ...]:
+        seen: set[str] = set()
+        ordered: list[ProviderEntry] = []
+        for entry in self._provider_entries.values():
+            if entry.id in seen:
+                continue
+            seen.add(entry.id)
+            ordered.append(entry)
+        ordered.sort(key=lambda item: (item.slug, item.id))
+        return tuple(ordered)
+
+    def _provider_record_for_ref(self, ref: str) -> ProviderEntry | None:
+        return self._provider_entries.get(ref)
+
+    async def resolve_chat_provider_display(self, req: ChatRequest) -> str | None:
+        """按运行时真实绑定规则解析本轮 chat 最终生效的 provider 展示名。"""
+        _, provider_record, _ = await self._resolve_effective_provider(req)
+        return provider_record.name if provider_record is not None else None
 
     @property
     def tools(self) -> dict[str, BaseTool]:
@@ -425,11 +454,11 @@ class AIAgent:
     async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         """跑一次 chat,yield ChatEvent 流(详见 DESIGN §6.1 / §6.4)。
 
-        路由:按 `req.provider_name`(entry name)找 Provider 实例;缺失 →
+        路由:按 `req.provider_ref`(provider ref)找 Provider 实例;缺失 →
         yield error event 退出。`req.agent_profile` 非空时先解析 binding:
-        - `profile.provider_profile` 覆盖 `req.provider_name`
-        - `profile.prompt_bundle` 由 `_prepare_request` 拣对应 bundle
-        - `profile.tool_profile` 由 `_inject_default_tools` 做 toolset filter
+        - `profile.provider_id` 覆盖 `req.provider_ref`
+        - `profile.prompt_id` 由 `_prepare_request` 拣对应 bundle
+        - `profile.toolset_id` 由 `_inject_default_tools` 做 toolset filter
         dangling reference 走 fallback 不阻断。
 
         default tools 注入:`req.tools is None` → 挂所有装载 tool 的 schema。
@@ -482,30 +511,27 @@ class AIAgent:
         (B4 wave 2 用,记 reflection iteration 入口信息)。"""
         from chariot.models.trace import TurnStatus
 
-        binding = await self._resolve_binding(req)
-        if binding.agent_profile is not None and binding.agent_profile.provider_profile is not None:
-            req = dataclasses.replace(req, provider_name=binding.agent_profile.provider_profile)
+        req, provider_record, binding = await self._resolve_effective_provider(req)
 
-        if req.provider_name is None:
+        if req.provider_ref is None:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
                 error_message="provider 未指定:选择 agent 或显式指定 provider",
             )
             return
 
-        provider = self._providers.get(req.provider_name)
-        if provider is None:
+        provider = self._providers.get(req.provider_ref)
+        if provider is None or provider_record is None:
             yield ChatEvent.error_event(
                 error_type="unknown_provider",
-                error_message=(
-                    f"unknown provider entry {req.provider_name!r}; known: {sorted(self._providers.keys())}"
-                ),
+                error_message=(f"unknown provider {req.provider_ref!r}; known: {sorted(self._providers.keys())}"),
             )
             return
 
         # Phase B1:begin turn(provider 解析后,branch 之前);失败降级 no-op
         turn = await self._trace.begin_turn(
-            provider_name=provider.config.name,
+            provider_id=getattr(provider_record, "id", None),
+            provider_snapshot=getattr(provider_record, "name", req.provider_ref),
             conversation_id=req.conversation_id,
             agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
             model=provider.config.model,
@@ -514,6 +540,7 @@ class AIAgent:
         last_usage: dict[str, Any] | None = None
         last_stop_reason: str | None = None
         last_error: ChatEvent | None = None
+        was_cancelled = False
 
         try:
             if req.is_stateful():
@@ -530,13 +557,30 @@ class AIAgent:
                 if event.kind == "error":
                     last_error = event
                 yield event
+        except asyncio.CancelledError:
+            was_cancelled = True
+            raise
         finally:
-            status = TurnStatus.FAILED if last_error is not None else TurnStatus.COMPLETED
+            status = (
+                TurnStatus.CANCELLED
+                if was_cancelled
+                else TurnStatus.FAILED
+                if last_error is not None
+                else TurnStatus.COMPLETED
+            )
             await turn.finalize(
                 status=status,
                 stop_reason=last_stop_reason,
-                error_type=last_error.error_type if last_error is not None else None,
-                error_message=last_error.error_message if last_error is not None else None,
+                error_type=(
+                    "cancelled" if was_cancelled else last_error.error_type if last_error is not None else None
+                ),
+                error_message=(
+                    "chat cancelled by user"
+                    if was_cancelled
+                    else last_error.error_message
+                    if last_error is not None
+                    else None
+                ),
                 input_tokens=(last_usage or {}).get("input_tokens"),
                 output_tokens=(last_usage or {}).get("output_tokens"),
                 cache_read_tokens=(last_usage or {}).get("cache_read_input_tokens"),
@@ -585,25 +629,38 @@ class AIAgent:
 
         0.8.8+ 行为变更:没有配置 toolset 或 dangling toolset → allowed_tools=None,
         在 _inject_default_tools 阶段会关闭工具调用(不挂载任何工具)。
-        工具调用必须通过 agent_profile.tool_profile 显式配置。
+        工具调用必须通过 agent_profile.toolset_id 显式配置。
         """
         if req.agent_profile is None or self._sessionmaker is None:
             return _NO_BINDING
-        from chariot.repos.task_repo import TaskRepo
-        from chariot.repos.toolset_repo import ToolsetRepo
         from chariot.services.agent import AgentService
+        from chariot.services.toolset import ToolsetService
 
         async with self._sessionmaker() as session:
-            profile = await AgentService(TaskRepo(session)).get_agent(req.agent_profile)
+            profile = await AgentService(session).get_agent_by_id(req.agent_profile)
             if profile is None:
                 return _NO_BINDING
-            if profile.tool_profile is None:
+            if profile.toolset_id is None:
                 return _AgentBinding(agent_profile=profile, allowed_tools=None)
-            toolset = await ToolsetRepo(session).get_entry(profile.tool_profile)
+            toolset = await ToolsetService(session).get_entry(profile.toolset_id)
             if toolset is None:
-                # toolset 名引用不存在 → fallback 到空工具(不挂载)
+                # toolset id 引用不存在 → fallback 到空工具(不挂载)
                 return _AgentBinding(agent_profile=profile, allowed_tools=None)
             return _AgentBinding(agent_profile=profile, allowed_tools=frozenset(toolset.members))
+
+    async def _resolve_effective_provider(
+        self,
+        req: ChatRequest,
+    ) -> tuple[ChatRequest, ProviderEntry | None, _AgentBinding]:
+        """按 agent_profile 覆盖规则解析最终生效的 provider。"""
+        binding = await self._resolve_binding(req)
+        resolved_req = req
+        if binding.agent_profile is not None and binding.agent_profile.provider_id is not None:
+            resolved_req = dataclasses.replace(req, provider_ref=binding.agent_profile.provider_id)
+        provider_record = None
+        if resolved_req.provider_ref is not None:
+            provider_record = self._provider_record_for_ref(resolved_req.provider_ref)
+        return resolved_req, provider_record, binding
 
     async def _run_stateless_chat(
         self,
@@ -613,26 +670,30 @@ class AIAgent:
         turn: TurnHandle | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """无 conversation_id:直接跑 AgentLoop,不锁不持久化。"""
+        provider_record = self._provider_record_for_ref(req.provider_ref or "")
         if self._sessionmaker is not None:
             async with self._sessionmaker() as session:
                 memory_policy = MemoryPolicy()
-                memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
+                memory_entries = await self._load_memory_entries(session, req, provider_record, memory_policy)
                 req = await self._prepare_request(req, provider, memory_entries, memory_policy, binding)
                 req = await self._maybe_expand_references(req)
                 prompt_trace = await self._record_prompt_trace(
                     session,
                     req,
+                    provider_record,
                     provider,
                     memory_entries,
                     memory_policy,
                 )
+                if turn is not None:
+                    await turn.update_links(prompt_trace_id=prompt_trace.id)
         else:
             req = self._normalize_request(req, provider, binding)
             req = await self._maybe_expand_references(req)
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
-            repo=None,
+            message_store=None,
             conversation_id=None,
             turn=turn,
             guardrail_engine=self._guardrail_engine,
@@ -652,7 +713,7 @@ class AIAgent:
                 await self._capture_memory(
                     session,
                     req=req,
-                    provider=provider,
+                    provider_record=provider_record,
                     memory_policy=memory_policy,
                     prompt_trace_id=prompt_trace.id,
                 )
@@ -661,7 +722,7 @@ class AIAgent:
                 await self._capture_error_memory(
                     session,
                     req=req,
-                    provider=provider,
+                    provider_record=provider_record,
                     memory_policy=memory_policy,
                     error_event=last_error_event,
                     prompt_trace_id=prompt_trace.id,
@@ -712,24 +773,32 @@ class AIAgent:
         """conversation lock 内的实际工作:ensure conversation / persist new user / load history /
         跑 AgentLoop。"""
         from chariot.context.composer import ContextComposer
-        from chariot.repos.context_repo import ContextRepo
-        from chariot.repos.conversation_repo import ConversationRepo
+        from chariot.services.context import ContextService
+        from chariot.services.conversation import ConversationService
 
-        repo = ConversationRepo(session)
-        await repo.ensure_exists(conversation_id)
-        await self._persist_new_user_messages(repo, conversation_id, req)
-        history = await self._load_history_as_messages(repo, conversation_id)
-        context_repo = ContextRepo(session)
+        conversation_service = ConversationService(session)
+        context_service = ContextService(session)
+        provider_record = self._provider_record_for_ref(req.provider_ref or "")
+        await conversation_service.ensure_exists(conversation_id)
+        await self._persist_new_user_messages(conversation_service, conversation_id, req)
+        history = await conversation_service.load_history_as_messages(conversation_id)
         memory_policy = MemoryPolicy()
-        memory_entries = await self._load_memory_entries(session, req, provider, memory_policy)
-        context_snapshot = await context_repo.record_snapshot(
+        memory_entries = await self._load_memory_entries(session, req, provider_record, memory_policy)
+        context_bundle_ref = binding.agent_profile.context_id if binding.agent_profile is not None else None
+        context_bundle = await context_service.resolve_bundle(bundle_name=context_bundle_ref)
+        context_version = (
+            await context_service.get_active_version(context_bundle.name) if context_bundle is not None else None
+        )
+        context_snapshot = await context_service.record_snapshot(
             ContextComposer.build_snapshot(
                 req,
-                provider_name=provider.config.name,
+                provider_id=getattr(provider_record, "id", None),
+                provider_snapshot=getattr(provider_record, "name", req.provider_ref or "unknown"),
                 model=provider.config.model,
                 history=[{"role": msg.role, "content": msg.content} for msg in history],
                 memory_entries=memory_entries,
                 memory_policy=memory_policy.describe(),
+                context_policy=context_version.spec if context_version is not None else None,
                 provider_capabilities=dataclasses.asdict(provider.capabilities),
             )
         )
@@ -740,27 +809,36 @@ class AIAgent:
         prompt_trace = await self._record_prompt_trace(
             session,
             full_req,
+            provider_record,
             provider,
             memory_entries,
             memory_policy,
         )
-        await context_repo.record_trace(
+        await context_service.record_trace(
             context_snapshot.id,
             prompt_trace_id=prompt_trace.id,
+            policy_name=context_version.version if context_version is not None else "default_context_policy",
+            bundle_id=context_bundle.id if context_bundle is not None else None,
+            version_id=context_version.id if context_version is not None else None,
         )
+        if turn is not None:
+            await turn.update_links(
+                prompt_trace_id=prompt_trace.id,
+                context_trace_id=context_snapshot.id,
+            )
 
         loop = AgentLoop(
             provider=provider,
             tools=self._tools,
-            repo=repo,
+            message_store=conversation_service,
             conversation_id=conversation_id,
             turn=turn,
             guardrail_engine=self._guardrail_engine,
             approval_policy=self._approval_policy,
             audit_hooks=self._audit_hooks,
             todo_store=self._todo_store_for(conversation_id),
-            agent_profile=binding.agent_profile.name if binding.agent_profile is not None else None,
-            provider_name=req.provider_name,
+            agent_profile=binding.agent_profile.id if binding.agent_profile is not None else None,
+            provider_snapshot=req.provider_ref,
         )
         last_event_kind = None
         last_error_event: ChatEvent | None = None
@@ -773,7 +851,7 @@ class AIAgent:
             await self._capture_memory(
                 session,
                 req=req,
-                provider=provider,
+                provider_record=provider_record,
                 memory_policy=memory_policy,
                 prompt_trace_id=prompt_trace.id,
                 context_trace_id=context_snapshot.id,
@@ -782,7 +860,7 @@ class AIAgent:
             await self._capture_error_memory(
                 session,
                 req=req,
-                provider=provider,
+                provider_record=provider_record,
                 memory_policy=memory_policy,
                 error_event=last_error_event,
                 prompt_trace_id=prompt_trace.id,
@@ -790,7 +868,9 @@ class AIAgent:
             )
 
     @staticmethod
-    async def _persist_new_user_messages(repo: ConversationRepo, conversation_id: str, req: ChatRequest) -> None:
+    async def _persist_new_user_messages(
+        repo: ConversationHistoryStore, conversation_id: str, req: ChatRequest
+    ) -> None:
         """req.messages 里新增的 user 消息(末尾若干条 role='user')落库。
 
         简化策略:把 req.messages 整体当"新增"持久化(假设 client 在 stateful
@@ -801,13 +881,7 @@ class AIAgent:
             if msg.role != "user":
                 continue
             content = msg.content if isinstance(msg.content, list) else [{"type": "text", "text": msg.content}]
-            await repo.append_message(conversation_id, role="user", content=content)
-
-    @staticmethod
-    async def _load_history_as_messages(repo: ConversationRepo, conversation_id: str) -> list[Message]:
-        """SELECT messages → list[Message](Claude 形态,直接喂 Provider)。"""
-        rows = await repo.load_messages_as_anthropic(conversation_id)
-        return [Message(role=row["role"], content=row["content"]) for row in rows]
+            await repo.append_user_message(conversation_id, content)
 
     # ---- B3 wave 3: @reference 解析 ----
 
@@ -893,7 +967,7 @@ class AIAgent:
         req.tools 是 list → 用调用方指定的(透传)。
 
         0.8.8+ 行为变更:没有配置 toolset(allowed_tools is None) → 不挂载任何工具,
-        工具调用必须显式通过 agent_profile.tool_profile 配置。
+        工具调用必须显式通过 agent_profile.toolset_id 配置。
         """
         if req.tools is not None:
             return req  # 调用方已指定(含 [] 关闭工具)
@@ -928,8 +1002,8 @@ class AIAgent:
     ) -> ChatRequest:
         """Compose prompt bundle into `system`, then normalize request fields.
 
-        binding.agent_profile.prompt_bundle 非空 → 取指定 bundle(dangling 时回退到
-        active bundle);profile 缺失 / 字段空 → 走 active bundle 兜底。
+        binding.agent_profile.prompt_id 非空 → 按稳定 id 取指定 bundle;
+        dangling 时回退到 active bundle。
 
         B6 wave 2:normalize 之后跑 SkillActivator —— 在 `_inject_default_tools`
         已把 toolset filter 走完之后,skill.tool_filter 再过一次(取交集 - forbidden);
@@ -938,15 +1012,12 @@ class AIAgent:
         composed = req
         if self._sessionmaker is not None:
             from chariot.prompt.composer import PromptComposer
-            from chariot.repos.prompt_repo import PromptRepo
+            from chariot.services.prompt import PromptService
 
             async with self._sessionmaker() as session:
-                repo = PromptRepo(session)
-                bundle = None
-                if binding.agent_profile is not None and binding.agent_profile.prompt_bundle is not None:
-                    bundle = await repo.get_bundle(binding.agent_profile.prompt_bundle)
-                if bundle is None:
-                    bundle = await repo.get_active_bundle()
+                prompt_service = PromptService(session)
+                bundle_ref = binding.agent_profile.prompt_id if binding.agent_profile is not None else None
+                bundle = await prompt_service.resolve_bundle(bundle_name=bundle_ref)
                 if bundle is not None:
                     existing_system = req.system if isinstance(req.system, str) else None
                     system = PromptComposer.render_layers_text(
@@ -969,7 +1040,7 @@ class AIAgent:
         - 都 None → 不激活
 
         dangling reference / disabled skill / registry 未装 → 静默 skip(跟
-        prompt_bundle dangling 同款 fallback,不阻断 chat)。
+        prompt_id dangling 同款 fallback,不阻断 chat)。
         """
         if self._skill_registry is None:
             return req
@@ -999,43 +1070,33 @@ class AIAgent:
         self,
         session: AsyncSession,
         req: ChatRequest,
-        provider: BaseProvider,
+        provider: ProviderEntry | None,
         policy: MemoryPolicy,
     ) -> list[dict[str, Any]] | None:
-        from chariot.repos.memory_repo import MemoryRepo
+        from chariot.services.memory import MemoryService
 
-        entries = await MemoryRepo(session).list_relevant_entries(
+        return await MemoryService(session).list_relevant_entry_payloads(
             conversation_id=req.conversation_id,
-            provider_name=provider.config.name,
+            provider_snapshot=getattr(provider, "name", None),
             limit=policy.max_items,
             policy=policy,
         )
-        entries = [
-            {
-                "id": entry.id,
-                "kind": entry.kind,
-                "text": entry.text,
-                "meta": entry.meta,
-                "pinned": entry.pinned,
-                "archived": entry.archived,
-            }
-            for entry in entries
-        ]
-        return entries or None
 
     @staticmethod
     async def _record_prompt_trace(
         session: AsyncSession,
         req: ChatRequest,
+        provider_record: ProviderEntry | None,
         provider: BaseProvider,
         memory_entries: list[dict[str, Any]] | None = None,
         memory_policy: MemoryPolicy | None = None,
     ) -> Any:
-        from chariot.repos.prompt_repo import PromptRepo
+        from chariot.services.prompt import PromptService
 
-        return await PromptRepo(session).record_trace(
+        return await PromptService(session).record_trace(
             req,
-            provider_name=provider.config.name,
+            provider_id=getattr(provider_record, "id", None),
+            provider_snapshot=getattr(provider_record, "name", provider.config.name),
             model=provider.config.model,
             memory_entries=memory_entries,
             memory_policy=memory_policy.describe() if memory_policy is not None else None,
@@ -1046,20 +1107,20 @@ class AIAgent:
         session: AsyncSession,
         *,
         req: ChatRequest,
-        provider: BaseProvider,
+        provider_record: ProviderEntry | None,
         memory_policy: MemoryPolicy,
         prompt_trace_id: str | None = None,
         context_trace_id: str | None = None,
     ) -> None:
-        from chariot.repos.memory_repo import MemoryRepo
+        from chariot.services.memory import MemoryService
 
-        capture = MemoryCaptureService(MemoryRepo(session), audit_hooks=self._audit_hooks)
-        await capture.capture_turn(
+        await MemoryService(session).capture_turn(
             req=req,
-            provider_name=provider.config.name,
+            provider_snapshot=str(getattr(provider_record, "name", req.provider_ref or "unknown")),
             policy=memory_policy,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
+            audit_hooks=self._audit_hooks,
         )
 
     async def _capture_error_memory(
@@ -1067,22 +1128,19 @@ class AIAgent:
         session: AsyncSession,
         *,
         req: ChatRequest,
-        provider: BaseProvider,
+        provider_record: ProviderEntry | None,
         memory_policy: MemoryPolicy,
         error_event: ChatEvent,
         prompt_trace_id: str | None = None,
         context_trace_id: str | None = None,
     ) -> None:
-        from chariot.repos.memory_repo import MemoryRepo
+        from chariot.services.memory import MemoryService
 
-        capture = MemoryCaptureService(MemoryRepo(session), audit_hooks=self._audit_hooks)
-        if error_event.error_type is None or error_event.error_message is None:
-            return
-        await capture.capture_error(
+        await MemoryService(session).capture_error(
             conversation_id=req.conversation_id,
-            provider_name=provider.config.name,
-            error_type=error_event.error_type,
-            error_message=error_event.error_message,
+            provider_snapshot=str(getattr(provider_record, "name", req.provider_ref or "unknown")),
+            error_event=error_event,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
+            audit_hooks=self._audit_hooks,
         )

@@ -18,15 +18,16 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from prompt_toolkit.document import Document
 
 from chariot.agent.run import AIAgent
 from chariot.cli.context import ChatContext
 from chariot.cli.render import Renderer
-from chariot.cli.repl import ChatRepl
+from chariot.cli.repl import ChatRepl, _ChatReplCompleter
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.task_repo import TaskRepo
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.agent import AgentService
+from chariot.services.conversation import ConversationService
+from chariot.services.tool import ToolService
 
 # ============================================================
 # fixtures
@@ -50,7 +51,7 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
 def _make_ctx(agent: AIAgent, *, conversation_id: str | None = None) -> ChatContext:
     return ChatContext(
         agent=agent,
-        provider_name="claude-haiku-4-5",
+        provider_ref="claude-haiku-4-5",
         conversation_id=conversation_id,
     )
 
@@ -83,6 +84,60 @@ def _capture_renderer_output(
 _Capt = list[tuple[str, str]]
 
 
+def test_repl_completer_completes_slash_commands(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+    completions = list(completer.get_completions(Document(text="/ag", cursor_position=3), object()))
+    assert [c.text for c in completions] == ["/agent", "/agents"]
+
+
+def test_repl_completer_completes_reference_prefixes(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+    completions = list(completer.get_completions(Document(text="@u", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@url:"]
+
+    completions = list(completer.get_completions(Document(text="@d", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@diff:"]
+
+    completions = list(completer.get_completions(Document(text="@s", cursor_position=2), object()))
+    assert [c.text for c in completions] == ["@session:"]
+
+
+def test_repl_completer_completes_agent_skill_and_session_values(tmp_path: Path) -> None:
+    completer = _ChatReplCompleter(
+        slash_commands=ChatRepl._SLASH_COMMANDS,
+        cwd=tmp_path,
+        agent_ids_getter=lambda: ("01AGENTAAAAAAAAAAAAAAAAAA",),
+        skill_names_getter=lambda: ("reviewer",),
+        conversation_ids_getter=lambda: ("01CONVAAAAAAAAAAAAAAAAAAA",),
+    )
+
+    completions = list(completer.get_completions(Document(text="/agent 01A", cursor_position=10), object()))
+    assert [c.text for c in completions] == ["01AGENTAAAAAAAAAAAAAAAAAA"]
+
+    completions = list(completer.get_completions(Document(text="/skill rev", cursor_position=10), object()))
+    assert [c.text for c in completions] == ["reviewer"]
+
+    completions = list(completer.get_completions(Document(text="@session:01C", cursor_position=12), object()))
+    assert [c.text for c in completions] == ["@session:01CONVAAAAAAAAAAAAAAAAAAA"]
+
+
+def test_repl_completer_completes_file_reference_paths(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("guide", encoding="utf-8")
+    completer = _ChatReplCompleter(slash_commands=ChatRepl._SLASH_COMMANDS, cwd=tmp_path)
+
+    completions = list(completer.get_completions(Document(text="@file:R", cursor_position=7), object()))
+    assert [c.text for c in completions] == ["@file:README.md"]
+
+    completions = list(completer.get_completions(Document(text="@file:d", cursor_position=7), object()))
+    assert [c.text for c in completions] == ["@file:docs/"]
+
+    completions = list(completer.get_completions(Document(text="@file:docs/g", cursor_position=12), object()))
+    assert [c.text for c in completions] == ["@file:docs/guide.md"]
+
+
 # ==========================================================
 # /agent · /agents
 # ==========================================================
@@ -97,11 +152,29 @@ async def test_slash_agent_no_arg_shows_current(agent: AIAgent, _capture_rendere
     assert "(none)" in outs[0][1]
 
 
-async def test_slash_agent_with_name_sets_ctx_agent_profile(agent: AIAgent) -> None:
-    """`/agent <name>` 设置 ctx.agent_profile。"""
+async def test_slash_agent_with_id_sets_ctx_agent_profile(agent: AIAgent) -> None:
+    """`/agent <id>` 设置 ctx.agent_profile。"""
+    entry = await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
+    ctx = _make_ctx(agent)
+    await ChatRepl(ctx=ctx)._handle_slash(f"/agent {entry.id}")
+    assert ctx.agent_profile == entry.id
+
+
+async def test_slash_agent_with_name_rejected(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
+    """`/agent <name>` 不再切换,只接受 id。"""
+    await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/agent dev-helper")
-    assert ctx.agent_profile == "dev-helper"
+    assert ctx.agent_profile is None
+    errs = [c for c in _capture_renderer_output if c[0] == "err"]
+    assert len(errs) == 1
+    assert "unknown agent_id" in errs[0][1]
 
 
 async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
@@ -114,22 +187,20 @@ async def test_slash_agent_clear_clears_profile(agent: AIAgent) -> None:
 
 async def test_slash_agents_lists_entries_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/agents` 走 AgentService,带 ← current 标记。"""
-    async with agent.session_maker() as session:
-        from chariot.services.agent import AgentService
-
-        await AgentService(TaskRepo(session)).create_agent(
-            name="dev-helper",
-            role="developer",
-        )
+    entry = await AgentService(agent).create_agent(
+        name="dev-helper",
+        role="developer",
+    )
 
     ctx = _make_ctx(agent)
-    ctx.agent_profile = "dev-helper"
+    ctx.agent_profile = entry.id
     await ChatRepl(ctx=ctx)._handle_slash("/agents")
 
     tables = [c for c in _capture_renderer_output if c[0] == "table"]
     assert len(tables) == 1
     title, body = tables[0][1].split("::", 1)
     assert title == "agent profiles"
+    assert entry.id in body
     assert "dev-helper" in body
     assert "← current" in body
     assert body.count("← current") == 1
@@ -178,10 +249,9 @@ async def test_slash_convo_no_arg_stateless_shows_off(agent: AIAgent, _capture_r
 async def test_slash_convos_lists_with_current_marker(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/convos` 走 ConversationRepo,当前会话行带 ← current。"""
     other_id = "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create(CONVO, title="t1")
-        await repo.create(other_id, title="t2")
+    service = ConversationService(agent)
+    await service.create(CONVO, title="t1")
+    await service.create(other_id, title="t2")
 
     ctx = _make_ctx(agent, conversation_id=CONVO)
     await ChatRepl(ctx=ctx)._handle_slash("/conversations")
@@ -274,8 +344,7 @@ async def test_slash_tool_shows_only_enabled(agent: AIAgent, _capture_renderer_o
 
     fresh DB seed 4 条全 disabled 的 fixture,先开 read_file 再断。
     """
-    async with agent.session_maker() as session:
-        await ToolRepo(session).update("read_file", enabled=True)
+    await ToolService(agent).update("read_file", enabled=True)
 
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/tool")
@@ -299,8 +368,7 @@ async def test_slash_tool_no_enabled_shows_hint(agent: AIAgent, _capture_rendere
 
 async def test_slash_tools_lists_all_with_marks(agent: AIAgent, _capture_renderer_output: _Capt) -> None:
     """`/tools` 列全部工具,enabled / disabled 都展示并带 ON/off 标记。"""
-    async with agent.session_maker() as session:
-        await ToolRepo(session).update("read_file", enabled=True)
+    await ToolService(agent).update("read_file", enabled=True)
 
     ctx = _make_ctx(agent)
     await ChatRepl(ctx=ctx)._handle_slash("/tools")

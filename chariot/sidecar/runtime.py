@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -29,6 +30,7 @@ class SidecarRuntime:
         self._agent = agent
         self._db_path = db_path
         self._session_key = session_key
+        self._running_chats: dict[str, asyncio.Task[object]] = {}
 
     @property
     def agent(self) -> SidecarAgent:
@@ -39,12 +41,12 @@ class SidecarRuntime:
         return self._db_path
 
     @property
-    def session_maker(self):  # type: ignore[no-untyped-def]
-        return self._agent.session_maker
+    def _sessionmaker(self):  # type: ignore[no-untyped-def]
+        return self._agent._sessionmaker
 
     async def reserve_chat_agent(
         self,
-        provider_name: str | None,
+        provider_ref: str | None,
         *,
         base_url: str | None,
         api_key: str | None,
@@ -54,7 +56,7 @@ class SidecarRuntime:
         if base_url is None and api_key is None:
             return self._agent
 
-        if provider_name is None:
+        if provider_ref is None:
             return self._agent
 
         options: dict[str, str] = {}
@@ -64,11 +66,11 @@ class SidecarRuntime:
             options["api_key"] = api_key
 
         digest = hashlib.sha256(json.dumps(options, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-        session_key = f"{self._OVERRIDE_SESSION_PREFIX}{provider_name}:{digest}"
+        session_key = f"{self._OVERRIDE_SESSION_PREFIX}{provider_ref}:{digest}"
         return await AgentRegistry.reserve(
             session_key,
             db_path=self._db_path,
-            provider_overrides={provider_name: options},
+            provider_overrides={provider_ref: options},
         )
 
     async def reload(self) -> SidecarAgent:
@@ -86,3 +88,18 @@ class SidecarRuntime:
 
         self._agent = await AIAgent.bootstrap(self._db_path)
         return self._agent
+
+    def register_chat(self, stream_id: str, task: asyncio.Task[object]) -> None:
+        self._running_chats[stream_id] = task
+
+    def unregister_chat(self, stream_id: str, task: asyncio.Task[object]) -> None:
+        current = self._running_chats.get(stream_id)
+        if current is task:
+            self._running_chats.pop(stream_id, None)
+
+    def cancel_chat(self, stream_id: str) -> bool:
+        task = self._running_chats.get(stream_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True

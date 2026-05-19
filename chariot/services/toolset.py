@@ -25,11 +25,11 @@ class ToolsetService:
     async def list_entries(self) -> list[Toolset]:
         return await self._repo.list_entries()
 
-    async def get_entry(self, name: str) -> Toolset | None:
-        return await self._repo.get_entry(name)
+    async def get_entry(self, ref: str) -> Toolset | None:
+        return await self._repo.get_entry(ref)
 
-    async def list_members(self, name: str) -> list[str]:
-        return await self._repo.list_members(name)
+    async def list_members(self, ref: str) -> list[str]:
+        return await self._repo.list_members(ref)
 
     async def create(
         self,
@@ -60,6 +60,9 @@ class ToolsetService:
             meta=meta,
             members=members,
         )
+
+    async def rename(self, ref: str, new_name: str) -> Toolset:
+        return await self._repo.rename(ref, new_name=new_name)
 
     async def delete(self, name: str) -> None:
         await self._repo.delete(name)

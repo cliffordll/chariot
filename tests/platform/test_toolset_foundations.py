@@ -33,12 +33,17 @@ class TestToolsetRepo:
             members=["read_file", "list_dir"],
         )
         assert toolset.name == "fs_safe"
+        assert len(toolset.id) == 26
         assert toolset.description == "只读文件操作"
         assert toolset.members == ("list_dir", "read_file")  # 排序后的
 
         loaded = await repo.get_entry("fs_safe")
         assert loaded is not None
+        assert loaded.id == toolset.id
         assert loaded.members == ("list_dir", "read_file")
+        loaded_by_id = await repo.get_entry(toolset.id)
+        assert loaded_by_id is not None
+        assert loaded_by_id.name == "fs_safe"
 
         await repo.delete("fs_safe")
         assert await repo.get_entry("fs_safe") is None
@@ -59,6 +64,21 @@ class TestToolsetRepo:
         await repo.create(name="ts", members=["read_file"])
         updated = await repo.update("ts", members=["list_dir", "http_get"])
         assert updated.members == ("http_get", "list_dir")
+
+    async def test_rename_preserves_agent_toolset_id(self, session: AsyncSession) -> None:
+        repo = ToolsetRepo(session)
+        from chariot.repos.task_repo import TaskRepo
+
+        created = await repo.create(name="ts", members=["read_file"])
+        await TaskRepo(session).create_agent_profile(name="planner", role="planner", toolset_id=created.id)
+
+        renamed = await repo.rename(created.id, new_name="ts-v2")
+        assert renamed.id == created.id
+        assert renamed.name == "ts-v2"
+
+        agent = await TaskRepo(session).get_agent_profile("planner")
+        assert agent is not None
+        assert agent.toolset_id == created.id
 
     async def test_update_missing_raises(self, session: AsyncSession) -> None:
         repo = ToolsetRepo(session)

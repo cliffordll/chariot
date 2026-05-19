@@ -15,8 +15,10 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
 from chariot.models.task import TaskCreate, TaskRunCreate
-from chariot.repos.task_repo import TaskRepo
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.agent import AgentService
+from chariot.services.job import JobService
 from chariot.services.task import TaskService
 from chariot.sidecar.methods import register_methods
 
@@ -75,13 +77,12 @@ def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
 
 @pytest.mark.asyncio
 async def test_list_agents_returns_created_profiles(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="planner",
-            role="planner",
-            tool_profile="default",
-            provider_profile="mock",
-        )
+    await AgentService(agent).create_agent(
+        name="planner",
+        role="planner",
+        toolset_id="default",
+        provider_id="mock",
+    )
 
     line = await _call(server, "list_agents")
     agents = line["result"]["agents"]
@@ -97,17 +98,54 @@ async def test_create_and_get_agent(server: JsonRpcServer) -> None:
         {
             "name": "planner",
             "role": "planner",
-            "tool_profile": "default",
-            "provider_profile": "mock",
+            "toolset_id": "default",
+            "provider_id": "mock",
             "budget": {"max_steps": 5},
         },
     )
     agent = line["result"]["agent"]
     assert agent["name"] == "planner"
+    assert agent["provider_id"]
+    assert agent["provider_label"] is not None
+    assert agent["toolset_label"] is not None
     assert agent["budget"]["max_steps"] == 5
 
     detail = await _call(server, "get_agent", {"name": "planner"})
     assert detail["result"]["agent"]["role"] == "planner"
+    assert detail["result"]["agent"]["provider_label"] is not None
+    detail_by_id = await _call(server, "get_agent", {"name": agent["id"]})
+    assert detail_by_id["result"]["agent"]["name"] == "planner"
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_agent_accept_prompt_id(server: JsonRpcServer) -> None:
+    bundle = await _call(
+        server,
+        "add_prompt_bundle",
+        {
+            "name": "research",
+            "layers": [{"name": "base_system", "source": "test", "content": "RESEARCH"}],
+        },
+    )
+    bundle_id = bundle["result"]["bundle"]["id"]
+
+    created = await _call(
+        server,
+        "create_agent",
+        {"name": "researcher", "role": "planner", "prompt_id": bundle_id},
+    )
+    agent = created["result"]["agent"]
+    assert agent["prompt_id"] == bundle_id
+    assert agent["prompt_label"] is not None
+    assert "prompt_bundle" not in agent
+
+    updated = await _call(
+        server,
+        "update_agent",
+        {"name": "researcher", "prompt_id": None},
+    )
+    assert updated["result"]["agent"]["prompt_id"] is None
+    assert "prompt_bundle" not in updated["result"]["agent"]
 
 
 @pytest.mark.asyncio
@@ -117,10 +155,10 @@ async def test_update_and_delete_agent(server: JsonRpcServer) -> None:
     updated = await _call(
         server,
         "update_agent",
-        {"name": "planner", "role": "executor", "tool_profile": "default"},
+        {"name": "planner", "role": "executor", "toolset_id": "default"},
     )
     assert updated["result"]["agent"]["role"] == "executor"
-    assert updated["result"]["agent"]["tool_profile"] == "default"
+    assert updated["result"]["agent"]["toolset_id"] == "default"
 
     deleted = await _call(server, "delete_agent", {"name": "planner"})
     assert deleted["result"]["deleted"] == "planner"
@@ -134,51 +172,72 @@ async def test_update_agent_clear_binding_fields(server: JsonRpcServer) -> None:
     """RPC payload key 不在 → UNSET(skip);key=null → 清空;key=str → set。"""
     await _call(
         server,
+        "add_prompt_bundle",
+        {
+            "name": "research",
+            "layers": [{"name": "base_system", "source": "test", "content": "RESEARCH"}],
+        },
+    )
+    await _call(
+        server,
         "create_agent",
         {
             "name": "researcher",
             "role": "research",
-            "prompt_bundle": "research",
-            "tool_profile": "fs_safe",
-            "provider_profile": "claude",
+            "prompt_id": "research",
+            "toolset_id": "fs_safe",
+            "provider_id": "claude",
         },
     )
 
     # 只改 role,binding 字段 key 不在 payload 里 → 保留
     only_role = await _call(server, "update_agent", {"name": "researcher", "role": "planner"})
     assert only_role["result"]["agent"]["role"] == "planner"
-    assert only_role["result"]["agent"]["provider_profile"] == "claude"
-    assert only_role["result"]["agent"]["prompt_bundle"] == "research"
+    assert only_role["result"]["agent"]["provider_id"] == "claude"
+    assert only_role["result"]["agent"]["prompt_id"] is not None
 
-    # provider_profile=null → 清空,其它保留
+    # provider_id=null → 清空,其它保留
     cleared = await _call(
         server,
         "update_agent",
-        {"name": "researcher", "provider_profile": None},
+        {"name": "researcher", "provider_id": None},
     )
-    assert cleared["result"]["agent"]["provider_profile"] is None
-    assert cleared["result"]["agent"]["prompt_bundle"] == "research"
-    assert cleared["result"]["agent"]["tool_profile"] == "fs_safe"
+    assert cleared["result"]["agent"]["provider_id"] is None
+    assert cleared["result"]["agent"]["prompt_id"] is not None
+    assert cleared["result"]["agent"]["toolset_id"] == "fs_safe"
 
     # 重新 set
     reset = await _call(
         server,
         "update_agent",
-        {"name": "researcher", "provider_profile": "ollama"},
+        {"name": "researcher", "provider_id": "ollama"},
     )
-    assert reset["result"]["agent"]["provider_profile"] == "ollama"
+    assert reset["result"]["agent"]["provider_id"] == "ollama"
+
+
+@pytest.mark.asyncio
+async def test_update_agent_accepts_provider_id_alias(server: JsonRpcServer, agent: AIAgent) -> None:
+    await _call(server, "create_agent", {"name": "planner", "role": "planner"})
+    updated = await _call(
+        server,
+        "update_agent",
+        {"name": "planner", "provider_id": "mock"},
+    )
+    async with agent._sessionmaker() as session:  # type: ignore[attr-defined]
+        mock = await ProviderRepo(session).get_entry("mock")
+    assert mock is not None
+    entry = updated["result"]["agent"]
+    assert entry["provider_id"] == mock.id
 
 
 @pytest.mark.asyncio
 async def test_list_tasks_and_get_task_include_runs_and_children(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        await repo.create_agent_profile(name="planner", role="planner")
-        service = TaskService(repo)
-        parent = await service.create_task(TaskCreate(goal="parent", agent_profile="planner"))
-        child = await service.create_child_task(parent_task_id=parent.id, goal="child")
-        run = await service.start_task_run(TaskRunCreate(task_id=parent.id))
-        await service.complete_task_run(run.id, result={"ok": True})
+    await AgentService(agent).create_agent(name="planner", role="planner")
+    service = TaskService(agent)
+    parent = await service.create_task(TaskCreate(goal="parent", agent_profile="planner"))
+    child = await service.create_child_task(parent_task_id=parent.id, goal="child")
+    run = await service.start_task_run(TaskRunCreate(task_id=parent.id))
+    await service.complete_task_run(run.id, result={"ok": True})
 
     line = await _call(server, "list_tasks")
     tasks = line["result"]["tasks"]
@@ -194,31 +253,31 @@ async def test_list_tasks_and_get_task_include_runs_and_children(server: JsonRpc
 
 @pytest.mark.asyncio
 async def test_list_jobs_returns_created_jobs(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_job(
-            name="cleanup",
-            goal="cleanup stale state",
-            cron="0 * * * *",
-        )
+    await JobService(agent).create_job(
+        name="cleanup",
+        goal="cleanup stale state",
+        cron="0 * * * *",
+    )
 
     line = await _call(server, "list_jobs")
     jobs = line["result"]["jobs"]
     assert jobs[0]["name"] == "cleanup"
+    assert jobs[0]["id"]
     assert jobs[0]["enabled"] is True
 
 
 @pytest.mark.asyncio
 async def test_show_job_and_run_job_now(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_job(
-            name="cleanup",
-            goal="cleanup stale state",
-            cron="0 * * * *",
-        )
+    await JobService(agent).create_job(
+        name="cleanup",
+        goal="cleanup stale state",
+        cron="0 * * * *",
+    )
 
     line = await _call(server, "run_job_now", {"name": "cleanup"})
     assert line["result"]["task"]["kind"] == "scheduled"
     assert line["result"]["job_run"]["job_name"] == "cleanup"
+    assert line["result"]["job_run"]["job_id"]
     assert line["result"]["job_run"]["status"] == "queued"
 
     detail = await _call(server, "show_job", {"name": "cleanup"})
@@ -226,6 +285,8 @@ async def test_show_job_and_run_job_now(server: JsonRpcServer, agent: AIAgent) -
     assert job["name"] == "cleanup"
     assert job["last_run_status"] == "queued"
     assert job["runs"][0]["job_name"] == "cleanup"
+    detail_by_id = await _call(server, "show_job", {"name": job["id"]})
+    assert detail_by_id["result"]["job"]["name"] == "cleanup"
 
 
 @pytest.mark.asyncio
@@ -285,11 +346,9 @@ async def test_create_task_returns_queued_task(server: JsonRpcServer) -> None:
 
 @pytest.mark.asyncio
 async def test_pause_resume_cancel_task_flow(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        task = await service.create_task(TaskCreate(goal="worker"))
-        await service.start_task_run(TaskRunCreate(task_id=task.id))
+    service = TaskService(agent)
+    task = await service.create_task(TaskCreate(goal="worker"))
+    await service.start_task_run(TaskRunCreate(task_id=task.id))
 
     paused = await _call(server, "pause_task", {"task_id": task.id})
     assert paused["result"]["task"]["status"] == "paused"
@@ -303,10 +362,8 @@ async def test_pause_resume_cancel_task_flow(server: JsonRpcServer, agent: AIAge
 
 @pytest.mark.asyncio
 async def test_start_and_complete_task_run(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        task = await service.create_task(TaskCreate(goal="worker"))
+    service = TaskService(agent)
+    task = await service.create_task(TaskCreate(goal="worker"))
 
     started = await _call(server, "start_task_run", {"task_id": task.id, "trigger": "manual"})
     run = started["result"]["run"]
@@ -322,10 +379,8 @@ async def test_start_and_complete_task_run(server: JsonRpcServer, agent: AIAgent
 
 @pytest.mark.asyncio
 async def test_get_and_list_task_runs(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        task = await service.create_task(TaskCreate(goal="worker"))
+    service = TaskService(agent)
+    task = await service.create_task(TaskCreate(goal="worker"))
 
     started = await _call(server, "start_task_run", {"task_id": task.id, "trigger": "manual"})
     run = started["result"]["run"]
@@ -339,10 +394,8 @@ async def test_get_and_list_task_runs(server: JsonRpcServer, agent: AIAgent) -> 
 
 @pytest.mark.asyncio
 async def test_fail_task_run_marks_run_and_task_failed(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        task = await service.create_task(TaskCreate(goal="worker"))
+    service = TaskService(agent)
+    task = await service.create_task(TaskCreate(goal="worker"))
 
     started = await _call(server, "start_task_run", {"task_id": task.id, "trigger": "manual"})
     run = started["result"]["run"]
@@ -357,10 +410,8 @@ async def test_fail_task_run_marks_run_and_task_failed(server: JsonRpcServer, ag
 
 @pytest.mark.asyncio
 async def test_cancel_task_run_marks_run_and_task_cancelled(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        task = await service.create_task(TaskCreate(goal="worker"))
+    service = TaskService(agent)
+    task = await service.create_task(TaskCreate(goal="worker"))
 
     started = await _call(server, "start_task_run", {"task_id": task.id, "trigger": "manual"})
     run = started["result"]["run"]
@@ -375,10 +426,8 @@ async def test_cancel_task_run_marks_run_and_task_cancelled(server: JsonRpcServe
 
 @pytest.mark.asyncio
 async def test_delegate_task_creates_children(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = TaskRepo(session)
-        service = TaskService(repo)
-        parent = await service.create_task(TaskCreate(goal="parent goal", agent_profile="planner"))
+    service = TaskService(agent)
+    parent = await service.create_task(TaskCreate(goal="parent goal", agent_profile="planner"))
 
     line = await _call(
         server,

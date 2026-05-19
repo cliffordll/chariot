@@ -6,6 +6,7 @@ from typing import Any
 
 from chariot.models.trace import (
     TraceCheckpoint,
+    TraceExecutionGroup,
     TraceProviderCall,
     TraceToolCall,
     TraceTree,
@@ -26,7 +27,7 @@ class TraceApi:
         *,
         conversation_id: str | None = None,
         task_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -36,7 +37,7 @@ class TraceApi:
         turns = await service.list_turns(
             conversation_id=conversation_id,
             task_id=task_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             status=status_enum,
             limit=limit,
             offset=offset,
@@ -78,6 +79,7 @@ class TraceApi:
             "provider_calls": [cls.serialize_provider_call(pc) for pc in tree.provider_calls],
             "tool_calls": [cls.serialize_tool_call(tc) for tc in tree.tool_calls],
             "checkpoints": [cls.serialize_checkpoint(cp) for cp in tree.checkpoints],
+            "execution_groups": [cls.serialize_execution_group(group) for group in tree.execution_groups],
         }
 
     @staticmethod
@@ -88,7 +90,8 @@ class TraceApi:
             "agent_profile": turn.agent_profile,
             "task_id": turn.task_id,
             "task_run_id": turn.task_run_id,
-            "provider_name": turn.provider_name,
+            "provider_id": turn.provider_id,
+            "provider_snapshot": turn.provider_snapshot,
             "model": turn.model,
             "prompt_trace_id": turn.prompt_trace_id,
             "context_trace_id": turn.context_trace_id,
@@ -106,6 +109,8 @@ class TraceApi:
             "duration_ms": turn.duration_ms,
             "started_at": turn.started_at.isoformat(),
             "finished_at": turn.finished_at.isoformat() if turn.finished_at is not None else None,
+            "provider_calls_count": turn.provider_calls_count,
+            "tool_calls_count": turn.tool_calls_count,
             "meta": turn.meta,
         }
 
@@ -114,7 +119,8 @@ class TraceApi:
         return {
             "id": pc.id,
             "turn_id": pc.turn_id,
-            "provider_name": pc.provider_name,
+            "provider_id": pc.provider_id,
+            "provider_snapshot": pc.provider_snapshot,
             "model": pc.model,
             "log_id": pc.log_id,
             "request_summary": pc.request_summary,
@@ -149,4 +155,14 @@ class TraceApi:
             "kind": cp.kind.value,
             "snapshot_id": cp.snapshot_id,
             "created_at": cp.created_at.isoformat(),
+        }
+
+    @classmethod
+    def serialize_execution_group(cls, group: TraceExecutionGroup) -> dict[str, Any]:
+        return {
+            "index": group.index,
+            "provider_call": (
+                cls.serialize_provider_call(group.provider_call) if group.provider_call is not None else None
+            ),
+            "tool_calls": [cls.serialize_tool_call(tc) for tc in group.tool_calls],
         }

@@ -9,7 +9,7 @@
 不做的事
 --------
 - **不校验 tool name 是否存在于 tools 表**:tool 注册是动态的,toolset 可以
-  引用未来才会注册的 tool name(跟 agent_profile.tool_profile 弱引用风格一致)
+  引用未来才会注册的 tool name(跟 `toolset_members` 的弱引用风格一致)
 - **不做 enabled 状态切换**:toolset 是 filter,不动 `tool.enabled`
   (详 docs/tool-profile-design.md "Toolset 的两种语义"一节)
 
@@ -28,7 +28,7 @@ import json
 from typing import Any, cast
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,14 +55,15 @@ class ToolsetRepo:
         return out
 
     async def get_entry(self, name: str) -> Toolset | None:
-        row = await self.session.get(ToolsetRow, name)
+        row = await self._find_row(name)
         if row is None:
             return None
-        members = await self._list_members(name)
+        members = await self._list_members(row.name)
         return self._row_to_entry(row, members)
 
     async def list_members(self, name: str) -> list[str]:
-        return await self._list_members(name)
+        row = await self._require_row(name)
+        return await self._list_members(row.name)
 
     # ---- 写 ----
 
@@ -87,7 +88,7 @@ class ToolsetRepo:
             await self.session.rollback()
             raise ConfigError(f"toolset name {name!r} 已存在") from e
         for tool_name in members or []:
-            self.session.add(ToolsetMemberRow(toolset_name=name, tool_name=tool_name))
+            self.session.add(ToolsetMemberRow(toolset_name=name, toolset_id=row.id, tool_name=tool_name))
         await self.session.commit()
         await self.session.refresh(row)
         result_members = await self._list_members(name)
@@ -121,32 +122,51 @@ class ToolsetRepo:
         await self.session.delete(row)
         await self.session.commit()
 
+    async def rename(self, ref: str, *, new_name: str) -> Toolset:
+        row = await self._require_row(ref)
+        self._require_non_empty(new_name, "toolset name")
+        old_name = row.name
+        row.name = new_name
+        await self.session.flush()
+        if old_name != new_name:
+            await self.session.execute(
+                update(ToolsetMemberRow).where(ToolsetMemberRow.toolset_id == row.id).values(toolset_name=new_name)
+            )
+        try:
+            await self.session.commit()
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise ConfigError(f"toolset name {new_name!r} 已存在") from e
+        await self.session.refresh(row)
+        result_members = await self._list_members(new_name)
+        return self._row_to_entry(row, result_members)
+
     async def add_member(self, name: str, tool_name: str) -> Toolset:
-        await self._require_row(name)
+        row = await self._require_row(name)
         self._require_non_empty(tool_name, "tool name")
         existing = await self.session.execute(
             select(ToolsetMemberRow).where(
-                ToolsetMemberRow.toolset_name == name,
+                ToolsetMemberRow.toolset_name == row.name,
                 ToolsetMemberRow.tool_name == tool_name,
             )
         )
         if existing.scalar_one_or_none() is None:
-            self.session.add(ToolsetMemberRow(toolset_name=name, tool_name=tool_name))
+            self.session.add(ToolsetMemberRow(toolset_name=row.name, toolset_id=row.id, tool_name=tool_name))
             await self.session.commit()
-        row = await self._require_row(name)
-        result_members = await self._list_members(name)
+        row = await self._require_row(row.name)
+        result_members = await self._list_members(row.name)
         return self._row_to_entry(row, result_members)
 
     async def remove_member(self, name: str, tool_name: str) -> Toolset:
         row = await self._require_row(name)
         await self.session.execute(
             sa_delete(ToolsetMemberRow).where(
-                ToolsetMemberRow.toolset_name == name,
+                ToolsetMemberRow.toolset_name == row.name,
                 ToolsetMemberRow.tool_name == tool_name,
             )
         )
         await self.session.commit()
-        result_members = await self._list_members(name)
+        result_members = await self._list_members(row.name)
         return self._row_to_entry(row, result_members)
 
     # ---- 内部 ----
@@ -160,17 +180,33 @@ class ToolsetRepo:
         return [m for m in (await self.session.execute(stmt)).scalars().all()]
 
     async def _set_members(self, name: str, members: list[str]) -> None:
-        await self.session.execute(sa_delete(ToolsetMemberRow).where(ToolsetMemberRow.toolset_name == name))
+        row = await self._require_row(name)
+        await self.session.execute(sa_delete(ToolsetMemberRow).where(ToolsetMemberRow.toolset_name == row.name))
         for tool_name in members:
             self._require_non_empty(tool_name, "tool name")
-            self.session.add(ToolsetMemberRow(toolset_name=name, tool_name=tool_name))
+            self.session.add(ToolsetMemberRow(toolset_name=row.name, toolset_id=row.id, tool_name=tool_name))
         await self.session.flush()
 
     async def _require_row(self, name: str) -> ToolsetRow:
-        row = await self.session.get(ToolsetRow, name)
+        row = await self._find_row(name)
         if row is None:
             raise ConfigError(f"toolset {name!r} not found")
         return row
+
+    async def _find_row(self, ref: str) -> ToolsetRow | None:
+        stmt = select(ToolsetRow).where((ToolsetRow.name == ref) | (ToolsetRow.id == ref))
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0]
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0]
+        raise ConfigError(f"toolset 引用 {ref!r} 不唯一,请改用 id")
 
     @staticmethod
     def _require_non_empty(value: str, label: str) -> None:
@@ -188,6 +224,7 @@ class ToolsetRepo:
     def _row_to_entry(cls, row: ToolsetRow, members: list[str]) -> Toolset:
         return Toolset(
             name=row.name,
+            id=row.id,
             description=row.description,
             members=tuple(members),
             meta=cls._deserialize_json("meta", row.meta),

@@ -205,9 +205,7 @@ class OpenAIProvider(BaseProvider):
 
         # messages: Claude content blocks → OpenAI message format
         for msg in req.messages:
-            openai_msg = self._claude_msg_to_openai(msg)
-            if openai_msg is not None:
-                messages.append(openai_msg)
+            messages.extend(self._claude_msg_to_openai_messages(msg))
 
         body: dict[str, Any] = {
             "model": req.model or self.config.model,
@@ -255,18 +253,23 @@ class OpenAIProvider(BaseProvider):
         return body
 
     @staticmethod
-    def _claude_msg_to_openai(msg: Any) -> dict[str, Any] | None:
-        """单条 Claude Message → OpenAI message dict。"""
+    def _claude_msg_to_openai_messages(msg: Any) -> list[dict[str, Any]]:
+        """单条 Claude Message → 一组 OpenAI message dict。"""
         role = msg.role
         content = msg.content
 
         if isinstance(content, str):
-            return {"role": role, "content": content}
+            return [{"role": role, "content": content}]
 
         # content block list
-        text_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
-        tool_results: list[dict[str, Any]] = []
+        messages_out: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+
+        def flush_text_parts() -> None:
+            if role == "user" and text_parts:
+                messages_out.append({"role": role, "content": "\n".join(text_parts)})
+                text_parts.clear()
 
         for block in content:
             btype = block.get("type")
@@ -286,11 +289,12 @@ class OpenAIProvider(BaseProvider):
                     }
                 )
             elif btype == "tool_result":
-                tool_results.append(
+                flush_text_parts()
+                messages_out.append(
                     {
                         "tool_call_id": block.get("tool_use_id", ""),
                         "role": "tool",
-                        "content": str(block.get("content", "")),
+                        "content": OpenAIProvider._tool_result_content_to_text(block.get("content")),
                     }
                 )
 
@@ -299,21 +303,24 @@ class OpenAIProvider(BaseProvider):
             result: dict[str, Any] = {"role": "assistant", "content": "\n".join(text_parts) or None}
             if tool_calls:
                 result["tool_calls"] = tool_calls
-            return result
-        else:  # user
-            # tool results 在 OpenAI 中是独立的消息,不是 user message 的 content
-            messages_out: list[dict[str, Any]] = []
-            if text_parts:
-                messages_out.append({"role": "user", "content": "\n".join(text_parts)})
-            for tr in tool_results:
-                messages_out.append(tr)
-            # 简化:返回第一条,其余由调用方处理... 实际上这里需要返回 list
-            # 但我们的 interface 是单条 → 单条,所以把 tool_results 合并到 content
-            if tool_results and not text_parts:
-                # 只有 tool_result:OpenAI 中每条 tool_result 是一条独立 message
-                # 这里简化处理,把第一个 tool_result 当 user message 返回
-                return {"role": "user", "content": tool_results[0].get("content", "")}
-            return {"role": "user", "content": "\n".join(text_parts) or ""}
+            return [result]
+        flush_text_parts()
+        return messages_out
+
+    @staticmethod
+    def _tool_result_content_to_text(content: Any) -> str:
+        """tool_result.content → OpenAI tool message 需要的纯文本。"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = [
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+            ]
+            if texts:
+                return "\n".join(texts)
+        return str(content or "")
 
     # ---- 内部:HTTP 错误码映射 ----
 
@@ -362,31 +369,35 @@ class OpenAIProvider(BaseProvider):
         # content_block_start: tool_calls 开始
         tool_calls_delta = delta.get("tool_calls")
         if isinstance(tool_calls_delta, list) and tool_calls_delta:
-            tc = tool_calls_delta[0]
-            if tc.get("index") == 0 and tc.get("id") and 0 not in open_blocks:
-                events.append(
-                    ChatEvent(
-                        kind="content_block_start",
-                        index=0,
-                        content_block={
-                            "type": "tool_use",
-                            "id": tc.get("id"),
-                            "name": tc.get("function", {}).get("name", ""),
-                            "input": {},
-                        },
+            for tc in tool_calls_delta:
+                raw_index = tc.get("index")
+                if not isinstance(raw_index, int):
+                    continue
+                block_index = raw_index + 1
+                if tc.get("id") and block_index not in open_blocks:
+                    events.append(
+                        ChatEvent(
+                            kind="content_block_start",
+                            index=block_index,
+                            content_block={
+                                "type": "tool_use",
+                                "id": tc.get("id"),
+                                "name": tc.get("function", {}).get("name", ""),
+                                "input": {},
+                            },
+                        )
                     )
-                )
 
-            # tool_call arguments delta
-            args_delta = tc.get("function", {}).get("arguments")
-            if isinstance(args_delta, str) and args_delta:
-                events.append(
-                    ChatEvent(
-                        kind="content_block_delta",
-                        index=0,
-                        delta={"type": "input_json_delta", "partial_json": args_delta},
+                # tool_call arguments delta
+                args_delta = tc.get("function", {}).get("arguments")
+                if isinstance(args_delta, str) and args_delta:
+                    events.append(
+                        ChatEvent(
+                            kind="content_block_delta",
+                            index=block_index,
+                            delta={"type": "input_json_delta", "partial_json": args_delta},
+                        )
                     )
-                )
 
         # content_block_delta: text
         content = delta.get("content")

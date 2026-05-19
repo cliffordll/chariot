@@ -19,12 +19,12 @@ class ProviderApi:
     async def list_entries(self) -> list[dict[str, Any]]:
         service = ProviderService(self._runtime)
         entries, default = await service.list_with_default()
-        default_name = default.name if default else None
-        health_map = {row["provider_name"]: row for row in await service.list_health_entries()}
+        default_id = default.id if default else None
+        health_map = {row["provider_id"]: row for row in await service.list_health_entries()}
         return [
             {
-                **self.serialize(entry, health=health_map.get(entry.name)),
-                "default": entry.name == default_name,
+                **self.serialize(entry, health=health_map.get(entry.id)),
+                "default": entry.id == default_id,
             }
             for entry in entries
         ]
@@ -35,7 +35,7 @@ class ProviderApi:
         if result is None:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
         entry, is_default = result
-        health = await service.get_health(entry.name)
+        health = await service.get_health(entry.id)
         return {
             **self.serialize(entry, health=health),
             "default": is_default,
@@ -46,15 +46,15 @@ class ProviderApi:
         result = await service.status()
         entries = result["entries"]
         default = result["default"]
-        health_map = {row["provider_name"]: row for row in await service.list_health_entries()}
+        health_map = {row["provider_id"]: row for row in await service.list_health_entries()}
         return {
-            "default_provider": default.name if default is not None else None,
+            "default_provider": f"{default.name} ({default.slug})" if default is not None else None,
             "provider_count": len(entries),
             "known_types": sorted(ProviderRegistry.known_types()),
             "providers": [
                 {
-                    **self.serialize(entry, health=health_map.get(entry.name)),
-                    "default": default is not None and entry.name == default.name,
+                    **self.serialize(entry, health=health_map.get(entry.id)),
+                    "default": default is not None and entry.id == default.id,
                 }
                 for entry in entries
             ],
@@ -81,11 +81,16 @@ class ProviderApi:
         self,
         *,
         name: str,
+        rename: str | None,
         type_: str | None,
         options: dict[str, Any] | None,
         params: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        entry = await ProviderService(self._runtime).update(
+        service = ProviderService(self._runtime)
+        if rename is not None:
+            entry = await service.rename_provider(name, rename)
+            name = entry.id
+        entry = await service.update(
             name,
             type=type_,
             options=options,
@@ -95,7 +100,11 @@ class ProviderApi:
         return self.serialize(entry)
 
     async def delete_entry(self, *, name: str) -> str:
-        await ProviderService(self._runtime).delete(name)
+        service = ProviderService(self._runtime)
+        entry = await service.get_entry(name)
+        if entry is None:
+            raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
+        await service.delete(name)
         await self._runtime.reload()
         return name
 
@@ -119,7 +128,7 @@ class ProviderApi:
             raise RpcError(JsonRpcServer.ERR_NOT_FOUND, f"provider {name!r} not found")
         result = await ProviderProber.probe(entry)
         await service.record_health_probe(
-            entry.name,
+            entry.id,
             ok=result.ok,
             latency_ms=result.latency_ms,
             error_code=result.error.code if result.error is not None else None,
@@ -136,6 +145,8 @@ class ProviderApi:
     @staticmethod
     def serialize(entry: ProviderEntry, *, health: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
+            "id": entry.id,
+            "slug": entry.slug,
             "name": entry.name,
             "type": entry.type,
             "options": entry.options,

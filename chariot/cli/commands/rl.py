@@ -47,7 +47,7 @@ async def _export(conversation_id: str, out: Path | None, raw: bool) -> None:
     scrubber = NullScrubber() if raw else SecretScrubber()
     async with installed_runtime() as agent:
         exporter = TrajectoryExporter(
-            sessionmaker=agent.session_maker,
+            runtime=agent,
             scrubber=scrubber,
             audit_hooks=agent.audit_hooks,
         )

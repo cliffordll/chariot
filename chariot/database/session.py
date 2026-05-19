@@ -25,9 +25,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from ulid import ULID
 
 DEFAULT_DB_PATH = Path.home() / ".chariot" / "chariot.db"
-CURRENT_SCHEMA_VERSION = 25
+CURRENT_SCHEMA_VERSION = 7
+_PROVIDER_SNAPSHOT_COLUMN = "provider_snapshot"
 
 
 def _db_url(db_path: Path) -> str:
@@ -71,8 +73,23 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
         row = result.fetchone()
     current = int(row[0]) if row else 0
 
+    # 0.8.9 起把 002..028 历史链压成 `002_squashed_current.sql`,后续仍保留
+    # 003..006 这几段真实 identity migration。
+    # 现网只需要兼容:
+    # - v0/v1:空库或 0.1.0 `logs` 单表库,按 001 + 002..006 升到当前
+    # - v28/v29:旧开发库已在 squash 前最终 schema,收敛回 v6
+    # 中间版本链(2..27)在 squash 后不再保留自动升级承诺。
+    if current in {28, 29}:
+        async with engine.begin() as conn:
+            await conn.execute(text("PRAGMA user_version = 6"))
+        current = 6
     if current > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"DB schema version {current} 比代码支持的 {CURRENT_SCHEMA_VERSION} 还新,拒启动")
+    if current not in {0, 1, 6, CURRENT_SCHEMA_VERSION}:
+        raise RuntimeError(
+            f"DB schema version {current} 不在 squash 后支持的自动升级集合内; "
+            "当前仅支持 v0/v1 新装或历史 0.1.0 库、以及已到 v28/v29 / v6 的现有库"
+        )
     if current == CURRENT_SCHEMA_VERSION:
         return
 
@@ -89,9 +106,290 @@ async def _maybe_run_migrations(engine: AsyncEngine) -> None:
                     # SQLite 迁移幂等容错:ALTER TABLE ADD COLUMN 重复时自动跳过,
                     # 避免"部分执行后 user_version 未更新"导致的死循环
                     msg = str(exc)
-                    if "duplicate column name" in msg.lower():
+                    if "duplicate column name" in msg.lower() or "already exists" in msg.lower():
                         continue
                     raise
+
+
+async def _ensure_agent_profile_identity_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE agent_profiles ADD COLUMN id TEXT",
+        "CREATE UNIQUE INDEX idx_agent_profiles_id ON agent_profiles(id)",
+        "ALTER TABLE tasks ADD COLUMN agent_profile_id TEXT",
+        "CREATE INDEX idx_tasks_agent_profile_id ON tasks(agent_profile_id)",
+        "ALTER TABLE scheduled_jobs ADD COLUMN agent_profile_id TEXT",
+        "CREATE INDEX idx_scheduled_jobs_agent_profile_id ON scheduled_jobs(agent_profile_id)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
+async def _backfill_agent_profile_identity(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("SELECT name, id FROM agent_profiles ORDER BY name"))).mappings().all()
+        for row in rows:
+            if row["id"]:
+                continue
+            await conn.execute(
+                text("UPDATE agent_profiles SET id = :id WHERE name = :name"),
+                {"id": str(ULID()), "name": row["name"]},
+            )
+        await conn.execute(
+            text(
+                """
+                UPDATE tasks
+                SET agent_profile_id = (
+                    SELECT ap.id FROM agent_profiles AS ap
+                    WHERE ap.name = tasks.agent_profile
+                )
+                WHERE agent_profile IS NOT NULL
+                  AND (agent_profile_id IS NULL OR agent_profile_id = '')
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                UPDATE scheduled_jobs
+                SET agent_profile_id = (
+                    SELECT ap.id FROM agent_profiles AS ap
+                    WHERE ap.name = scheduled_jobs.agent_profile
+                )
+                WHERE agent_profile IS NOT NULL
+                  AND (agent_profile_id IS NULL OR agent_profile_id = '')
+                """
+            )
+        )
+
+
+async def _ensure_auxiliary_identity_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE auxiliary_clients ADD COLUMN id TEXT",
+        "CREATE UNIQUE INDEX idx_auxiliary_clients_id ON auxiliary_clients(id)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
+async def _backfill_auxiliary_identity(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("SELECT name, id FROM auxiliary_clients ORDER BY name"))).mappings().all()
+        for row in rows:
+            if row["id"]:
+                continue
+            await conn.execute(
+                text("UPDATE auxiliary_clients SET id = :id WHERE name = :name"),
+                {"id": str(ULID()), "name": row["name"]},
+            )
+
+
+async def _ensure_toolset_identity_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE toolsets ADD COLUMN id TEXT",
+        "CREATE UNIQUE INDEX idx_toolsets_id ON toolsets(id)",
+        "ALTER TABLE toolset_members ADD COLUMN toolset_id TEXT",
+        "CREATE INDEX idx_toolset_members_toolset_id ON toolset_members(toolset_id)",
+        "ALTER TABLE agent_profiles ADD COLUMN toolset_id TEXT",
+        "CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
+async def _ensure_trace_provider_call_links_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE trace_provider_calls ADD COLUMN prompt_trace_id TEXT",
+        "ALTER TABLE trace_provider_calls ADD COLUMN context_trace_id TEXT",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
+async def _backfill_toolset_identity(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("SELECT name, id FROM toolsets ORDER BY name"))).mappings().all()
+        for row in rows:
+            if row["id"]:
+                continue
+            await conn.execute(
+                text("UPDATE toolsets SET id = :id WHERE name = :name"),
+                {"id": str(ULID()), "name": row["name"]},
+            )
+        await conn.execute(
+            text(
+                """
+                UPDATE toolset_members
+                SET toolset_id = (
+                    SELECT ts.id FROM toolsets AS ts
+                    WHERE ts.name = toolset_members.toolset_name
+                )
+                WHERE toolset_name IS NOT NULL
+                  AND (toolset_id IS NULL OR toolset_id = '')
+                """
+            )
+        )
+
+
+async def _normalize_agent_profile_toolset_id_schema(engine: AsyncEngine) -> None:
+    # `tool_profile` 只在这里作为旧库兼容列名出现:
+    # 若历史库还没迁到 `toolset_id`,启动时先回填稳定 id,再重建表删掉旧列。
+    async with engine.begin() as conn:
+        columns = (await conn.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        column_names = {str(row["name"]) for row in columns}
+
+        if "toolset_id" not in column_names:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN toolset_id TEXT"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)"))
+            column_names.add("toolset_id")
+
+        if "tool_profile" in column_names:
+            await conn.execute(
+                text(
+                    """
+                    UPDATE agent_profiles
+                    SET toolset_id = (
+                        SELECT ts.id FROM toolsets AS ts
+                        WHERE ts.name = agent_profiles.tool_profile
+                    )
+                    WHERE tool_profile IS NOT NULL
+                      AND (toolset_id IS NULL OR toolset_id = '')
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE agent_profiles__new (
+                        name TEXT PRIMARY KEY,
+                        id TEXT UNIQUE,
+                        role TEXT NOT NULL,
+                        prompt_id TEXT,
+                        toolset_id TEXT,
+                        provider_id TEXT,
+                        budget TEXT NOT NULL DEFAULT '{}',
+                        meta TEXT NOT NULL DEFAULT '{}',
+                        reflection_enabled INTEGER NOT NULL DEFAULT 0,
+                        reflection_max_retries INTEGER NOT NULL DEFAULT 2,
+                        default_skill TEXT,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO agent_profiles__new (
+                        name,
+                        id,
+                        role,
+                        prompt_id,
+                        toolset_id,
+                        provider_id,
+                        budget,
+                        meta,
+                        reflection_enabled,
+                        reflection_max_retries,
+                        default_skill,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        name,
+                        id,
+                        role,
+                        prompt_id,
+                        toolset_id,
+                        provider_id,
+                        budget,
+                        meta,
+                        reflection_enabled,
+                        reflection_max_retries,
+                        default_skill,
+                        created_at,
+                        updated_at
+                    FROM agent_profiles
+                    """
+                )
+            )
+            await conn.execute(text("DROP TABLE agent_profiles"))
+            await conn.execute(text("ALTER TABLE agent_profiles__new RENAME TO agent_profiles"))
+            await conn.execute(text("CREATE UNIQUE INDEX idx_agent_profiles_id ON agent_profiles(id)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_role ON agent_profiles(role)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_prompt_id ON agent_profiles(prompt_id)"))
+            await conn.execute(text("CREATE INDEX idx_agent_profiles_toolset_id ON agent_profiles(toolset_id)"))
+
+
+async def _ensure_job_identity_schema(engine: AsyncEngine) -> None:
+    statements = [
+        "ALTER TABLE scheduled_jobs ADD COLUMN id TEXT",
+        "CREATE UNIQUE INDEX idx_scheduled_jobs_id ON scheduled_jobs(id)",
+        "ALTER TABLE job_runs ADD COLUMN job_id TEXT",
+        "CREATE INDEX idx_job_runs_job_id ON job_runs(job_id)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                raise
+
+
+async def _backfill_job_identity(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("SELECT name, id FROM scheduled_jobs ORDER BY name"))).mappings().all()
+        for row in rows:
+            if row["id"]:
+                continue
+            await conn.execute(
+                text("UPDATE scheduled_jobs SET id = :id WHERE name = :name"),
+                {"id": str(ULID()), "name": row["name"]},
+            )
+        await conn.execute(
+            text(
+                """
+                UPDATE job_runs
+                SET job_id = (
+                    SELECT sj.id FROM scheduled_jobs AS sj
+                    WHERE sj.name = job_runs.job_name
+                )
+                WHERE job_name IS NOT NULL
+                  AND (job_id IS NULL OR job_id = '')
+                """
+            )
+        )
 
 
 class DBState:
@@ -127,6 +425,16 @@ class DBState:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_async_engine(_db_url(db_path))
         await _maybe_run_migrations(engine)
+        await _ensure_agent_profile_identity_schema(engine)
+        await _backfill_agent_profile_identity(engine)
+        await _ensure_auxiliary_identity_schema(engine)
+        await _backfill_auxiliary_identity(engine)
+        await _ensure_toolset_identity_schema(engine)
+        await _backfill_toolset_identity(engine)
+        await _normalize_agent_profile_toolset_id_schema(engine)
+        await _ensure_trace_provider_call_links_schema(engine)
+        await _ensure_job_identity_schema(engine)
+        await _backfill_job_identity(engine)
         cls.engine = engine
         # expire_on_commit=False:commit 后对象属性不失效,避免响应序列化时 lazy reload
         sm = async_sessionmaker(engine, expire_on_commit=False)

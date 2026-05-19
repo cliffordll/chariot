@@ -16,8 +16,8 @@ class ProviderHealthRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get(self, provider_name: str) -> dict[str, Any] | None:
-        row = await self.session.get(ProviderHealthRow, provider_name)
+    async def get(self, provider_id: str) -> dict[str, Any] | None:
+        row = await self.session.get(ProviderHealthRow, provider_id)
         if row is None:
             return None
         return self._row_to_dict(row)
@@ -29,17 +29,19 @@ class ProviderHealthRepo:
 
     async def record_probe(
         self,
-        provider_name: str,
+        provider_id: str,
         *,
+        provider_snapshot: str,
         ok: bool,
         latency_ms: int,
         error_code: str | None = None,
         error_message: str | None = None,
     ) -> dict[str, Any]:
-        row = await self.session.get(ProviderHealthRow, provider_name)
+        row = await self.session.get(ProviderHealthRow, provider_id)
         if row is None:
-            row = ProviderHealthRow(provider_name=provider_name)
+            row = ProviderHealthRow(provider_id=provider_id, provider_snapshot=provider_snapshot)
             self.session.add(row)
+        row.provider_snapshot = provider_snapshot
         row.last_ok = 1 if ok else 0
         row.latency_ms = latency_ms
         row.error_code = error_code
@@ -48,14 +50,15 @@ class ProviderHealthRepo:
         await self.session.refresh(row)
         return self._row_to_dict(row)
 
-    async def clear(self, provider_name: str) -> None:
-        await self.session.execute(delete(ProviderHealthRow).where(ProviderHealthRow.provider_name == provider_name))
+    async def clear(self, provider_id: str) -> None:
+        await self.session.execute(delete(ProviderHealthRow).where(ProviderHealthRow.provider_id == provider_id))
         await self.session.commit()
 
     @staticmethod
     def _row_to_dict(row: ProviderHealthRow) -> dict[str, Any]:
         return {
-            "provider_name": row.provider_name,
+            "provider_id": row.provider_id,
+            "provider_snapshot": row.provider_snapshot,
             "last_ok": bool(row.last_ok),
             "latency_ms": row.latency_ms,
             "error_code": row.error_code,

@@ -13,6 +13,7 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
 from chariot.sidecar.methods import register_methods
 
@@ -76,11 +77,16 @@ async def test_list_includes_seeded_summarizer(server: JsonRpcServer) -> None:
     assert "summarizer" in names
 
 
-async def test_show_returns_entry(server: JsonRpcServer) -> None:
+async def test_show_returns_entry(server: JsonRpcServer, agent: AIAgent) -> None:
+    async with agent._sessionmaker() as session:  # type: ignore[attr-defined]
+        mock = await ProviderRepo(session).get_entry("mock")
     resp = await _call(server, "show_auxiliary_client", {"name": "summarizer"})
     assert "result" in resp
     aux = resp["result"]["auxiliary_client"]
-    assert aux["provider_entry"] == "mock"
+    assert mock is not None
+    assert aux["provider_id"] == mock.id
+    resp_by_id = await _call(server, "show_auxiliary_client", {"name": aux["id"]})
+    assert resp_by_id["result"]["auxiliary_client"]["name"] == "summarizer"
 
 
 async def test_show_unknown_returns_not_found(server: JsonRpcServer) -> None:
@@ -93,14 +99,15 @@ async def test_add_then_delete(server: JsonRpcServer) -> None:
     add_resp = await _call(
         server,
         "add_auxiliary_client",
-        {"name": "critic_aux", "provider_entry": "mock", "model": "mock-critic"},
+        {"name": "critic_aux", "provider_id": "mock", "model": "mock-critic"},
     )
+    assert add_resp["result"]["auxiliary_client"]["provider_id"]
     assert add_resp["result"]["auxiliary_client"]["model"] == "mock-critic"
 
     dup_resp = await _call(
         server,
         "add_auxiliary_client",
-        {"name": "critic_aux", "provider_entry": "mock"},
+        {"name": "critic_aux", "provider_id": "mock"},
     )
     assert dup_resp["error"]["code"] == JsonRpcServer.ERR_DUPLICATE
 
@@ -112,7 +119,7 @@ async def test_update_clear_model_via_null(server: JsonRpcServer) -> None:
     await _call(
         server,
         "add_auxiliary_client",
-        {"name": "aux1", "provider_entry": "mock", "model": "mock-1"},
+        {"name": "aux1", "provider_id": "mock", "model": "mock-1"},
     )
     resp = await _call(
         server,
@@ -127,7 +134,7 @@ async def test_update_unset_model_keeps_value(server: JsonRpcServer) -> None:
     await _call(
         server,
         "add_auxiliary_client",
-        {"name": "aux1", "provider_entry": "mock", "model": "mock-1"},
+        {"name": "aux1", "provider_id": "mock", "model": "mock-1"},
     )
     resp = await _call(
         server,
@@ -139,6 +146,21 @@ async def test_update_unset_model_keeps_value(server: JsonRpcServer) -> None:
     assert aux["params"] == {"max_tokens": 2048}
 
 
-async def test_add_missing_provider_entry_errors(server: JsonRpcServer) -> None:
+async def test_update_provider_via_provider_id_alias(server: JsonRpcServer) -> None:
+    await _call(
+        server,
+        "add_auxiliary_client",
+        {"name": "aux1", "provider_id": "mock", "model": "mock-1"},
+    )
+    resp = await _call(
+        server,
+        "update_auxiliary_client",
+        {"name": "aux1", "provider_id": "mock"},
+    )
+    aux = resp["result"]["auxiliary_client"]
+    assert aux["provider_id"]
+
+
+async def test_add_missing_provider_id_errors(server: JsonRpcServer) -> None:
     resp = await _call(server, "add_auxiliary_client", {"name": "x"})
     assert resp["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS

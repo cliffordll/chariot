@@ -90,8 +90,8 @@ class PromptRepo:
             for row in rows
         ]
 
-    async def get_bundle(self, name: str) -> PromptBundleEntry | None:
-        row = await self._bundle_row_by_name(name)
+    async def get_bundle(self, ref: str) -> PromptBundleEntry | None:
+        row = await self._bundle_row(ref)
         if row is None:
             return None
         return self._bundle_to_entry(
@@ -100,8 +100,8 @@ class PromptRepo:
             active_version=await self._active_version_name(row.id),
         )
 
-    async def list_versions(self, bundle_name: str) -> list[PromptVersionEntry]:
-        bundle = await self._bundle_row_by_name(bundle_name)
+    async def list_versions(self, bundle_ref: str) -> list[PromptVersionEntry]:
+        bundle = await self._bundle_row(bundle_ref)
         if bundle is None:
             return []
         stmt = (
@@ -112,8 +112,8 @@ class PromptRepo:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self._version_to_entry(row, bundle_name=bundle.name) for row in rows]
 
-    async def get_version(self, bundle_name: str, version: str) -> PromptVersionEntry | None:
-        bundle = await self._bundle_row_by_name(bundle_name)
+    async def get_version(self, bundle_ref: str, version: str) -> PromptVersionEntry | None:
+        bundle = await self._bundle_row(bundle_ref)
         if bundle is None:
             return None
         stmt = select(PromptVersionRow).where(
@@ -160,12 +160,12 @@ class PromptRepo:
 
     async def list_traces_by_bundle(
         self,
-        bundle_name: str,
+        bundle_ref: str,
         *,
         limit: int = 50,
         offset: int = 0,
     ) -> list[PromptTraceEntry]:
-        bundle = await self._bundle_row_by_name(bundle_name)
+        bundle = await self._bundle_row(bundle_ref)
         if bundle is None:
             return []
         stmt = (
@@ -201,16 +201,16 @@ class PromptRepo:
 
     async def create_bundle(
         self,
-        name: str,
+        ref: str,
         *,
         description: str | None = None,
         layers: list[dict[str, Any]] | None = None,
         version: str = DEFAULT_VERSION,
     ) -> PromptVersionEntry:
-        if await self._bundle_row_by_name(name) is not None:
-            raise ConfigError(f"prompt bundle {name!r} already exists")
+        if await self._bundle_row_by_name(ref) is not None:
+            raise ConfigError(f"prompt bundle {ref!r} already exists")
         bundle = PromptBundleRow(
-            name=name,
+            name=ref,
             description=description,
             layers=self._serialize_json("layers", layers or DEFAULT_BUNDLE_LAYERS),
             is_active=1,
@@ -230,15 +230,15 @@ class PromptRepo:
 
     async def update_bundle(
         self,
-        name: str,
+        ref: str,
         *,
         description: str | None | object = _MISSING,
         layers: list[dict[str, Any]] | None | object = _MISSING,
         activate: bool = True,
     ) -> PromptVersionEntry:
-        bundle = await self._bundle_row_by_name(name)
+        bundle = await self._bundle_row(ref)
         if bundle is None:
-            raise ConfigError(f"prompt bundle {name!r} not found")
+            raise ConfigError(f"prompt bundle {ref!r} not found")
         if description is not _MISSING:
             bundle.description = cast(str | None, description)
         if layers is not _MISSING and layers is not None:
@@ -274,21 +274,47 @@ class PromptRepo:
         await self.session.commit()
         return created
 
-    async def activate_bundle(self, name: str) -> PromptBundleEntry:
-        bundle = await self._bundle_row_by_name(name)
+    async def rename_bundle(self, ref: str, *, new_name: str) -> PromptBundleEntry:
+        bundle = await self._bundle_row(ref)
         if bundle is None:
-            raise ConfigError(f"prompt bundle {name!r} not found")
+            raise ConfigError(f"prompt bundle {ref!r} not found")
+        new_name = new_name.strip()
+        if not new_name:
+            raise ConfigError("prompt bundle name must be non-empty")
+        existing = await self._bundle_row_by_name(new_name)
+        if existing is not None and existing.id != bundle.id:
+            raise ConfigError(f"prompt bundle {new_name!r} already exists")
+        bundle.name = new_name
+        versions = (
+            (await self.session.execute(select(PromptVersionRow).where(PromptVersionRow.bundle_id == bundle.id)))
+            .scalars()
+            .all()
+        )
+        for row in versions:
+            spec = cast(dict[str, Any], json.loads(row.spec))
+            spec["bundle"] = new_name
+            row.spec = self._serialize_json("spec", spec)
+        await self.session.commit()
+        renamed = await self.get_bundle(new_name)
+        if renamed is None:
+            raise RuntimeError("prompt bundle rename failed")
+        return renamed
+
+    async def activate_bundle(self, ref: str) -> PromptBundleEntry:
+        bundle = await self._bundle_row(ref)
+        if bundle is None:
+            raise ConfigError(f"prompt bundle {ref!r} not found")
         await self._set_bundle_active(bundle.id)
         await self.session.commit()
-        active = await self.get_bundle(name)
+        active = await self.get_bundle(bundle.id)
         if active is None:
             raise RuntimeError("prompt bundle activation failed")
         return active
 
-    async def activate_version(self, bundle_name: str, version: str) -> PromptVersionEntry:
-        bundle = await self._bundle_row_by_name(bundle_name)
+    async def activate_version(self, bundle_ref: str, version: str) -> PromptVersionEntry:
+        bundle = await self._bundle_row(bundle_ref)
         if bundle is None:
-            raise ConfigError(f"prompt bundle {bundle_name!r} not found")
+            raise ConfigError(f"prompt bundle {bundle_ref!r} not found")
         target = await self._set_version_active(bundle.id, version)
         await self._set_bundle_active(bundle.id)
         await self.session.commit()
@@ -304,7 +330,8 @@ class PromptRepo:
         self,
         req: ChatRequest,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_snapshot: str,
         model: str | None,
         bundle_name: str | None = None,
         version: str | None = None,
@@ -328,7 +355,8 @@ class PromptRepo:
             ver = await self._create_version(bundle.id, bundle.name, version_name)
         snapshot = PromptComposer.build_snapshot(
             req,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_snapshot=provider_snapshot,
             model=model,
             bundle_name=bundle.name,
             version=ver.version,
@@ -339,7 +367,8 @@ class PromptRepo:
             bundle_id=bundle.id,
             version_id=ver.id,
             conversation_id=req.conversation_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_snapshot=provider_snapshot,
             model=model,
             request=self._serialize_json("request", snapshot.request),
             source_refs=self._serialize_json("source_refs", snapshot.source_refs),
@@ -426,6 +455,21 @@ class PromptRepo:
         stmt = select(PromptBundleRow).where(PromptBundleRow.name == name)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def _bundle_row(self, ref: str) -> PromptBundleRow | None:
+        stmt = select(PromptBundleRow).where((PromptBundleRow.id == ref) | (PromptBundleRow.name == ref))
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+        exact_id = [row for row in rows if row.id == ref]
+        if len(exact_id) == 1:
+            return exact_id[0]
+        exact_name = [row for row in rows if row.name == ref]
+        if len(exact_name) == 1:
+            return exact_name[0]
+        raise ConfigError(f"prompt bundle 引用 {ref!r} 不唯一,请改用 id")
+
     async def _active_bundle_row(self) -> PromptBundleRow | None:
         stmt = select(PromptBundleRow).where(PromptBundleRow.is_active == 1).order_by(PromptBundleRow.updated_at.desc())
         return (await self.session.execute(stmt)).scalar_one_or_none()
@@ -503,7 +547,8 @@ class PromptRepo:
             version_id=row.version_id,
             version=version.version if version is not None else row.version_id,
             conversation_id=row.conversation_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_snapshot=row.provider_snapshot,
             model=row.model,
             request=cast(dict[str, Any], json.loads(row.request)),
             source_refs=cast(list[dict[str, Any]], json.loads(row.source_refs)),

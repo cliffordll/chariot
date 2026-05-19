@@ -38,7 +38,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type AgentProfile, type ApiError, type PromptBundle, type Provider, type Toolset } from "@/lib/api";
+import { CollapsibleJson } from "@/components/collapsible-json";
+import {
+  api,
+  type AgentProfile,
+  type ApiError,
+  type ContextBundle,
+  type PromptBundle,
+  type Provider,
+  type Toolset,
+} from "@/lib/api";
 
 type AgentsState =
   | { kind: "loading" }
@@ -53,9 +62,41 @@ type DetailState =
 
 type BindingOptions = {
   bundles: PromptBundle[];
+  contexts: ContextBundle[];
   toolsets: Toolset[];
   providers: Provider[];
 };
+
+type BindingOption = {
+  value: string;
+  label: string;
+};
+
+function bindingText(label: string | null, ref: string | null): string {
+  return label ?? ref ?? "-";
+}
+
+function BindingStack({ agent }: { agent: AgentProfile }) {
+  const rows = [
+    { label: "Prompt", text: bindingText(agent.prompt_label, agent.prompt_id), variant: "outline" as const },
+    { label: "Context", text: bindingText(agent.context_label, agent.context_id), variant: "outline" as const },
+    { label: "Toolset", text: bindingText(agent.toolset_label, agent.toolset_id), variant: "secondary" as const },
+    { label: "Provider", text: bindingText(agent.provider_label, agent.provider_id), variant: "outline" as const },
+  ];
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      {rows.map((row) => (
+        <div key={row.label} className="flex min-w-0 items-center gap-1.5">
+          <span className="w-12 shrink-0 text-[10px] font-medium text-muted-foreground">{row.label}</span>
+          <Badge variant={row.variant} className="min-w-0 max-w-full truncate">
+            {row.text}
+          </Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Agents() {
   const [state, setState] = useState<AgentsState>({ kind: "loading" });
@@ -65,7 +106,12 @@ export default function Agents() {
   const [removeAgent, setRemoveAgent] = useState<AgentProfile | null>(null);
   const [removing, setRemoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [bindingOptions, setBindingOptions] = useState<BindingOptions>({ bundles: [], toolsets: [], providers: [] });
+  const [bindingOptions, setBindingOptions] = useState<BindingOptions>({
+    bundles: [],
+    contexts: [],
+    toolsets: [],
+    providers: [],
+  });
 
   const detailRef = useRef(detail);
   useEffect(() => {
@@ -113,12 +159,13 @@ export default function Agents() {
   useEffect(() => {
     void (async () => {
       try {
-        const [{ bundles }, { toolsets }, { providers }] = await Promise.all([
+        const [{ bundles }, { bundles: contexts }, { toolsets }, { providers }] = await Promise.all([
           api.listPromptBundles(),
+          api.listContextBundles(),
           api.listToolsets(),
           api.listProviders(),
         ]);
-        setBindingOptions({ bundles, toolsets, providers });
+        setBindingOptions({ bundles, contexts, toolsets, providers });
       } catch {
         // 静默:datalist 是辅助提示,失败不阻断 Agents 页主功能
       }
@@ -242,9 +289,7 @@ function AgentsListCard({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Prompt bundle</TableHead>
-              <TableHead>Tool profile</TableHead>
-              <TableHead>Provider profile</TableHead>
+              <TableHead>Bindings</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -257,9 +302,9 @@ function AgentsListCard({
               >
                 <TableCell className="font-medium">{agent.name}</TableCell>
                 <TableCell>{agent.role}</TableCell>
-                <TableCell>{agent.prompt_bundle ?? "-"}</TableCell>
-                <TableCell>{agent.tool_profile ?? "-"}</TableCell>
-                <TableCell>{agent.provider_profile ?? "-"}</TableCell>
+                <TableCell className="max-w-[18rem] align-top">
+                  <BindingStack agent={agent} />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -290,14 +335,16 @@ function AgentDetailCard({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{agent.role}</Badge>
-              {agent.prompt_bundle && <Badge variant="outline">{agent.prompt_bundle}</Badge>}
-              {agent.tool_profile && <Badge variant="secondary">{agent.tool_profile}</Badge>}
-              {agent.provider_profile && <Badge variant="outline">{agent.provider_profile}</Badge>}
+              {agent.prompt_id && <Badge variant="outline">{bindingText(agent.prompt_label, agent.prompt_id)}</Badge>}
+              {agent.context_id && <Badge variant="outline">{bindingText(agent.context_label, agent.context_id)}</Badge>}
+              {agent.toolset_id && <Badge variant="secondary">{bindingText(agent.toolset_label, agent.toolset_id)}</Badge>}
+              {agent.provider_id && <Badge variant="outline">{bindingText(agent.provider_label, agent.provider_id)}</Badge>}
               {agent.reflection_enabled && (
                 <Badge variant="default">reflect ×{agent.reflection_max_retries}</Badge>
               )}
             </div>
             <div className="grid gap-1 text-sm text-muted-foreground">
+              <span>id: {agent.id}</span>
               <span>created: {formatDateTime(agent.created_at)}</span>
               <span>updated: {formatDateTime(agent.updated_at)}</span>
             </div>
@@ -307,9 +354,10 @@ function AgentDetailCard({
             <Button variant="outline" size="sm" onClick={() => onRemove(agent)}>Remove</Button>
           </div>
         </div>
-
-        <MetaBlock title="Budget" value={agent.budget} />
-        <MetaBlock title="Meta" value={agent.meta} />
+        <div className="space-y-4">
+          <MetaBlock title="Budget" value={agent.budget} />
+          <MetaBlock title="Meta" value={agent.meta} />
+        </div>
       </div>
     </Panel>
   );
@@ -325,7 +373,7 @@ function BindingSelect({
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ name: string }>;
+  options: BindingOption[];
   placeholder: string;
 }) {
   return (
@@ -339,8 +387,8 @@ function BindingSelect({
       <SelectContent>
         <SelectItem value={BINDING_NONE}>(none)</SelectItem>
         {options.map((opt) => (
-          <SelectItem key={opt.name} value={opt.name}>
-            {opt.name}
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
           </SelectItem>
         ))}
       </SelectContent>
@@ -359,8 +407,9 @@ function CreateAgentDialog({
 }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [promptBundle, setPromptBundle] = useState("");
-  const [toolProfile, setToolProfile] = useState("");
+  const [promptId, setPromptId] = useState("");
+  const [contextId, setContextId] = useState("");
+  const [toolsetId, setToolsetId] = useState("");
   const [providerProfile, setProviderProfile] = useState("");
   const [budget, setBudget] = useState("{}");
   const [meta, setMeta] = useState("{}");
@@ -385,9 +434,10 @@ function CreateAgentDialog({
       await api.createAgent({
         name,
         role,
-        prompt_bundle: promptBundle || null,
-        tool_profile: toolProfile || null,
-        provider_profile: providerProfile || null,
+        prompt_id: promptId || null,
+        context_id: contextId || null,
+        toolset_id: toolsetId || null,
+        provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
         reflection_enabled: reflectionEnabled,
@@ -419,20 +469,28 @@ function CreateAgentDialog({
               <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="planner" />
             </Field>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Field label="Prompt bundle">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Prompt ID">
               <BindingSelect
-                value={promptBundle}
-                onChange={setPromptBundle}
-                options={options.bundles}
+                value={promptId}
+                onChange={setPromptId}
+                options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>
-            <Field label="Tool profile">
+            <Field label="Context ID">
               <BindingSelect
-                value={toolProfile}
-                onChange={setToolProfile}
-                options={options.toolsets}
+                value={contextId}
+                onChange={setContextId}
+                options={options.contexts.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
+                placeholder="(none)"
+              />
+            </Field>
+            <Field label="Toolset ID">
+              <BindingSelect
+                value={toolsetId}
+                onChange={setToolsetId}
+                options={options.toolsets.map((toolset) => ({ value: toolset.id, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -440,7 +498,7 @@ function CreateAgentDialog({
               <BindingSelect
                 value={providerProfile}
                 onChange={setProviderProfile}
-                options={options.providers}
+                options={options.providers.map((provider) => ({ value: provider.id, label: provider.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -497,10 +555,12 @@ function EditAgentDialog({
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
+  const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
-  const [promptBundle, setPromptBundle] = useState(agent.prompt_bundle ?? "");
-  const [toolProfile, setToolProfile] = useState(agent.tool_profile ?? "");
-  const [providerProfile, setProviderProfile] = useState(agent.provider_profile ?? "");
+  const [promptId, setPromptId] = useState(agent.prompt_id ?? "");
+  const [contextId, setContextId] = useState(agent.context_id ?? "");
+  const [toolsetId, setToolsetId] = useState(agent.toolset_id ?? "");
+  const [providerProfile, setProviderProfile] = useState(agent.provider_id ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
   const [meta, setMeta] = useState(JSON.stringify(agent.meta, null, 2));
   const [reflectionEnabled, setReflectionEnabled] = useState(agent.reflection_enabled);
@@ -522,16 +582,18 @@ function EditAgentDialog({
     setSubmitting(true);
     try {
       await api.updateAgent(agent.name, {
+        rename: name.trim() !== agent.name ? name.trim() : undefined,
         role,
-        prompt_bundle: promptBundle || null,
-        tool_profile: toolProfile || null,
-        provider_profile: providerProfile || null,
+        prompt_id: promptId || null,
+        context_id: contextId || null,
+        toolset_id: toolsetId || null,
+        provider_id: providerProfile || null,
         budget: parsedBudget,
         meta: parsedMeta,
         reflection_enabled: reflectionEnabled,
         reflection_max_retries: reflectionMaxRetries,
       });
-      onSaved(agent.name);
+      onSaved(name.trim() || agent.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -547,23 +609,34 @@ function EditAgentDialog({
           <DialogDescription>Update role, bindings, budget, or meta for {agent.name}.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
           <Field label="Role">
             <Input value={role} onChange={(e) => setRole(e.target.value)} />
           </Field>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Field label="Prompt bundle">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Prompt ID">
               <BindingSelect
-                value={promptBundle}
-                onChange={setPromptBundle}
-                options={options.bundles}
+                value={promptId}
+                onChange={setPromptId}
+                options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>
-            <Field label="Tool profile">
+            <Field label="Context ID">
               <BindingSelect
-                value={toolProfile}
-                onChange={setToolProfile}
-                options={options.toolsets}
+                value={contextId}
+                onChange={setContextId}
+                options={options.contexts.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
+                placeholder="(none)"
+              />
+            </Field>
+            <Field label="Toolset ID">
+              <BindingSelect
+                value={toolsetId}
+                onChange={setToolsetId}
+                options={options.toolsets.map((toolset) => ({ value: toolset.id, label: toolset.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -571,7 +644,7 @@ function EditAgentDialog({
               <BindingSelect
                 value={providerProfile}
                 onChange={setProviderProfile}
-                options={options.providers}
+                options={options.providers.map((provider) => ({ value: provider.id, label: provider.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -650,11 +723,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function MetaBlock({ title, value }: { title: string; value: Record<string, unknown> }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-sm font-medium">{title}</div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-background/80 p-3 text-xs">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+    <div className="space-y-2">
+      <div className="text-sm font-medium">{title}</div>
+      <CollapsibleJson
+        value={value}
+        maxHeightClassName="max-h-64"
+        containerClassName="rounded-lg border border-border bg-muted/10 px-3 py-2"
+        contentClassName="rounded bg-background/80 px-2 py-1.5 font-mono text-[11px] leading-5"
+      />
     </div>
   );
 }

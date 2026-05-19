@@ -2,7 +2,7 @@
 
 封装策略(CLAUDE.md ⭐):
 - 单类编排;模块级零自由函数
-- 持 `sessionmaker` + `skill_registry`;读 audit_events + skills.prompt,**不写**
+- 持 `runtime` + `skill_registry`;读 audit_events + skills.prompt,**不写**
 - 4 bucket 互不独占:同一 skill 可被多个 bucket 命中(在 UI 上聚合显示)
 
 Bucket 阈值(经验值;后续 demo 跑通后再调):
@@ -50,7 +50,7 @@ class SkillCurator:
     用法::
 
         curator = SkillCurator(
-            sessionmaker=sm,
+            runtime=sm,
             skill_registry=registry,
         )
         result = await curator.curate()
@@ -72,7 +72,8 @@ class SkillCurator:
     def __init__(
         self,
         *,
-        sessionmaker: async_sessionmaker[AsyncSession],
+        runtime: object | None = None,
+        sessionmaker: async_sessionmaker[AsyncSession] | None = None,
         skill_registry: SkillRegistry,
         stale_days: int = DEFAULT_STALE_DAYS,
         underused_threshold: int = DEFAULT_UNDERUSED_THRESHOLD,
@@ -80,7 +81,9 @@ class SkillCurator:
         failing_ratio: float = DEFAULT_FAILING_RATIO,
         overlap_ratio: float = DEFAULT_OVERLAP_RATIO,
     ) -> None:
-        self._sessionmaker = sessionmaker
+        self._runtime = runtime or sessionmaker
+        if self._runtime is None:
+            raise ValueError("runtime or sessionmaker is required")
         self._skill_registry = skill_registry
         self._stale_days = stale_days
         self._underused_threshold = underused_threshold
@@ -112,13 +115,12 @@ class SkillCurator:
         只读最近 30 天 + failing_window 兜底 N 条(查询起来 limit 大一点,client side
         过滤)。避免一次性把整张 audit 表灌进内存。
         """
-        from chariot.repos.audit_repo import AuditRepo
+        from chariot.services.audit import AuditService
 
         out: dict[str, list[tuple[datetime, bool]]] = {}
         # 读 max(stale_days, failing_window×10) 条,够 4 bucket 算
         limit = max(self._stale_days * 50, self._failing_window * 20, 500)
-        async with self._sessionmaker() as session:
-            events = await AuditRepo(session).list_events(limit=limit)
+        events = await AuditService(self._runtime).list_events(limit=limit)
         for ev in events:
             if ev.event_type != AuditHookManager.EVENT_SKILL_ACTIVATE:
                 continue

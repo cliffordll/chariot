@@ -8,7 +8,7 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.tool_repo import ToolRepo
+from chariot.services.tool import ToolService
 from chariot.sidecar.runtime import SidecarRuntime
 
 
@@ -29,8 +29,7 @@ async def test_reload_refreshes_default_agent_tools(tmp_path: Path) -> None:
 
     assert runtime.agent.tools == {}
 
-    async with runtime.session_maker() as session:
-        await ToolRepo(session).update("list_dir", enabled=True)
+    await ToolService(runtime).update("list_dir", enabled=True)
 
     await runtime.reload()
 

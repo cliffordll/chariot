@@ -278,7 +278,7 @@ class Renderer:
     ) -> None:
         """打 chat 收尾的 meta 行。
 
-        形如 `[claude-haiku · 8→21 tokens · 412ms]`(显示的是 provider entry name)。
+        形如 `[Claude Prod · 8→21 tokens · 412ms]`(显示的是 provider 展示名快照)。
 
         tok 数为 0 时显示 `?` 占位。`--quiet` 时完全抑制 meta 行。
         """

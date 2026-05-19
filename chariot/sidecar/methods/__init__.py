@@ -40,7 +40,7 @@ class SidecarAgent(Protocol):
     def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]: ...
 
     @property
-    def session_maker(self) -> async_sessionmaker[AsyncSession]: ...
+    def _sessionmaker(self) -> async_sessionmaker[AsyncSession] | None: ...
 
     @property
     def critic_agent(self) -> CriticAgent | None: ...
@@ -177,6 +177,7 @@ def register_methods(
     from chariot.sidecar.methods.memory import MemoryMethods
     from chariot.sidecar.methods.prompt import PromptMethods
     from chariot.sidecar.methods.provider import ProviderMethods
+    from chariot.sidecar.methods.reference import ReferenceMethods
     from chariot.sidecar.methods.rl import RLMethods
     from chariot.sidecar.methods.skill import SkillMethods
     from chariot.sidecar.methods.task import TaskMethods
@@ -184,13 +185,22 @@ def register_methods(
     from chariot.sidecar.methods.toolset import ToolsetMethods
     from chariot.sidecar.methods.trace import TraceMethods
 
-    server.method("chat")(ChatMethod(runtime))
+    chat = ChatMethod(runtime)
+    server.method("chat")(chat)
+    server.method("cancel_chat")(chat.cancel)
 
     contexts = ContextMethods(runtime)
     server.method("list_context_snapshots")(contexts.list_)
+    server.method("list_context_bundles")(contexts.bundles)
+    server.method("get_context_bundle")(contexts.show)
+    server.method("list_context_versions")(contexts.versions)
+    server.method("get_context_version")(contexts.version)
     server.method("get_context_snapshot")(contexts.get)
     server.method("list_context_traces")(contexts.traces)
     server.method("inspect_context")(contexts.inspect)
+    server.method("add_context_bundle")(contexts.add)
+    server.method("update_context_bundle")(contexts.update)
+    server.method("activate_context_bundle")(contexts.activate)
 
     memories = MemoryMethods(runtime)
     server.method("list_memories")(memories.list_)
@@ -269,6 +279,9 @@ def register_methods(
     server.method("add_tool")(tools.add)
     server.method("delete_tool")(tools.delete)
     server.method("update_tool")(tools.update)
+
+    references = ReferenceMethods(runtime)
+    server.method("complete_reference")(references.complete)
 
     toolsets = ToolsetMethods(runtime)
     server.method("list_toolsets")(toolsets.list_)

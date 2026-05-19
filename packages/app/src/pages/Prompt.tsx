@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
   Dialog,
   DialogContent,
@@ -41,10 +42,7 @@ export default function Prompt() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<PromptBundle | null>(null);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
-  const [traces, setTraces] = useState<PromptTrace[]>([]);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
-  const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
-  const [traceDetails, setTraceDetails] = useState<Record<string, PromptTrace>>({});
   const [bundleDialog, setBundleDialog] = useState<BundleDialogMode>({ kind: "closed" });
 
   const loadBundles = useCallback(async () => {
@@ -64,25 +62,18 @@ export default function Prompt() {
 
   const loadSelected = useCallback(async (name: string) => {
     try {
-      const [bundleRes, versionsRes, tracesRes] = await Promise.all([
+      const [bundleRes, versionsRes] = await Promise.all([
         api.getPromptBundle(name),
         api.listPromptVersions(name),
-        api.listPromptTraces({ bundle_name: name, limit: 20, offset: 0 }),
       ]);
       setDetail(bundleRes.bundle);
       setVersions(versionsRes.versions);
-      setTraces(tracesRes.traces);
       setExpandedVersionId(null);
-      setExpandedTraceId(null);
-      setTraceDetails({});
     } catch (e) {
       const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
       setDetail(null);
       setVersions([]);
-      setTraces([]);
       setExpandedVersionId(null);
-      setExpandedTraceId(null);
-      setTraceDetails({});
       setState({ kind: "err", message: msg });
     }
   }, []);
@@ -113,29 +104,6 @@ export default function Prompt() {
     [refreshAll],
   );
 
-  const inspectTrace = useCallback(async (trace: PromptTrace) => {
-    if (expandedTraceId === trace.id && traceDetails[trace.id]) {
-      setExpandedTraceId(null);
-      return;
-    }
-    if (traceDetails[trace.id]) {
-      setExpandedTraceId(trace.id);
-      return;
-    }
-    try {
-      const result = await api.inspectPrompt(trace.id);
-      setTraceDetails((cur) => ({ ...cur, [trace.id]: result.trace }));
-      setExpandedTraceId(trace.id);
-    } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setTraceDetails((cur) => ({
-        ...cur,
-        [trace.id]: { ...trace, request: { error: msg } as Record<string, unknown> },
-      }));
-      setExpandedTraceId(trace.id);
-    }
-  }, [expandedTraceId, traceDetails]);
-
   const openEdit = useCallback(() => {
     if (detail) setBundleDialog({ kind: "edit", bundle: detail });
   }, [detail]);
@@ -146,7 +114,7 @@ export default function Prompt() {
         <div>
           <h1 className="text-2xl font-semibold">Prompt</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage prompt bundles, versions, and traces.
+            Manage prompt bundles and versions.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -292,9 +260,7 @@ export default function Prompt() {
                                   {layers.length === 0 ? (
                                     <p className="text-xs text-muted-foreground">(no layers)</p>
                                   ) : (
-                                    <pre className="overflow-auto rounded-md border border-border bg-background p-3 text-xs leading-5 whitespace-pre-wrap break-words">
-                                      {JSON.stringify(layers, null, 2)}
-                                    </pre>
+                                    <CollapsibleJson title="Layers" value={layers} defaultExpanded maxHeightClassName="max-h-72" />
                                   )}
                                 </td>
                               </tr>
@@ -307,68 +273,6 @@ export default function Prompt() {
                 </div>
               </Card>
 
-              <Card title="Traces" subtitle="Single-line overview. Click inspect to view details.">
-                <div className="overflow-hidden rounded-md border border-border">
-                  <table className="w-full table-fixed text-sm">
-                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <tr>
-                        <th className="w-[24%] px-3 py-2">trace</th>
-                        <th className="w-[18%] px-3 py-2">version</th>
-                        <th className="w-[22%] px-3 py-2">provider</th>
-                        <th className="w-[18%] px-3 py-2">created</th>
-                        <th className="w-[18%] px-3 py-2 text-right">action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {traces.map((trace) => {
-                        const expanded = expandedTraceId === trace.id;
-                        const detailTrace = traceDetails[trace.id] ?? trace;
-                        return (
-                          <Fragment key={trace.id}>
-                            <tr className={"border-t border-border " + (expanded ? "bg-primary/5" : "")}>
-                              <td className="px-3 py-2 align-top">
-                                <div className="font-mono text-xs">{trace.id.slice(0, 10)}...</div>
-                                <div className="mt-1 truncate text-xs text-muted-foreground">
-                                  {trace.conversation_id ?? "-"}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <div className="font-mono text-xs">{trace.version}</div>
-                                <div className="mt-1 truncate text-xs text-muted-foreground">{trace.model ?? "-"}</div>
-                              </td>
-                              <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
-                                {trace.provider_name}
-                              </td>
-                              <td className="px-3 py-2 align-top truncate text-xs text-muted-foreground">
-                                {formatDate(trace.created_at)}
-                              </td>
-                              <td className="px-3 py-2 text-right">
-                                <Button
-                                  variant={expanded ? "default" : "outline"}
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => void inspectTrace(trace)}
-                                >
-                                  {expanded ? "Hide" : "Inspect"}
-                                </Button>
-                              </td>
-                            </tr>
-                            {expanded && (
-                              <tr className="border-t border-border bg-muted/20">
-                                <td colSpan={5} className="px-3 py-3">
-                                  <div className="mx-auto w-full max-w-2xl">
-                                    <TracePanel trace={detailTrace} />
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
             </div>
           </section>
         </div>
@@ -378,9 +282,15 @@ export default function Prompt() {
         <BundleDialog
           mode={bundleDialog}
           onClose={() => setBundleDialog({ kind: "closed" })}
-          onSaved={async () => {
+          onSaved={async (preferredName?: string) => {
             setBundleDialog({ kind: "closed" });
-            await refreshAll();
+            await loadBundles();
+            if (preferredName) {
+              setSelected(preferredName);
+              await loadSelected(preferredName);
+            } else {
+              await refreshAll();
+            }
           }}
         />
       )}
@@ -424,7 +334,7 @@ function BundleDialog({
 }: {
   mode: BundleDialogMode;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (preferredName?: string) => Promise<void>;
 }) {
   const isEdit = mode.kind === "edit";
   const initial = mode.kind === "edit" ? mode.bundle : null;
@@ -466,7 +376,8 @@ function BundleDialog({
     setSaving(true);
     try {
       const payload = {
-        name: bundleName,
+        name: isEdit && initial ? initial.name : bundleName,
+        ...(isEdit && initial && bundleName !== initial.name ? { rename: bundleName } : {}),
         description: description.trim() === "" ? null : description.trim(),
         ...(layers ? { layers: layers as PromptBundle["layers"] } : {}),
       };
@@ -475,7 +386,7 @@ function BundleDialog({
       } else {
         await api.updatePromptBundle(payload);
       }
-      await onSaved();
+      await onSaved(bundleName);
     } catch (e) {
       setErr(e instanceof Error ? (e as ApiError).message || e.message : String(e));
     } finally {
@@ -495,7 +406,7 @@ function BundleDialog({
 
         <div className="space-y-3">
           <Field label="name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} />
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="description">
             <Input
@@ -552,7 +463,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function TracePanel({ trace }: { trace: PromptTrace }) {
+export function TracePanel({ trace }: { trace: PromptTrace }) {
   return (
     <div className="space-y-4">
       <div className="space-y-1 border-b border-border/60 pb-3">
@@ -563,30 +474,19 @@ function TracePanel({ trace }: { trace: PromptTrace }) {
           <span className="break-all font-mono text-xs text-muted-foreground">{trace.id}</span>
         </div>
         <div className="text-xs text-muted-foreground">
-          {trace.bundle_name}:{trace.version} · {trace.provider_name}
+          {trace.bundle_name}:{trace.version} · {trace.provider_snapshot}
           {trace.model ? ` · ${trace.model}` : ""} · size {trace.prompt_size} · {formatDate(trace.created_at)}
         </div>
       </div>
 
-      <section className="space-y-2">
-        <div className="space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Request</h4>
-          <p className="text-xs text-muted-foreground">The final request snapshot sent to the model.</p>
-        </div>
-        <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(trace.request, null, 2)}
-        </pre>
-      </section>
-
-      <section className="space-y-2">
-        <div className="space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">Source refs</h4>
-          <p className="text-xs text-muted-foreground">The full source_refs payload for this trace.</p>
-        </div>
-        <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(trace.source_refs, null, 2)}
-        </pre>
-      </section>
+      <div className="space-y-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Request</div>
+        <CollapsibleJson value={trace.request} defaultExpanded maxHeightClassName="max-h-72" />
+      </div>
+      <div className="space-y-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source refs</div>
+        <CollapsibleJson value={trace.source_refs} defaultExpanded maxHeightClassName="max-h-72" />
+      </div>
     </div>
   );
 }

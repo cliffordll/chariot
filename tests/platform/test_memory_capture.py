@@ -28,11 +28,11 @@ async def test_memory_capture_extracts_preference_candidate(session: AsyncSessio
     repo = MemoryRepo(session)
     capture = MemoryCaptureService(repo)
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="默认用中文输出但保留关键 English terms")],
     )
 
-    candidates = capture.extract_from_request(req, provider_name="mock")
+    candidates = capture.extract_from_request(req, provider_snapshot="mock")
     assert len(candidates) == 1
     assert candidates[0].kind == "preference"
     assert candidates[0].text == "默认用中文输出但保留关键 English terms"
@@ -43,11 +43,11 @@ async def test_memory_capture_turn_persists_memory(session: AsyncSession) -> Non
     repo = MemoryRepo(session)
     capture = MemoryCaptureService(repo)
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="默认用中文输出但保留关键 English terms")],
     )
 
-    await capture.capture_turn(req=req, provider_name="mock", policy=MemoryPolicy())
+    await capture.capture_turn(req=req, provider_snapshot="mock", policy=MemoryPolicy())
     entries = await repo.list_entries(kind="preference")
 
     assert len(entries) == 1

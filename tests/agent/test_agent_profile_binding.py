@@ -1,4 +1,4 @@
-"""phase 4 binding tests:agent_profile -> provider_profile / prompt_bundle / tool_profile。"""
+"""phase 4 binding tests:agent_profile -> provider_id / prompt_id / toolset_id。"""
 
 from __future__ import annotations
 
@@ -76,9 +76,9 @@ def _make_agent(sessionmaker, *, providers: dict[str, BaseProvider], tools: dict
     return AIAgent(providers=providers, tools=tools, sessionmaker=sessionmaker)
 
 
-def _stateless(provider_name: str, *, agent_profile: str | None = None) -> ChatRequest:
+def _stateless(provider_ref: str, *, agent_profile: str | None = None) -> ChatRequest:
     return ChatRequest(
-        provider_name=provider_name,
+        provider_ref=provider_ref,
         messages=[Message(role="user", content="hi")],
         agent_profile=agent_profile,
     )
@@ -92,7 +92,7 @@ class TestAgentProfileBinding:
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         # 没绑定 → provider 路由原样,tools=None(没装载 tool 时不挂)
-        assert provider.last_req.provider_name == "mock"
+        assert provider.last_req.provider_ref == "mock"
 
     async def test_dangling_agent_profile_fallback(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
@@ -101,9 +101,9 @@ class TestAgentProfileBinding:
         assert any(e.kind == "stream_done" for e in events)
         # dangling profile name → 不阻断,走原 provider
         assert provider.last_req is not None
-        assert provider.last_req.provider_name == "mock"
+        assert provider.last_req.provider_ref == "mock"
 
-    async def test_provider_profile_overrides_provider_name(self, sessionmaker) -> None:
+    async def test_agent_profile_name_no_longer_binds(self, sessionmaker) -> None:
         primary = _CapturingProvider("primary")
         secondary = _CapturingProvider("secondary")
         agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})
@@ -111,15 +111,30 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="researcher",
                 role="research",
-                provider_profile="secondary",
+                provider_id="secondary",
             )
         events = [e async for e in agent.run_chat(_stateless("primary", agent_profile="researcher"))]
+        assert any(e.kind == "stream_done" for e in events)
+        assert primary.last_req is not None
+        assert secondary.last_req is None
+
+    async def test_provider_id_overrides_provider_ref(self, sessionmaker) -> None:
+        primary = _CapturingProvider("primary")
+        secondary = _CapturingProvider("secondary")
+        agent = _make_agent(sessionmaker, providers={"primary": primary, "secondary": secondary}, tools={})
+        async with sessionmaker() as session:
+            profile = await TaskRepo(session).create_agent_profile(
+                name="researcher",
+                role="research",
+                provider_id="secondary",
+            )
+        events = [e async for e in agent.run_chat(_stateless("primary", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         # provider 被切到 secondary
         assert secondary.last_req is not None
         assert primary.last_req is None
 
-    async def test_prompt_bundle_pinned_overrides_active(self, sessionmaker) -> None:
+    async def test_prompt_id_pinned_overrides_active(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools={})
         async with sessionmaker() as session:
@@ -134,12 +149,14 @@ class TestAgentProfileBinding:
                 "override",
                 layers=[{"name": "base_system", "source": "override", "content": "OVERRIDE MARKER"}],
             )
-            await TaskRepo(session).create_agent_profile(
+            pinned = await repo.get_bundle("research")
+            assert pinned is not None
+            profile = await TaskRepo(session).create_agent_profile(
                 name="researcher",
                 role="research",
-                prompt_bundle="research",
+                prompt_id=pinned.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="researcher"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         system = provider.last_req.system
@@ -148,7 +165,7 @@ class TestAgentProfileBinding:
         assert "RESEARCH MARKER" in system
         assert "OVERRIDE MARKER" not in system
 
-    async def test_prompt_bundle_dangling_falls_back_to_active(self, sessionmaker) -> None:
+    async def test_prompt_id_dangling_falls_back_to_active(self, sessionmaker) -> None:
         provider = _CapturingProvider("mock")
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools={})
         async with sessionmaker() as session:
@@ -159,7 +176,7 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="bad_prompt",
                 role="x",
-                prompt_bundle="ghost_bundle",
+                prompt_id="ghost_bundle",
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="bad_prompt"))]
         assert any(e.kind == "stream_done" for e in events)
@@ -179,12 +196,14 @@ class TestAgentProfileBinding:
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools=tools)
         async with sessionmaker() as session:
             await ToolsetRepo(session).create(name="fs_safe", members=["read_file", "list_dir"])
-            await TaskRepo(session).create_agent_profile(
+            toolset = await ToolsetRepo(session).get_entry("fs_safe")
+            assert toolset is not None
+            profile = await TaskRepo(session).create_agent_profile(
                 name="safe",
                 role="reader",
-                tool_profile="fs_safe",
+                toolset_id=toolset.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="safe"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         tool_names = {t.name for t in (provider.last_req.tools or [])}
@@ -196,12 +215,14 @@ class TestAgentProfileBinding:
         agent = _make_agent(sessionmaker, providers={"mock": provider}, tools=tools)
         async with sessionmaker() as session:
             await ToolsetRepo(session).create(name="none")
-            await TaskRepo(session).create_agent_profile(
+            toolset = await ToolsetRepo(session).get_entry("none")
+            assert toolset is not None
+            profile = await TaskRepo(session).create_agent_profile(
                 name="tooless",
                 role="x",
-                tool_profile="none",
+                toolset_id=toolset.id,
             )
-        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="tooless"))]
+        events = [e async for e in agent.run_chat(_stateless("mock", agent_profile=profile.id))]
         assert any(e.kind == "stream_done" for e in events)
         assert provider.last_req is not None
         assert provider.last_req.tools == []
@@ -214,7 +235,7 @@ class TestAgentProfileBinding:
             await TaskRepo(session).create_agent_profile(
                 name="bad",
                 role="x",
-                tool_profile="ghost_toolset",
+                toolset_id="ghost_toolset",
             )
         events = [e async for e in agent.run_chat(_stateless("mock", agent_profile="bad"))]
         assert any(e.kind == "stream_done" for e in events)

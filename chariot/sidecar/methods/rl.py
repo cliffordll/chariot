@@ -30,7 +30,7 @@ class RLMethods(MethodBase):
         out_path = Path(out_str) if out_str else self._default_out_path(conversation_id)
         scrubber = NullScrubber() if raw else SecretScrubber()
         exporter = TrajectoryExporter(
-            sessionmaker=self.agent.session_maker,
+            runtime=self.agent,
             scrubber=scrubber,
             audit_hooks=self.agent.audit_hooks,
         )

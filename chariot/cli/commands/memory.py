@@ -15,7 +15,11 @@ from chariot.services.memory import MemoryService
 
 memory_app = typer.Typer(
     name="memory",
-    help="管理长期记忆 entries / events / links",
+    help=(
+        "管理长期记忆 entries / events / links\n\n"
+        "kind 用于业务分类,当前不做枚举限制;常见可用 "
+        "preference(用户偏好) / instruction(命令约束) / lesson(经验教训)。"
+    ),
     no_args_is_help=True,
 )
 
@@ -61,6 +65,9 @@ def _build_links(
     return links
 
 
+_MEMORY_KIND_HELP = "memory 类型(用于业务分类; 常见: preference(用户偏好) / instruction(命令约束) / lesson(经验教训))"
+
+
 @memory_app.command("list", help="列出 memory entries")
 def list_cmd() -> None:
     asyncio.run(_list())
@@ -75,7 +82,7 @@ def show_cmd(
 
 @memory_app.command("add", help="创建 memory")
 def add_cmd(
-    kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "preference",
+    kind: Annotated[str, typer.Option("--kind", help=_MEMORY_KIND_HELP)] = "preference",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
     conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],
@@ -101,7 +108,7 @@ def add_cmd(
 @memory_app.command("update", help="更新 memory")
 def update_cmd(
     memory_id: Annotated[str, typer.Argument(help="memory id")],
-    kind: Annotated[str, typer.Option("--kind", help="memory 类型")] = "",
+    kind: Annotated[str, typer.Option("--kind", help=_MEMORY_KIND_HELP)] = "",
     text: Annotated[str, typer.Option("--text", help="memory 文本")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
     conversation: Annotated[list[str], typer.Option("--conversation", help="关联 conversation id")] = [],

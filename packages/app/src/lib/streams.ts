@@ -16,7 +16,7 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import { rpc } from "@/lib/api";
+import { api, rpc } from "@/lib/api";
 
 // ============================================================
 // Claude 形态 ChatEvent payload(对齐 chariot.agent.chat_event.ChatEvent)
@@ -29,6 +29,7 @@ interface ChatEventNotify {
 }
 
 interface ChatEventPayload {
+  stream_id?: string | null;
   kind: string;
   message?: {
     id?: string;
@@ -136,10 +137,10 @@ export class ChatStreamError extends Error {
 /**
  * `chat` RPC 请求体(对齐 sidecar `_RequestDecoder.parse`)。
  *
- * 必填:`provider_name` + `messages`;可选:`model` / `max_tokens` / `conversation_id` 等。
+ * 必填:`provider_ref` + `messages`;可选:`model` / `max_tokens` / `conversation_id` 等。
  */
 export interface ChatRequest {
-  provider_name: string | null;
+  provider_ref: string | null;
   messages: Array<{ role: "user" | "assistant"; content: string | unknown[] }>;
   model?: string | null;
   max_tokens?: number;
@@ -179,6 +180,7 @@ export async function runChatTurn(
   signal: AbortSignal,
   onEvent: (ev: StreamEvent) => void,
 ): Promise<ChatRunResult> {
+  const expectedStreamId = crypto.randomUUID();
   const tracker = new ChatStreamTracker();
   // 流中途若收到 ChatEvent(kind=error),记下首条;chat RPC resolve 后转成
   // ChatStreamError 抛出,走上层 catch 路径(否则 success path 会 setPending(null)
@@ -188,6 +190,7 @@ export async function runChatTurn(
   const unlisten = await listen<ChatEventNotify>("rpc_notify", (e) => {
     if (e.payload.method !== "chat_event") return;
     if (signal.aborted) return;
+    if (e.payload.params.stream_id !== expectedStreamId) return;
     frameCount += 1;
     // 诊断日志:streaming 卡顿调试用。在 DevTools Console 过滤 [chariot] 看
     // 帧到达情况;0.6.6+ 改 Tauri Channel 后可删
@@ -199,10 +202,16 @@ export async function runChatTurn(
       onEvent(stream_ev);
     }
   });
-  signal.addEventListener("abort", () => unlisten());
-  console.debug("[chariot] chat invoke start", req.provider_name, req.conversation_id ?? "(stateless)");
+  signal.addEventListener("abort", () => {
+    unlisten();
+    void api.cancelChat(expectedStreamId).catch(() => {});
+  });
+  console.debug("[chariot] chat invoke start", req.provider_ref, req.conversation_id ?? "(stateless)", expectedStreamId);
   try {
-    const result = await rpc<{ stream_id: string; ended_at: number }>("chat", req);
+    const result = await rpc<{ stream_id: string; ended_at: number; cancelled?: boolean }>("chat", {
+      ...req,
+      stream_id: expectedStreamId,
+    });
     console.debug("[chariot] chat resolved", { frames: frameCount, ...result });
     if (streamErr !== null) {
       const err = streamErr as ErrorEvent;
@@ -213,7 +222,7 @@ export async function runChatTurn(
       endedAt: result.ended_at,
       inputTokens: tracker.inputTokens,
       outputTokens: tracker.outputTokens,
-      aborted: false,
+      aborted: signal.aborted || result.cancelled === true,
     };
   } catch (e) {
     console.debug("[chariot] chat threw", { frames: frameCount, error: e });

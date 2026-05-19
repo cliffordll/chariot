@@ -45,7 +45,7 @@ class TestPromptSystem:
     async def test_stateless_chat_records_prompt_trace(self, sessionmaker) -> None:
         agent = AIAgent(providers={"mock": _PromptProvider()}, tools={}, sessionmaker=sessionmaker)
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="hi")],
             system="system prompt",
         )
@@ -57,6 +57,6 @@ class TestPromptSystem:
             traces = await PromptRepo(session).list_traces()
         assert len(traces) == 1
         trace = traces[0]
-        assert trace.provider_name == "mock"
+        assert trace.provider_snapshot == "mock"
         assert trace.request["system"] == "system prompt"
         assert trace.source_refs[0]["layer"] == "base_system"

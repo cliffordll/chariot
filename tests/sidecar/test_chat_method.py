@@ -5,7 +5,7 @@ JsonRpcServer 走完完整 dispatch 路径"的端到端行为,而非单帧解析
 
 覆盖:
 - 流式:N 个 ChatEvent → N 个 chat_event notify + 1 个 response
-- params 校验:provider_name 缺 / messages 缺 / role 非法 / content 类型错 →
+- params 校验:provider_ref 缺 / messages 缺 / role 非法 / content 类型错 →
   ERR_INVALID_PARAMS
 - 可选字段 pass-through:model / conversation_id / max_tokens / system 进 ChatRequest
 - response shape:`{stream_id, ended_at}`(stream_id 是 UUID4 hex,ended_at
@@ -74,6 +74,23 @@ class _MockAgent:
             yield ev
 
 
+class _BlockingAgent:
+    def __init__(self) -> None:
+        self.last_req: ChatRequest | None = None
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        self.last_req = req
+        self.started.set()
+        try:
+            await asyncio.Future[None]()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+        yield  # pragma: no cover
+
+
 def _chat_request_frame(rid: int, params: dict[str, Any]) -> bytes:
     """拼一帧 chat request(带换行)。"""
     return (json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n").encode()
@@ -99,7 +116,7 @@ class TestChatStreaming:
         server = JsonRpcServer()
         register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
-        params = {"provider_name": "mock", "messages": [{"role": "user", "content": "hi"}]}
+        params = {"provider_ref": "mock", "messages": [{"role": "user", "content": "hi"}]}
         reader = make_reader(_chat_request_frame(1, params))
         writer = MockWriter()
         await server.serve(reader, writer)
@@ -131,7 +148,7 @@ class TestChatStreaming:
         register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [{"role": "user", "content": "x"}],
         }
         reader = make_reader(_chat_request_frame(7, params))
@@ -157,7 +174,7 @@ class TestChatStreaming:
         reader = make_reader(
             _chat_request_frame(
                 1,
-                {"provider_name": "mock", "messages": [{"role": "user", "content": "x"}]},
+                {"provider_ref": "mock", "messages": [{"role": "user", "content": "x"}]},
             )
         )
         writer = MockWriter()
@@ -182,7 +199,7 @@ class TestChatStreaming:
         db_path = tmp_path / "chariot.db"
         register_methods(server, agent, db_path=db_path)
 
-        params = {"provider_name": "mock", "messages": [{"role": "user", "content": "hi"}]}
+        params = {"provider_ref": "mock", "messages": [{"role": "user", "content": "hi"}]}
         reader = make_reader(_chat_request_frame(1, params))
         writer = MockWriter()
         await server.serve(reader, writer)
@@ -196,6 +213,50 @@ class TestChatStreaming:
         assert logs[0].status == "ok"
         assert logs[0].input_tokens == 3
         assert logs[0].output_tokens == 7
+
+    async def test_cancel_chat_cancels_inflight_turn_and_returns_response(self) -> None:
+        agent = _BlockingAgent()
+        server = JsonRpcServer()
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
+
+        reader = asyncio.StreamReader()
+        writer = MockWriter()
+        serve_task = asyncio.create_task(server.serve(reader, writer))
+
+        reader.feed_data(
+            _chat_request_frame(
+                1,
+                {
+                    "provider_ref": "mock",
+                    "stream_id": "stream_cancel_me",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        )
+        await agent.started.wait()
+        reader.feed_data(
+            (
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "cancel_chat",
+                        "params": {"stream_id": "stream_cancel_me"},
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+        reader.feed_eof()
+        await serve_task
+
+        assert agent.cancelled.is_set() is True
+        lines = writer.lines()
+        cancel_resp = next(line for line in lines if line.get("id") == 2)
+        chat_resp = next(line for line in lines if line.get("id") == 1)
+        assert cancel_resp["result"] == {"cancelled": True}
+        assert chat_resp["result"]["stream_id"] == "stream_cancel_me"
+        assert chat_resp["result"]["cancelled"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -214,31 +275,49 @@ class TestParamsValidation:
         await server.serve(reader, writer)
         return writer.lines()[0]
 
-    async def test_missing_provider_name(self) -> None:
+    async def test_missing_provider_ref(self) -> None:
         line = await self._send({"messages": [{"role": "user", "content": "x"}]})
-        # provider_name 可选;不传时 AIAgent 层报 missing_provider error event
+        # provider_ref 可选;不传时 AIAgent 层报 missing_provider error event
         assert "result" in line
         assert "stream_id" in line["result"]
 
-    async def test_provider_name_empty_string(self) -> None:
-        line = await self._send({"provider_name": "", "messages": [{"role": "user", "content": "x"}]})
+    async def test_provider_ref_empty_string(self) -> None:
+        line = await self._send({"provider_ref": "", "messages": [{"role": "user", "content": "x"}]})
         # 空串视为 null;AIAgent 层报 missing_provider error event
         assert "result" in line
         assert "stream_id" in line["result"]
 
+    async def test_legacy_provider_display_name_param_ignored(self) -> None:
+        agent = _MockAgent([])
+        server = JsonRpcServer()
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
+
+        legacy_param = "provider_name"
+        params = {
+            legacy_param: "mock",
+            "messages": [{"role": "user", "content": "x"}],
+        }
+        reader = make_reader(_chat_request_frame(1, params))
+        writer = MockWriter()
+        await server.serve(reader, writer)
+
+        captured = agent.last_req
+        assert captured is not None
+        assert captured.provider_ref is None
+
     async def test_missing_messages(self) -> None:
-        line = await self._send({"provider_name": "mock"})
+        line = await self._send({"provider_ref": "mock"})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
         assert "messages" in line["error"]["message"]
 
     async def test_messages_empty_list(self) -> None:
-        line = await self._send({"provider_name": "mock", "messages": []})
+        line = await self._send({"provider_ref": "mock", "messages": []})
         assert line["error"]["code"] == JsonRpcServer.ERR_INVALID_PARAMS
 
     async def test_message_invalid_role(self) -> None:
         line = await self._send(
             {
-                "provider_name": "mock",
+                "provider_ref": "mock",
                 "messages": [{"role": "system", "content": "x"}],
             }
         )
@@ -248,7 +327,7 @@ class TestParamsValidation:
     async def test_message_content_wrong_type(self) -> None:
         line = await self._send(
             {
-                "provider_name": "mock",
+                "provider_ref": "mock",
                 "messages": [{"role": "user", "content": 123}],
             }
         )
@@ -258,7 +337,7 @@ class TestParamsValidation:
     async def test_message_not_object(self) -> None:
         line = await self._send(
             {
-                "provider_name": "mock",
+                "provider_ref": "mock",
                 "messages": ["not-a-dict"],
             }
         )
@@ -277,7 +356,7 @@ class TestOptionalFieldsPassThrough:
         register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             "model": "claude-haiku-4-5",
             "conversation_id": "01H_TEST",
@@ -290,7 +369,7 @@ class TestOptionalFieldsPassThrough:
 
         captured = agent.last_req
         assert captured is not None
-        assert captured.provider_name == "mock"
+        assert captured.provider_ref == "mock"
         assert captured.model == "claude-haiku-4-5"
         assert captured.conversation_id == "01H_TEST"
         assert captured.max_tokens == 1024
@@ -303,7 +382,7 @@ class TestOptionalFieldsPassThrough:
         register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [
                 {
                     "role": "user",
@@ -332,7 +411,7 @@ class TestOptionalFieldsPassThrough:
         register_methods(server, agent, db_path=_DUMMY_DB_PATH)
 
         params = {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             "unknown_field_42": "ignored",
         }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -442,6 +443,7 @@ function EditToolsetDialog({
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
+  const [name, setName] = useState(toolset.name);
   const [description, setDescription] = useState(toolset.description ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -451,9 +453,10 @@ function EditToolsetDialog({
     setSubmitting(true);
     try {
       await api.updateToolset(toolset.name, {
+        rename: name.trim() !== toolset.name ? name.trim() : undefined,
         description: description.trim() || null,
       });
-      onSaved(toolset.name);
+      onSaved(name.trim() || toolset.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -469,6 +472,9 @@ function EditToolsetDialog({
           <DialogDescription>Update description for {toolset.name}. Manage members from the detail panel.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
           <Field label="Description">
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
@@ -515,14 +521,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function MetaBlock({ title, value }: { title: string; value: Record<string, unknown> }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/10 p-4">
-      <div className="mb-2 text-sm font-medium">{title}</div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-background/80 p-3 text-xs">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </div>
-  );
+  return <CollapsibleJson title={title} value={value} />;
 }
 
 function formatDateTime(value: string | null): string {

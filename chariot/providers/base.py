@@ -30,7 +30,7 @@ class BaseProviderConfig:
     base_url / timeout 等专属字段。
 
     通用字段语义:
-    - `name`:entry name(用户写的,如 "claude" / "mock");chariot 内部用它路由
+    - `name`:Provider 实例的内部配置名;请求路由真正依赖的是外层 provider ref
     - `model`:上游真实 model ID(给 LLM API,如 "claude-sonnet-4-6")
     """
 

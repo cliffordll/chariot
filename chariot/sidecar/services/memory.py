@@ -21,7 +21,7 @@ class MemoryApi:
         pinned: bool | None = None,
         archived: bool | None = False,
         conversation_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         tag: str | None = None,
         search: str | None = None,
         limit: int = 50,
@@ -32,7 +32,7 @@ class MemoryApi:
             pinned=pinned,
             archived=archived,
             conversation_id=conversation_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             tag=tag,
             search=search,
             limit=limit,
@@ -131,13 +131,13 @@ class MemoryApi:
         self,
         *,
         conversation_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         tags: list[str] | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         entries = await MemoryService(self._runtime).list_relevant_entries(
             conversation_id=conversation_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             tags=tags,
             limit=limit,
         )

@@ -44,9 +44,15 @@ ClearableStr = str | None | _UnsetType
 class AgentProfile:
     name: str
     role: str
-    prompt_bundle: str | None = None
-    tool_profile: str | None = None
-    provider_profile: str | None = None
+    agent_label: str | None = None
+    prompt_id: str | None = None
+    prompt_label: str | None = None
+    context_id: str | None = None
+    context_label: str | None = None
+    toolset_id: str | None = None
+    toolset_label: str | None = None
+    provider_id: str | None = None
+    provider_label: str | None = None
     budget: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
     # B4 wave 3:reflection 控制(透传给 ChatRequest.reflection_* 字段)
@@ -55,5 +61,52 @@ class AgentProfile:
     # B6 wave 2:agent_profile 预绑 skill;chat 不显式 --skill 时透传给
     # ChatRequest.skill;dangling reference(skill 不存在 / disabled)走 fallback。
     default_skill: str | None = None
+    id: str = ""
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
+
+    @classmethod
+    def from_provider_id(
+        cls,
+        *,
+        name: str,
+        agent_label: str | None = None,
+        role: str,
+        provider_id: str | None = None,
+        prompt_id: str | None = None,
+        context_id: str | None = None,
+        toolset_id: str | None = None,
+        prompt_label: str | None = None,
+        context_label: str | None = None,
+        toolset_label: str | None = None,
+        provider_label: str | None = None,
+        budget: dict[str, Any] | None = None,
+        meta: dict[str, Any] | None = None,
+        reflection_enabled: bool = False,
+        reflection_max_retries: int = 2,
+        default_skill: str | None = None,
+        id: str = "",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+    ) -> AgentProfile:
+        return cls(
+            name=name,
+            agent_label=agent_label,
+            role=role,
+            prompt_id=prompt_id,
+            prompt_label=prompt_label,
+            context_id=context_id,
+            context_label=context_label,
+            toolset_id=toolset_id,
+            toolset_label=toolset_label,
+            provider_id=provider_id,
+            provider_label=provider_label,
+            budget=budget or {},
+            meta=meta or {},
+            reflection_enabled=reflection_enabled,
+            reflection_max_retries=reflection_max_retries,
+            default_skill=default_skill,
+            id=id,
+            created_at=created_at or _utcnow(),
+            updated_at=updated_at or _utcnow(),
+        )

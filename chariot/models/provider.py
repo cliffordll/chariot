@@ -28,7 +28,9 @@ class ProviderEntry:
       暴露给 client。
     """
 
-    name: str  # 用户面名称(`chariot provider list` 列出来 / client 在 body.model 写)
+    id: str
+    slug: str
+    name: str  # 用户面展示名
     type: str  # builder 类型 key(mock / anthropic / llama_local 等)
     options: dict[str, Any]
     params: dict[str, Any] = field(default_factory=_empty_params)

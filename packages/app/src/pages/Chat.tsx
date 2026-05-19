@@ -1,9 +1,8 @@
-import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Pencil, RotateCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,27 +20,67 @@ import {
   type Message,
   type ProviderEntry,
   type ProvidersListResponse,
+  type ReferenceSuggestion,
 } from "@/lib/api";
 import { ChatError, runTurn, type ChatTurnMsg } from "@/lib/chat";
 import type { StreamEvent } from "@/lib/streams";
 
-/**
- * Chat 页(0.4.0):左侧 conversation 侧栏 + 右侧 messages 视图。
- *
- * - sampling 参数取自 selected entry 的 `params`(不在本页配置)
- * - "+ New" 进入 draft 状态(conversationId=null);首次发送时创建 conversation
- * - 选中已存在 conversation → 拉取 messages,渲染 anthropic content blocks
- * - 发送只发新增的 user message(body.messages 单条);server 自己 prepend 历史
- *
- * Anthropic 默认兜底:max_tokens=1024,temperature/top_p 缺省不发。
- */
-
 const DEFAULT_MAX_TOKENS = 1024;
+const DRAFT_KEY = "__draft__";
+const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
+const DRAFT_AGENT_STORAGE_KEY = "chariot.chat.draft_agent";
 
 interface SamplingValues {
   maxTokens: number;
   temperature: number | undefined;
   topP: number | undefined;
+}
+
+interface PendingTurn {
+  requestId: number;
+  userText: string;
+  conversationId: string;
+  baseMessageCount: number;
+  blocks: AnthropicBlock[];
+  status: "streaming" | "done" | "aborted" | "error";
+  errorMsg: string | null;
+  meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
+}
+
+interface SessionState {
+  key: string;
+  conversationId: string | null;
+  conversation: Conversation | null;
+  detailStatus: "draft" | "loading" | "loaded" | "error";
+  detailError: string | null;
+  turnStatus: "idle" | "waiting" | "streaming" | "refreshing" | "done" | "error" | "aborted";
+  messages: Message[];
+  composerText: string;
+  selectedAgent: string | null;
+  pending: PendingTurn | null;
+  inFlight: boolean;
+}
+
+type ProvidersState =
+  | { kind: "loading" }
+  | { kind: "ok"; data: ProvidersListResponse }
+  | { kind: "err"; message: string };
+
+type ConvPaneState =
+  | { kind: "draft" }
+  | { kind: "loading"; id: string }
+  | { kind: "loaded"; id: string; convo: Conversation; messages: Message[] }
+  | { kind: "err"; id: string; message: string };
+
+interface ReferencePickerState {
+  query: string;
+  items: ReferenceSuggestion[];
+  index: number;
+}
+
+interface ChatPageStoreState {
+  activeKey: string;
+  sessions: Record<string, SessionState>;
 }
 
 function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
@@ -56,9 +95,10 @@ function samplingFromEntry(entry: ProviderEntry | undefined): SamplingValues {
   };
 }
 
-const ENTRY_STORAGE_KEY = "chariot.chat.selected_entry";
-const CONV_STORAGE_KEY = "chariot.chat.active_conversation";
-const AGENT_STORAGE_KEY = "chariot.chat.selected_agent";
+function upsertConversation(list: Conversation[], convo: Conversation): Conversation[] {
+  const rest = list.filter((item) => item.id !== convo.id);
+  return [convo, ...rest];
+}
 
 function lsGet(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -79,125 +119,331 @@ function lsSet(key: string, value: string | null): void {
   }
 }
 
-interface PendingTurn {
-  /** 用户这轮发的文本(已显示在右侧但还没落 DB)。 */
-  userText: string;
-  /**
-   * 0.5.0:渐进 append 的 anthropic content blocks。
-   * - text 增量累积进末尾 text block(没有就推一个新的)
-   * - tool_use_complete 推 tool_use block
-   * - tool_result 推 tool_result block
-   * - server 合成的 user role tool_result message 完整 turn 也走这里(单条 list 即可,
-   *   不区分 assistant / user 边界 —— BlocksRender 按 type 分支着色已足够区分)
-   */
-  blocks: AnthropicBlock[];
-  status: "streaming" | "done" | "aborted" | "error";
-  errorMsg: string | null;
-  meta: { inputTokens: number; outputTokens: number; latencyMs: number; model: string } | null;
+function extractReferenceQuery(text: string): string | null {
+  const token = text.match(/(?:^|\s)(@\S*)$/)?.[1] ?? null;
+  return token && token.startsWith("@") ? token : null;
 }
 
-type ConvPaneState =
-  | { kind: "draft" }
-  | { kind: "loading"; id: string }
-  | { kind: "loaded"; id: string; convo: Conversation; messages: Message[] }
-  | { kind: "err"; id: string; message: string };
+function replaceReferenceQuery(text: string, next: string): string {
+  return text.replace(/(?:^|\s)(@\S*)$/, (full, token: string) => full.slice(0, full.length - token.length) + next);
+}
 
-type ProvidersState =
-  | { kind: "loading" }
-  | { kind: "ok"; data: ProvidersListResponse }
-  | { kind: "err"; message: string };
+function makeDraftSession(selectedAgent: string | null): SessionState {
+  return {
+    key: DRAFT_KEY,
+    conversationId: null,
+    conversation: null,
+    detailStatus: "draft",
+    detailError: null,
+    turnStatus: "idle",
+    messages: [],
+    composerText: "",
+    selectedAgent,
+    pending: null,
+    inFlight: false,
+  };
+}
+
+function createInitialChatPageState(): ChatPageStoreState {
+  const initialActiveKey = lsGet(CONV_STORAGE_KEY) ?? DRAFT_KEY;
+  const initialDraftAgent = lsGet(DRAFT_AGENT_STORAGE_KEY);
+  return {
+    activeKey: initialActiveKey,
+    sessions: {
+      [DRAFT_KEY]: makeDraftSession(initialDraftAgent),
+      ...(initialActiveKey !== DRAFT_KEY
+        ? {
+            [initialActiveKey]: {
+              key: initialActiveKey,
+              conversationId: initialActiveKey,
+              conversation: null,
+              detailStatus: "loading",
+              detailError: null,
+              turnStatus: "idle",
+              messages: [],
+              composerText: "",
+              selectedAgent: null,
+              pending: null,
+              inFlight: false,
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+let chatPageStoreState: ChatPageStoreState = createInitialChatPageState();
+const chatPageStoreListeners = new Set<() => void>();
+const chatAbortControllers = new Map<string, AbortController>();
+
+function getChatPageStoreSnapshot(): ChatPageStoreState {
+  return chatPageStoreState;
+}
+
+function subscribeChatPageStore(listener: () => void): () => void {
+  chatPageStoreListeners.add(listener);
+  return () => {
+    chatPageStoreListeners.delete(listener);
+  };
+}
+
+function setChatPageStoreState(
+  updater: ChatPageStoreState | ((state: ChatPageStoreState) => ChatPageStoreState),
+): void {
+  const next = typeof updater === "function" ? updater(chatPageStoreState) : updater;
+  if (next === chatPageStoreState) return;
+  chatPageStoreState = next;
+  for (const listener of chatPageStoreListeners) {
+    listener();
+  }
+}
+
+function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  return content;
+}
+
+function blocksPlainText(blocks: AnthropicBlock[]): string | null {
+  if (blocks.length === 0 || !blocks.every((b) => b.type === "text")) return null;
+  return blocks.map((b) => (b as { text?: string }).text ?? "").join("");
+}
+
+function messagePlainText(msg: Message): string | null {
+  return blocksPlainText(asBlocks(msg.content));
+}
+
+function hasCanonicalTurnEcho(messages: Message[], pending: PendingTurn): boolean {
+  if (messages.length <= pending.baseMessageCount) return false;
+  const appended = messages.slice(pending.baseMessageCount);
+  const hasUserEcho = appended.some(
+    (msg) => msg.role === "user" && messagePlainText(msg) === pending.userText,
+  );
+  if (!hasUserEcho) return false;
+  if (pending.blocks.length === 0) {
+    return true;
+  }
+  return appended.some((msg) => msg.role !== "user");
+}
+
+function hasCanonicalUserEcho(messages: Message[], pending: PendingTurn): boolean {
+  if (messages.length <= pending.baseMessageCount) return false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    return messagePlainText(msg) === pending.userText;
+  }
+  return false;
+}
+
+function applyEvent(blocks: AnthropicBlock[], ev: StreamEvent): AnthropicBlock[] {
+  if (ev.kind === "text") {
+    const last = blocks[blocks.length - 1];
+    if (last && last.type === "text" && typeof (last as { text?: unknown }).text === "string") {
+      const next = blocks.slice();
+      next[next.length - 1] = { type: "text", text: (last as { text: string }).text + ev.text };
+      return next;
+    }
+    return [...blocks, { type: "text", text: ev.text }];
+  }
+  if (ev.kind === "tool_use") {
+    return [
+      ...blocks,
+      { type: "tool_use", id: ev.toolUseId, name: ev.toolName, input: ev.toolInput },
+    ];
+  }
+  if (ev.kind === "tool_result") {
+    return [
+      ...blocks,
+      {
+        type: "tool_result",
+        tool_use_id: ev.toolUseId,
+        content: ev.toolResultContent,
+        is_error: ev.isError,
+      },
+    ];
+  }
+  return blocks;
+}
+
+function extractErr(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+function formatErrorBubbleText(errorType: string | null | undefined, errorMessage: string): string {
+  return `[error] ${errorType ?? "unknown_error"}: ${errorMessage}`;
+}
+
+function isErrorBubbleText(text: string): boolean {
+  return text.startsWith("[error] ");
+}
+
+function isCancelledBubbleText(text: string): boolean {
+  return text.startsWith("[cancelled] ");
+}
 
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
-  const [selectedEntry, setSelectedEntryState] = useState<string | null>(() =>
-    lsGet(ENTRY_STORAGE_KEY),
-  );
-  // 0.7.2-tool+ agent picker:选中 agent 后,本轮 chat RPC 带 agent_profile,
-  // sidecar 由 AIAgent._resolve_binding 解析三件套(provider/prompt/tool);
-  // 选 "(none)" 走 0.7.0 行为(全局 active bundle + 全量 enabled tools)。
   const [agents, setAgents] = useState<AgentProfile[]>([]);
-  const [selectedAgent, setSelectedAgentState] = useState<string | null>(() =>
-    lsGet(AGENT_STORAGE_KEY),
-  );
-
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(true);
   const [convsErr, setConvsErr] = useState<string | null>(null);
-
-  const [pane, setPane] = useState<ConvPaneState>(() => {
-    const id = lsGet(CONV_STORAGE_KEY);
-    return id ? { kind: "loading", id } : { kind: "draft" };
-  });
-  const [pending, setPending] = useState<PendingTurn | null>(null);
-
-  const [input, setInput] = useState("");
-  const [inFlight, setInFlight] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const [refreshingConvIds, setRefreshingConvIds] = useState<string[]>([]);
+  const [referencePicker, setReferencePicker] = useState<ReferencePickerState | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const detailReqSeqRef = useRef<Record<string, number>>({});
+  const turnReqSeqRef = useRef(0);
+  const { activeKey, sessions } = useSyncExternalStore(subscribeChatPageStore, getChatPageStoreSnapshot);
+  const initialActiveKeyRef = useRef(chatPageStoreState.activeKey);
 
-  const setSelectedEntry = useCallback((name: string | null) => {
-    setSelectedEntryState(name);
-    lsSet(ENTRY_STORAGE_KEY, name);
-  }, []);
+  const activeSession = sessions[activeKey] ?? sessions[DRAFT_KEY];
+  const pending = activeSession.pending;
+  const isBusy =
+    activeSession.turnStatus === "waiting" ||
+    activeSession.turnStatus === "streaming" ||
+    activeSession.turnStatus === "refreshing";
+  const input = activeSession.composerText;
+  const selectedAgent = activeSession.selectedAgent;
 
-  const setSelectedAgent = useCallback((name: string | null) => {
-    setSelectedAgentState(name);
-    lsSet(AGENT_STORAGE_KEY, name);
-  }, []);
-
-  const setActivePane = useCallback((next: ConvPaneState) => {
-    setPane(next);
-    if (next.kind === "draft") lsSet(CONV_STORAGE_KEY, null);
-    else lsSet(CONV_STORAGE_KEY, next.id);
+  const patchSession = useCallback((key: string, updater: (session: SessionState) => SessionState) => {
+    setChatPageStoreState((state) => {
+      const existing =
+        state.sessions[key] ?? (key === DRAFT_KEY ? makeDraftSession(lsGet(DRAFT_AGENT_STORAGE_KEY)) : null);
+      if (!existing) return state;
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [key]: updater(existing),
+        },
+      };
+    });
   }, []);
 
   const loadProviders = useCallback(async () => {
     setProvidersState({ kind: "loading" });
     try {
       const { providers } = await api.listProviders();
-      const data: ProvidersListResponse = {
-        available: providers.map((p) => p.name),
-        types: [],
-        entries: providers,
-      };
-      setProvidersState({ kind: "ok", data });
+      setProvidersState({
+        kind: "ok",
+        data: {
+          available: providers.map((p) => p.name),
+          types: [],
+          entries: providers,
+        },
+      });
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setProvidersState({ kind: "err", message: msg });
+      setProvidersState({ kind: "err", message: extractErr(e) });
     }
   }, []);
 
-  const loadConvs = useCallback(async () => {
-    setConvsLoading(true);
+  const loadConvs = useCallback(async (opts?: { preserveList?: boolean }) => {
+    if (!opts?.preserveList) {
+      setConvsLoading(true);
+    }
     setConvsErr(null);
     try {
       const { conversations } = await api.listConversations();
       setConvs(conversations.slice(0, 100));
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setConvsErr(msg);
+      setConvsErr(extractErr(e));
     } finally {
       setConvsLoading(false);
     }
   }, []);
 
-  const loadConvDetail = useCallback(async (id: string) => {
-    setActivePane({ kind: "loading", id });
+  const loadConversation = useCallback(async (id: string, opts?: { activate?: boolean; preserveMessages?: boolean }) => {
+    const activate = opts?.activate !== false;
+    const preserveMessages = opts?.preserveMessages === true;
+    const requestSeq = (detailReqSeqRef.current[id] ?? 0) + 1;
+    detailReqSeqRef.current[id] = requestSeq;
+    if (activate) {
+      setChatPageStoreState((state) => ({ ...state, activeKey: id }));
+    }
+    setChatPageStoreState((state) => {
+      const existing = state.sessions[id];
+      const next: SessionState = existing ?? {
+        key: id,
+        conversationId: id,
+        conversation: null,
+        detailStatus: "loading",
+        detailError: null,
+        turnStatus: "idle",
+        messages: [],
+        composerText: "",
+        selectedAgent: null,
+        pending: null,
+        inFlight: false,
+      };
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [id]: {
+            ...next,
+            detailStatus: preserveMessages && next.messages.length > 0 ? "loaded" : "loading",
+            detailError: null,
+          },
+        },
+      };
+    });
     try {
       const detail = await api.getConversation(id);
-      setActivePane({
-        kind: "loaded",
-        id,
-        convo: detail.conversation,
-        messages: detail.messages,
+      if (detailReqSeqRef.current[id] !== requestSeq) return;
+      setChatPageStoreState((state) => {
+        const existing = state.sessions[id];
+        if (!existing) return state;
+        const shouldClearPending =
+          existing.pending !== null && hasCanonicalTurnEcho(detail.messages, existing.pending);
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              conversationId: id,
+              conversation: detail.conversation,
+              detailStatus: "loaded",
+              detailError: null,
+              messages: detail.messages,
+              selectedAgent: detail.conversation.agent_profile,
+              pending: shouldClearPending ? null : existing.pending,
+              inFlight: shouldClearPending ? false : existing.inFlight,
+              turnStatus: shouldClearPending ? "done" : existing.turnStatus,
+            },
+          },
+        };
       });
     } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      setActivePane({ kind: "err", id, message: msg });
+      if (detailReqSeqRef.current[id] !== requestSeq) return;
+      setChatPageStoreState((state) => {
+        const existing = state.sessions[id];
+        if (!existing) return state;
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              detailStatus: "error",
+              detailError: extractErr(e),
+            },
+          },
+        };
+      });
     }
-  }, [setActivePane]);
+  }, []);
 
-  // initial loads
+  useEffect(() => {
+    lsSet(CONV_STORAGE_KEY, activeKey === DRAFT_KEY ? null : activeKey);
+  }, [activeKey]);
+
+  useEffect(() => {
+    lsSet(DRAFT_AGENT_STORAGE_KEY, sessions[DRAFT_KEY]?.selectedAgent ?? null);
+  }, [sessions]);
+
   useEffect(() => {
     void loadProviders();
     void loadConvs();
@@ -206,311 +452,407 @@ export default function Chat() {
         const { agents: list } = await api.listAgents();
         setAgents(list);
       } catch {
-        // 静默:agent picker 是辅助,失败不阻断主聊天
+        // ignore
       }
     })();
   }, [loadProviders, loadConvs]);
 
-  // selectedAgent 兜底:dangling(本机 ls 残留但 DB 已删)→ 清空回 "(none)"
   useEffect(() => {
-    if (selectedAgent === null) return;
-    if (agents.length === 0) return;
-    if (!agents.some((a) => a.name === selectedAgent)) {
-      setSelectedAgent(null);
+    if (initialActiveKeyRef.current !== DRAFT_KEY) {
+      void loadConversation(initialActiveKeyRef.current, { activate: false });
     }
-  }, [agents, selectedAgent, setSelectedAgent]);
+  }, [loadConversation]);
 
-  // 启动时若 localStorage 里残留了 conv id,拉一次详情
-  useEffect(() => {
-    if (pane.kind === "loading") {
-      void loadConvDetail(pane.id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // auto-scroll:每次 pane / pending 变化都吸到底,确保最新消息可见。
-  // 之前用 64px 阈值条件式滚动,但 turn 结束后 loadConvDetail 重拉 canonical
-  // messages 时长度跳变,distance 常超 64px → 阈值卡住不滚 → 用户看不到最新。
-  // 牺牲"流式中往上翻看历史不被打断"的便利,优先保证消息可见性。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [pane, pending]);
+  }, [activeKey, activeSession.messages, activeSession.pending]);
 
-  // C1: 切换/恢复对话时自动恢复 provider + agent
-  // 用 seenPaneId 追踪 pane 身份变化:当 pane id 改变时(切换对话/draft)
-  // 清空 restoredForConvId,确保重新恢复。同对话的 loadConvDetail reload
-  // 不会改变 pane id,因此不会触发重复恢复。
-  const seenPaneId = useRef<string | null>(null);
-  const restoredForConvId = useRef<string | null>(null);
   useEffect(() => {
-    const currentId = pane.kind === "draft" ? null : pane.id;
-
-    if (currentId !== seenPaneId.current) {
-      // pane 身份变了 → 清空恢复标记,下次 loaded 时重新恢复
-      restoredForConvId.current = null;
-      seenPaneId.current = currentId;
+    const query = extractReferenceQuery(input);
+    if (!query) {
+      setReferencePicker(null);
+      return;
     }
-
-    if (pane.kind !== "loaded") return;
-    if (pane.id === restoredForConvId.current) return;
-    restoredForConvId.current = pane.id;
-
-    const convo = pane.convo;
-
-    // 恢复 agent;provider 由 agent 绑定自动推导
-    if (convo.agent_profile) {
-      setSelectedAgent(convo.agent_profile);
-      const agent = agents.find((a) => a.name === convo.agent_profile);
-      setSelectedEntry(agent?.provider_profile ?? null);
-    } else {
-      setSelectedAgent(null);
-      setSelectedEntry(null);
+    if (query.startsWith("@session:")) {
+      const items = convs
+        .slice(0, 8)
+        .map((c) => ({
+          value: `@session:${c.id}`,
+          label: `${c.title?.trim() || "(untitled)"} · ${c.id}`,
+          kind: "session",
+        }))
+        .filter((item) => item.value.startsWith(query));
+      setReferencePicker(items.length ? { query, items, index: 0 } : null);
+      return;
     }
-  }, [pane, setSelectedEntry, setSelectedAgent, agents]);
-
-  // 双向同步:页面重新可见时从 DB 拉最新 agent(应对 CLI 修改)
-  // provider 由 agent 自动推导,不再单独同步
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      if (pane.kind !== "loaded") return;
-      api
-        .getConversation(pane.id)
-        .then(({ conversation: c }) => {
-          const targetAgent = c.agent_profile ?? null;
-          if (targetAgent !== selectedAgent) {
-            setSelectedAgent(targetAgent);
-            // provider 由 handleSelectAgent 自动推导
-          }
-        })
-        .catch(() => {});
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [pane, selectedAgent, setSelectedAgent]);
-
-  const startNewChat = useCallback(async () => {
-    abortRef.current?.abort();
-    setPending(null);
-    setSelectedEntry(null);
-    setSelectedAgent(null);
-    try {
-      const conv = await api.createConversation({});
-      setActivePane({
-        kind: "loaded",
-        id: conv.id,
-        convo: conv,
-        messages: [],
+    if (query.startsWith("@file:") || ["@file:", "@url:", "@diff:", "@session:"].some((prefix) => prefix.startsWith(query))) {
+      let cancelled = false;
+      void api.completeReference(query).then(({ items }) => {
+        if (!cancelled) {
+          setReferencePicker(items.length ? { query, items, index: 0 } : null);
+        }
+      }).catch(() => {
+        if (!cancelled) setReferencePicker(null);
       });
-      void loadConvs();
-    } catch (e) {
-      const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-      alert(`创建会话失败: ${msg}`);
-      setActivePane({ kind: "draft" });
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [setActivePane, setSelectedEntry, setSelectedAgent, loadConvs]);
+    setReferencePicker(null);
+  }, [input, convs]);
 
-  const selectConv = useCallback(
-    (id: string) => {
-      if (pane.kind !== "draft" && pane.kind !== "loading" && pane.kind !== "err") {
-        if (pane.id === id) return;
-      }
-      abortRef.current?.abort();
-      setPending(null);
-      void loadConvDetail(id);
-    },
-    [pane, loadConvDetail],
-  );
+  const updateComposer = useCallback((key: string, value: string) => {
+    patchSession(key, (session) => ({ ...session, composerText: value }));
+  }, [patchSession]);
 
-  const handleDeleteConv = useCallback(
-    async (id: string) => {
-      if (!window.confirm("删除这个对话?不可撤销。")) return;
-      try {
-        await api.deleteConversation(id);
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        alert(`删除失败: ${msg}`);
-        return;
-      }
-      // 当前选中被删 → 回 draft
-      if (
-        (pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err") &&
-        pane.id === id
-      ) {
-        setPending(null);
-        setActivePane({ kind: "draft" });
-      }
-      void loadConvs();
-    },
-    [pane, setActivePane, loadConvs],
-  );
+  const startNewChat = useCallback(() => {
+    chatAbortControllers.get(DRAFT_KEY)?.abort();
+    chatAbortControllers.delete(DRAFT_KEY);
+    setChatPageStoreState((state) => ({
+      ...state,
+      sessions: {
+        ...state.sessions,
+        [DRAFT_KEY]: {
+          ...makeDraftSession(state.sessions[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+        },
+      },
+    }));
+    setChatPageStoreState((state) => ({ ...state, activeKey: DRAFT_KEY }));
+  }, []);
 
-  const handleRenameConv = useCallback(
-    async (id: string, currentTitle: string | null) => {
-      const next = window.prompt("新标题(空字符串清空):", currentTitle ?? "");
-      if (next === null) return;
-      const title = next.trim() === "" ? null : next.trim();
-      try {
-        await api.renameConversation(id, title);
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        alert(`改名失败: ${msg}`);
-        return;
-      }
-      void loadConvs();
-      if (pane.kind === "loaded" && pane.id === id) {
-        void loadConvDetail(id);
-      }
-    },
-    [loadConvs, pane, loadConvDetail],
-  );
+  const selectConv = useCallback((id: string) => {
+    if (activeKey === id) return;
+    const existing = sessions[id];
+    setChatPageStoreState((state) => ({ ...state, activeKey: id }));
+    if (!existing || existing.detailStatus === "error" || existing.messages.length === 0) {
+      void loadConversation(id, { activate: false });
+    }
+  }, [activeKey, loadConversation, sessions]);
 
-  const handleSelectAgent = useCallback(
-    (name: string | null) => {
-      setSelectedAgent(name);
-      const agent = agents.find((a) => a.name === name);
-      const derivedProvider = agent?.provider_profile ?? null;
-      setSelectedEntry(derivedProvider);
-      if (pane.kind === "loaded") {
-        api.updateConversationConfig(pane.id, { agent_profile: name }).catch(() => {});
-      }
-    },
-    [setSelectedAgent, setSelectedEntry, agents, pane],
-  );
+  const handleDeleteConv = useCallback(async (id: string) => {
+    if (!window.confirm("删除这个对话?不可撤销。")) return;
+    try {
+      await api.deleteConversation(id);
+    } catch (e) {
+      alert(`删除失败: ${extractErr(e)}`);
+      return;
+    }
+    chatAbortControllers.get(id)?.abort();
+    chatAbortControllers.delete(id);
+    setChatPageStoreState((state) => {
+      const nextSessions = { ...state.sessions };
+      delete nextSessions[id];
+      return {
+        ...state,
+        sessions: nextSessions,
+      };
+    });
+    if (activeKey === id) {
+      setChatPageStoreState((state) => ({ ...state, activeKey: DRAFT_KEY }));
+    }
+    void loadConvs({ preserveList: true });
+  }, [activeKey, loadConvs]);
 
-  const canSend =
-    !inFlight &&
-    input.trim().length > 0 &&
-    selectedAgent !== null &&
-    (pane.kind === "draft" || pane.kind === "loaded");
+  const handleRenameConv = useCallback(async (id: string, currentTitle: string | null) => {
+    const next = window.prompt("新标题(空字符串清空):", currentTitle ?? "");
+    if (next === null) return;
+    const title = next.trim() === "" ? null : next.trim();
+    try {
+      const { conversation } = await api.renameConversation(id, title);
+      setConvs((cur) => upsertConversation(cur, conversation));
+      patchSession(id, (session) => ({
+        ...session,
+        conversation,
+      }));
+    } catch (e) {
+      alert(`改名失败: ${extractErr(e)}`);
+      return;
+    }
+    void loadConvs({ preserveList: true });
+    void loadConversation(id, { activate: false, preserveMessages: true });
+  }, [loadConversation, loadConvs, patchSession]);
+
+  const handleRefreshConv = useCallback(async (id: string) => {
+    setRefreshingConvIds((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    try {
+      await Promise.all([
+        loadConvs({ preserveList: true }),
+        loadConversation(id, { activate: false, preserveMessages: true }),
+      ]);
+    } finally {
+      setRefreshingConvIds((cur) => cur.filter((item) => item !== id));
+    }
+  }, [loadConversation, loadConvs]);
+
+  const handleSelectAgent = useCallback((name: string | null) => {
+    const key = activeKey;
+    patchSession(key, (session) => ({ ...session, selectedAgent: name }));
+    if (key === DRAFT_KEY) return;
+    api.updateConversationConfig(key, { agent_profile: name }).then(({ conversation }) => {
+      setConvs((cur) => upsertConversation(cur, conversation));
+      patchSession(key, (session) => ({ ...session, conversation }));
+    }).catch(() => {});
+  }, [activeKey, patchSession]);
+
+  const refreshAfterTurn = useCallback(async (key: string, conversationId: string, requestId: number) => {
+    await loadConversation(conversationId, { activate: false, preserveMessages: true });
+    await loadConvs({ preserveList: true });
+    setChatPageStoreState((state) => {
+      const session = state.sessions[key];
+      if (!session?.pending || session.pending.requestId !== requestId || session.pending.status !== "done") {
+        return state;
+      }
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [key]: {
+            ...session,
+            inFlight: false,
+            pending: null,
+            turnStatus: "done",
+          },
+        },
+      };
+    });
+  }, [loadConversation, loadConvs]);
 
   const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || inFlight || selectedAgent === null) return;
-    if (pane.kind !== "draft" && pane.kind !== "loaded") return;
+    const session = sessions[activeKey];
+    if (!session) return;
+    const text = session.composerText.trim();
+    if (
+      !text ||
+      session.turnStatus === "waiting" ||
+      session.turnStatus === "streaming" ||
+      session.turnStatus === "refreshing" ||
+      session.selectedAgent === null
+    ) return;
 
-    setInput("");
-    setInFlight(true);
-
-    // 0. 若 draft → 先创建 conversation
-    let convId: string;
-    if (pane.kind === "draft") {
-      try {
-        const conv = await api.createConversation({});
-        convId = conv.id;
-        setActivePane({
-          kind: "loaded",
-          id: conv.id,
-          convo: conv,
-          messages: [],
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? (e as ApiError).message || e.message : String(e);
-        setPending({
-          userText: text,
-          blocks: [],
-          status: "error",
-          errorMsg: `创建会话失败: ${msg}`,
-          meta: null,
-        });
-        setInFlight(false);
-        return;
-      }
-      void loadConvs();
-    } else {
-      convId = pane.id;
-    }
-
-    // 1. 显示 pending 行(blocks 起步空,onEvent 渐进 append)
-    setPending({
+    const requestId = ++turnReqSeqRef.current;
+    const pendingTurn: PendingTurn = {
+      requestId,
       userText: text,
+      conversationId: session.conversationId ?? DRAFT_KEY,
+      baseMessageCount: session.messages.length,
       blocks: [],
       status: "streaming",
       errorMsg: null,
       meta: null,
-    });
+    };
 
-    // 2. 取 sampling:从 agent 绑定的 provider_profile 找 entry
-    const agentObj = agents.find((a) => a.name === selectedAgent);
-    const entryName = agentObj?.provider_profile ?? null;
+    patchSession(activeKey, (current) => ({
+      ...current,
+      composerText: "",
+      pending: pendingTurn,
+      turnStatus: "waiting",
+      inFlight: true,
+    }));
+
+    let targetKey = activeKey;
+    let conversationId = session.conversationId;
+    let agentForTurn = session.selectedAgent;
+
+    if (activeKey === DRAFT_KEY) {
+      try {
+        const created = await api.createConversation({});
+        const conversation: Conversation = { ...created, agent_profile: agentForTurn };
+        setConvs((cur) => upsertConversation(cur, conversation));
+        targetKey = conversation.id;
+        conversationId = conversation.id;
+        setChatPageStoreState((state) => ({
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [DRAFT_KEY]: makeDraftSession(state.sessions[DRAFT_KEY]?.selectedAgent ?? lsGet(DRAFT_AGENT_STORAGE_KEY)),
+            [conversation.id]: {
+              key: conversation.id,
+              conversationId: conversation.id,
+              conversation,
+              detailStatus: "loaded",
+              detailError: null,
+              turnStatus: "waiting",
+              messages: [],
+              composerText: "",
+              selectedAgent: agentForTurn,
+              pending: { ...pendingTurn, conversationId: conversation.id, baseMessageCount: 0 },
+              inFlight: true,
+            },
+          },
+        }));
+        setChatPageStoreState((state) => ({ ...state, activeKey: conversation.id }));
+        api.updateConversationConfig(conversation.id, { agent_profile: agentForTurn }).catch(() => {});
+      } catch (e) {
+        patchSession(DRAFT_KEY, (current) => ({
+          ...current,
+          pending: {
+            ...pendingTurn,
+            status: "error",
+            errorMsg: `创建会话失败: ${extractErr(e)}`,
+          },
+          turnStatus: "error",
+          inFlight: false,
+        }));
+        return;
+      }
+    }
+
+    if (!conversationId || agentForTurn === null) return;
+
+    const agentObj = agents.find((a) => a.id === agentForTurn);
+    const entryId = agentObj?.provider_id ?? null;
     const entry =
       providersState.kind === "ok"
-        ? providersState.data.entries.find((e) => e.name === entryName)
+        ? providersState.data.entries.find((e) => e.id === entryId)
         : undefined;
     const sampling = samplingFromEntry(entry);
-
-    // 3. 只发新的 user message;server 会从 DB prepend 历史
-    const newMessages: ChatTurnMsg[] = [{ role: "user", content: text }];
-
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    chatAbortControllers.set(targetKey, ctrl);
 
     try {
-      const result = await runTurn(newMessages, {
+      const result = await runTurn([{ role: "user", content: text } satisfies ChatTurnMsg], {
         provider: null,
         maxTokens: sampling.maxTokens,
         temperature: sampling.temperature,
         topP: sampling.topP,
-        conversationId: convId,
-        agentProfile: selectedAgent,
+        conversationId,
+        agentProfile: agentForTurn,
         signal: ctrl.signal,
         onEvent: (ev) => {
-          setPending((cur) => (cur ? { ...cur, blocks: applyEvent(cur.blocks, ev) } : cur));
+          setChatPageStoreState((state) => {
+            const current = state.sessions[targetKey];
+            if (!current?.pending || current.pending.requestId !== requestId) return state;
+            return {
+              ...state,
+              sessions: {
+                ...state.sessions,
+                [targetKey]: {
+                  ...current,
+                  turnStatus: "streaming",
+                  pending: {
+                    ...current.pending,
+                    blocks: applyEvent(current.pending.blocks, ev),
+                  },
+                },
+              },
+            };
+          });
         },
       });
-
-      setPending((cur) =>
-        cur
-          ? {
-              ...cur,
-              status: result.aborted ? "aborted" : "done",
-              meta: {
-                inputTokens: result.inputTokens,
-                outputTokens: result.outputTokens,
-                latencyMs: result.latencyMs,
-                model: entryName ?? "?",
+      setChatPageStoreState((state) => {
+        const current = state.sessions[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return state;
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [targetKey]: {
+              ...current,
+              inFlight: false,
+              turnStatus: result.aborted ? "aborted" : "refreshing",
+              pending: {
+                ...current.pending,
+                status: result.aborted ? "aborted" : "done",
+                meta: {
+                  inputTokens: result.inputTokens,
+                  outputTokens: result.outputTokens,
+                  latencyMs: result.latencyMs,
+                  model: entryId ?? "?",
+                },
               },
-            }
-          : cur,
-      );
-
-      // 4. 成功 → 重拉 canonical messages(含 tool_use/tool_result blocks)
-      if (!result.aborted) {
-        await loadConvDetail(convId);
-        void loadConvs();
-        setPending(null);
-      }
+            },
+          },
+        };
+      });
+      void refreshAfterTurn(targetKey, conversationId, requestId);
     } catch (e) {
-      const msg = e instanceof ChatError ? e.message : extractErr(e);
-      setPending((cur) =>
-        cur ? { ...cur, status: "error", errorMsg: msg } : cur,
-      );
+      setChatPageStoreState((state) => {
+        const current = state.sessions[targetKey];
+        if (!current?.pending || current.pending.requestId !== requestId) return state;
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [targetKey]: {
+              ...current,
+              inFlight: false,
+              turnStatus: "error",
+              pending: {
+                ...current.pending,
+                status: "error",
+                errorMsg: e instanceof ChatError ? e.message : extractErr(e),
+              },
+            },
+          },
+        };
+      });
     } finally {
-      setInFlight(false);
-      abortRef.current = null;
+      chatAbortControllers.delete(targetKey);
     }
-  }, [input, inFlight, selectedAgent, agents, pane, providersState, setActivePane, loadConvDetail, loadConvs]);
+  }, [activeKey, agents, patchSession, providersState, refreshAfterTurn, sessions]);
 
   const handleStop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+    chatAbortControllers.get(activeKey)?.abort();
+  }, [activeKey]);
 
   const handleRetry = useCallback(() => {
-    if (inFlight || !pending) return;
-    if (pending.status !== "error" && pending.status !== "aborted") return;
-    const text = pending.userText;
-    setPending(null);
-    setInput(text);
-  }, [inFlight, pending]);
+    const session = sessions[activeKey];
+    if (
+      !session?.pending ||
+      session.turnStatus === "waiting" ||
+      session.turnStatus === "streaming" ||
+      session.turnStatus === "refreshing"
+    ) return;
+    if (session.pending.status !== "error" && session.pending.status !== "aborted") return;
+    patchSession(activeKey, (current) => ({
+      ...current,
+      composerText: current.pending?.userText ?? current.composerText,
+      turnStatus: "idle",
+    }));
+  }, [activeKey, patchSession, sessions]);
 
-  const activeId =
-    pane.kind === "loaded" || pane.kind === "loading" || pane.kind === "err" ? pane.id : null;
+  const applyReferenceSuggestion = useCallback((item: ReferenceSuggestion) => {
+    updateComposer(activeKey, `${replaceReferenceQuery(input, item.value)} `);
+    setReferencePicker(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const len = textareaRef.current?.value.length ?? 0;
+      textareaRef.current?.setSelectionRange(len, len);
+    });
+  }, [activeKey, input, updateComposer]);
+
+  const canSend =
+    !isBusy &&
+    input.trim().length > 0 &&
+    selectedAgent !== null &&
+    (activeSession.detailStatus === "draft" || activeSession.detailStatus === "loaded");
+
+  const activePane: ConvPaneState = useMemo(() => {
+    if (activeKey === DRAFT_KEY) return { kind: "draft" };
+    if (activeSession.detailStatus === "loading") return { kind: "loading", id: activeKey };
+    if (activeSession.detailStatus === "error") {
+      return { kind: "err", id: activeKey, message: activeSession.detailError ?? "load failed" };
+    }
+    return {
+      kind: "loaded",
+      id: activeKey,
+      convo: activeSession.conversation ?? {
+        id: activeKey,
+        title: null,
+        agent_profile: activeSession.selectedAgent,
+        last_model: null,
+        created_at: "",
+        updated_at: "",
+        message_count: activeSession.messages.length,
+      },
+      messages: activeSession.messages,
+    };
+  }, [activeKey, activeSession]);
 
   return (
     <section className="flex h-full gap-3">
-      {/* 左侧 sidebar */}
       <aside className="flex w-64 flex-col rounded-lg border border-border bg-muted/10">
         <div className="flex items-center justify-between border-b border-border p-2">
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -523,10 +865,11 @@ export default function Chat() {
             <Button
               variant="outline"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2.5 text-xs"
               onClick={() => void loadConvs()}
+              title="refresh conversations"
             >
-              ⟳
+              <RotateCw className="h-2 w-2" />
             </Button>
           </div>
         </div>
@@ -543,50 +886,101 @@ export default function Chat() {
             </p>
           )}
           <ul className="divide-y divide-border">
+            <li
+              className={
+                "group flex cursor-pointer items-start gap-1 px-2 py-2 text-xs hover:bg-muted/30 " +
+                (activeKey === DRAFT_KEY ? "bg-muted/40" : "")
+              }
+              onClick={startNewChat}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">New chat</div>
+                <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                  draft
+                </div>
+              </div>
+            </li>
             {convs.map((c) => {
-              const isActive = activeId === c.id;
+              const session = sessions[c.id];
+              const isRefreshing = refreshingConvIds.includes(c.id);
+              const isStreaming =
+                session?.turnStatus === "waiting" ||
+                session?.turnStatus === "streaming" ||
+                session?.turnStatus === "refreshing";
+              const statusLabel =
+                session?.turnStatus === "waiting"
+                  ? "waiting"
+                  : session?.turnStatus === "streaming"
+                    ? "streaming"
+                  : session?.turnStatus === "refreshing"
+                    ? "syncing"
+                    : session?.turnStatus === "done"
+                      ? "done"
+                      : session?.turnStatus === "error"
+                        ? "error"
+                        : session?.turnStatus === "aborted"
+                          ? "aborted"
+                          : null;
               return (
                 <li
                   key={c.id}
                   className={
                     "group flex cursor-pointer items-start gap-1 px-2 py-2 text-xs hover:bg-muted/30 " +
-                    (isActive ? "bg-muted/40" : "")
+                    (activeKey === c.id ? "bg-muted/40" : "")
                   }
                   onClick={() => selectConv(c.id)}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">
+                    <div className="flex items-center gap-1 truncate font-medium">
+                      {isStreaming && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />}
                       {c.title?.trim() ? c.title : <span className="text-muted-foreground">(no title)</span>}
                     </div>
                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                       <code className="font-mono">{c.id.slice(-6)}</code>
                       {" · "}
-                      {c.message_count} msg
-                      {c.last_model && ` · ${c.last_model}`}
+                      {c.message_count} msgs
+                      {statusLabel && (
+                        <>
+                          {" · "}
+                          {statusLabel}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100">
+                  <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition group-hover:opacity-100">
                     <button
                       type="button"
-                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-60"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleRefreshConv(c.id);
+                      }}
+                      title="refresh"
+                      disabled={isRefreshing}
+                    >
+                      <RotateCw className={"h-3 w-3 " + (isRefreshing ? "animate-spin" : "")} />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleRenameConv(c.id, c.title);
                       }}
                       title="rename"
                     >
-                      ✎
+                      <Pencil className="h-3 w-3" />
                     </button>
                     <button
                       type="button"
-                      className="text-[10px] text-muted-foreground hover:text-destructive"
+                      className="rounded-sm p-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleDeleteConv(c.id);
                       }}
                       title="delete"
                     >
-                      ×
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 </li>
@@ -596,26 +990,24 @@ export default function Chat() {
         </div>
       </aside>
 
-      {/* 右侧主面板 */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">
-            {pane.kind === "loaded" && pane.convo.title
-              ? pane.convo.title
-              : pane.kind === "draft"
+            {activePane.kind === "loaded" && activePane.convo.title
+              ? activePane.convo.title
+              : activePane.kind === "draft"
                 ? "New chat"
                 : "Chat"}
           </h1>
-          {pane.kind === "loaded" && (
+          {activePane.kind === "loaded" && (
             <div className="text-xs text-muted-foreground">
-              <code className="font-mono">{pane.id}</code>
+              <code className="font-mono">{activePane.id}</code>
             </div>
           )}
         </div>
 
         <EntryRow
           providersState={providersState}
-          selectedEntry={selectedEntry}
           agents={agents}
           selectedAgent={selectedAgent}
           onSelectAgent={handleSelectAgent}
@@ -625,24 +1017,91 @@ export default function Chat() {
           ref={scrollRef}
           className="mb-3 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/20 p-4"
         >
-          <MessagesView pane={pane} pending={pending} onRetry={handleRetry} />
+          <MessagesView pane={activePane} pending={pending} onRetry={handleRetry} />
         </div>
-
         <div className="flex gap-2">
-          <Textarea
-            value={input}
-            placeholder="发消息…(Enter 发送,Shift+Enter 换行)"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (canSend) void handleSend();
+          <div className="relative flex-1">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              placeholder={
+                selectedAgent === null
+                  ? "请先选择 agent_profile，再开始对话"
+                  : "发消息…(Enter 发送,Shift+Enter 换行)"
               }
-            }}
-            disabled={inFlight}
-            className="min-h-20 flex-1"
-          />
-          {inFlight ? (
+              onChange={(e) => updateComposer(activeKey, e.target.value)}
+              onKeyDown={(e) => {
+                if (referencePicker && referencePicker.items.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setReferencePicker((cur) =>
+                      cur ? { ...cur, index: (cur.index + 1) % cur.items.length } : cur,
+                    );
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setReferencePicker((cur) =>
+                      cur ? { ...cur, index: (cur.index - 1 + cur.items.length) % cur.items.length } : cur,
+                    );
+                    return;
+                  }
+                  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                    e.preventDefault();
+                    void applyReferenceSuggestion(referencePicker.items[referencePicker.index]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setReferencePicker(null);
+                    return;
+                  }
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) void handleSend();
+                }
+              }}
+              disabled={isBusy}
+              className="min-h-20 flex-1"
+            />
+            {referencePicker && (
+              <div className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-md border border-border bg-background shadow-lg">
+                <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  reference suggestions
+                </div>
+                <ul className="max-h-56 overflow-y-auto py-1">
+                  {referencePicker.items.map((item, index) => (
+                    <li key={`${item.kind}:${item.value}`}>
+                      <button
+                        type="button"
+                        className={
+                          "flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/50 " +
+                          (index === referencePicker.index ? "bg-muted/60" : "")
+                        }
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyReferenceSuggestion(item)}
+                      >
+                        <span className="truncate">{item.label}</span>
+                        <span className="ml-3 shrink-0 font-mono text-[11px] text-muted-foreground">
+                          {item.kind}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {selectedAgent === null && (
+              <p className="mt-2 text-xs text-muted-foreground">请先选择 `agent_profile`。</p>
+            )}
+            {selectedAgent !== null && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                输入 `@` 可补全 `@file:`、`@session:`、`@url:`、`@diff:`。冒号后可带空格，发送前会自动按引用格式解析。
+              </p>
+            )}
+          </div>
+          {isBusy ? (
             <Button variant="destructive" onClick={handleStop}>
               Stop
             </Button>
@@ -657,19 +1116,15 @@ export default function Chat() {
   );
 }
 
-// ---------- EntryRow(0.3.1 起 · 0.6.6+ 加 per-call override 输入框)----------
-
 const AGENT_NONE = "__none__";
 
 function EntryRow({
   providersState,
-  selectedEntry,
   agents,
   selectedAgent,
   onSelectAgent,
 }: {
   providersState: ProvidersState;
-  selectedEntry: string | null;
   agents: AgentProfile[];
   selectedAgent: string | null;
   onSelectAgent: (name: string | null) => void;
@@ -685,8 +1140,10 @@ function EntryRow({
     );
   }
 
-  const agent = agents.find((a) => a.name === selectedAgent);
-  const providerName = selectedEntry ?? agent?.provider_profile ?? null;
+  const agent = agents.find((a) => a.id === selectedAgent);
+  const providerName = agent?.provider_label ?? agent?.provider_id ?? null;
+  const promptName = agent?.prompt_label ?? agent?.prompt_id ?? null;
+  const toolsetName = agent?.toolset_label ?? agent?.toolset_id ?? null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/10 p-3">
@@ -703,28 +1160,18 @@ function EntryRow({
         <SelectContent>
           <SelectItem value={AGENT_NONE}>(none)</SelectItem>
           {agents.map((a) => (
-            <SelectItem key={a.name} value={a.name}>
+            <SelectItem key={a.id} value={a.id}>
               {a.name}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <span className="w-20 text-xs uppercase tracking-wide text-muted-foreground">
-        provider
-      </span>
-      <span className="h-8 min-w-[8rem] rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
-        {providerName ?? "-"}
-      </span>
-      <span className="ml-auto text-xs text-muted-foreground">
-        {selectedAgent
-          ? `agent: ${selectedAgent} 覆盖 provider / prompt / tools`
-          : "请先选择 agent"}
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        {`provider: ${providerName ?? "(none)"} | prompt: ${promptName ?? "(none)"} | toolset: ${toolsetName ?? "(none)"}`}
       </span>
     </div>
   );
 }
-
-// ---------- MessagesView ----------
 
 function MessagesView({
   pane,
@@ -744,15 +1191,27 @@ function MessagesView({
     );
   }
   if (pane.kind === "loading") {
-    return <p className="text-sm text-muted-foreground">Loading conversation…</p>;
+    return pending ? (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">Loading conversation…</p>
+        <PendingBubble pending={pending} onRetry={onRetry} />
+      </div>
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading conversation…</p>
+    );
   }
   if (pane.kind === "err") {
-    return (
+    return pending ? (
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">无法读取对话:{pane.message}</p>
+        <PendingBubble pending={pending} onRetry={onRetry} />
+      </div>
+    ) : (
       <p className="text-sm text-destructive">无法读取对话:{pane.message}</p>
     );
   }
-  const { messages } = pane;
-  if (messages.length === 0 && !pending) {
+  const hidePendingUserBubble = pending ? hasCanonicalUserEcho(pane.messages, pending) : false;
+  if (pane.messages.length === 0 && !pending) {
     return (
       <p className="text-sm text-muted-foreground">
         空对话:输入消息开始。
@@ -761,14 +1220,18 @@ function MessagesView({
   }
   return (
     <ul className="space-y-4">
-      {messages.map((m, i) => (
+      {pane.messages.map((m, i) => (
         <li key={m.seq ?? i}>
           <MessageRow msg={m} />
         </li>
       ))}
       {pending && (
         <li>
-          <PendingBubble pending={pending} onRetry={onRetry} />
+          <PendingBubble
+            pending={pending}
+            onRetry={onRetry}
+            hideUserBubble={hidePendingUserBubble}
+          />
         </li>
       )}
     </ul>
@@ -777,21 +1240,9 @@ function MessagesView({
 
 function MessageRow({ msg }: { msg: Message }) {
   if (msg.role === "user") {
-    // user content 形态分两种:
-    // - 纯文本(string 或全是 type="text" 的 blocks)→ 右侧深色 bubble(用户输入)
-    // - 含 tool_result blocks → 左侧 emerald 框(那是 AgentLoop 合成的工具反馈,
-    //   语义上虽是 user role,但视觉上属于"系统输出"
-    //
-    // bug 注:0.6.0+ AIAgent._persist_new_user_messages 把 user 输入强制
-    // normalize 成 blocks 落库,DB load 出来 content 永远是 list,**永远不是
-    // string**;之前 `typeof content === "string"` 守卫永远 false,导致用户输入
-    // 也走 tool_result 分支(emerald + 左对齐),整个 history 看起来"没区分左右"。
     const blocks = asBlocks(msg.content);
-    const isPureText = blocks.length > 0 && blocks.every((b) => b.type === "text");
-    if (isPureText) {
-      const text = blocks
-        .map((b) => (b as { text?: string }).text ?? "")
-        .join("");
+    const text = blocksPlainText(blocks);
+    if (text !== null) {
       return (
         <div className="flex justify-end">
           <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
@@ -807,7 +1258,6 @@ function MessageRow({ msg }: { msg: Message }) {
     );
   }
 
-  // assistant — 左侧浅色 bubble
   return (
     <div className="flex flex-col items-start gap-1">
       {typeof msg.content === "string" ? (
@@ -815,23 +1265,34 @@ function MessageRow({ msg }: { msg: Message }) {
       ) : (
         <BlocksRender blocks={asBlocks(msg.content)} side="assistant" />
       )}
-      {msg.provider_name && (
+      {msg.provider_snapshot && (
         <div className="font-mono text-xs text-muted-foreground">
-          [{msg.provider_name}]
+          [{msg.provider_snapshot}]
         </div>
       )}
     </div>
   );
 }
 
-function asBlocks(content: string | AnthropicBlock[]): AnthropicBlock[] {
-  if (typeof content === "string") return [{ type: "text", text: content }];
-  return content;
-}
-
 function AssistantTextBubble({ text }: { text: string }) {
+  const isError = isErrorBubbleText(text);
+  const isCancelled = isCancelledBubbleText(text);
   return (
-    <div className="max-w-[85%] rounded-lg border border-border bg-background px-3 py-2 text-sm">
+    <div
+      className={
+        "max-w-[85%] rounded-lg border px-3 py-2 text-sm " +
+        (isError
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : isCancelled
+            ? "border-amber-300/40 bg-amber-50 text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-100"
+          : "border-border bg-background")
+      }
+    >
+      {isCancelled && (
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+          中断结束
+        </div>
+      )}
       {text ? (
         <MarkdownText text={text} />
       ) : (
@@ -865,8 +1326,7 @@ function BlockRender({
   side: "assistant" | "tool";
 }) {
   if (block.type === "text" && typeof (block as { text?: unknown }).text === "string") {
-    const text = (block as { text: string }).text;
-    return <AssistantTextBubble text={text} />;
+    return <AssistantTextBubble text={(block as { text: string }).text} />;
   }
 
   if (block.type === "tool_use") {
@@ -921,7 +1381,6 @@ function BlockRender({
     );
   }
 
-  // 兜底:其它 type → JSON dump
   void side;
   return (
     <pre className="max-w-[85%] overflow-auto rounded border border-border bg-muted/30 p-2 font-mono text-[11px]">
@@ -968,60 +1427,24 @@ function ToolResultContent({
   );
 }
 
-/**
- * 0.5.0:把一条 StreamEvent 应用到 pending blocks 上。
- *
- * - text:文本增量累积进**末尾**那条 text block;末尾不是 text 就推一条新 text
- *   block(典型场景:tool_use 后的 text response 起步)
- * - tool_use:推一条新 tool_use block
- * - tool_result:推一条新 tool_result block
- * - turn_complete / stream_done:不动 blocks(纯通知,Chat.tsx 也不需要在这里处理 meta,
- *   meta 由 runTurn 返回值赋)
- */
-function applyEvent(blocks: AnthropicBlock[], ev: StreamEvent): AnthropicBlock[] {
-  if (ev.kind === "text") {
-    const last = blocks[blocks.length - 1];
-    if (last && last.type === "text" && typeof (last as { text?: unknown }).text === "string") {
-      const next = blocks.slice();
-      next[next.length - 1] = { type: "text", text: (last as { text: string }).text + ev.text };
-      return next;
-    }
-    return [...blocks, { type: "text", text: ev.text }];
-  }
-  if (ev.kind === "tool_use") {
-    return [
-      ...blocks,
-      { type: "tool_use", id: ev.toolUseId, name: ev.toolName, input: ev.toolInput },
-    ];
-  }
-  if (ev.kind === "tool_result") {
-    return [
-      ...blocks,
-      {
-        type: "tool_result",
-        tool_use_id: ev.toolUseId,
-        content: ev.toolResultContent,
-        is_error: ev.isError,
-      },
-    ];
-  }
-  return blocks;
-}
-
 function PendingBubble({
   pending,
   onRetry,
+  hideUserBubble = false,
 }: {
   pending: PendingTurn;
   onRetry: () => void;
+  hideUserBubble?: boolean;
 }) {
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-          {pending.userText}
+      {!hideUserBubble && (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+            {pending.userText}
+          </div>
         </div>
-      </div>
+      )}
       <div className="flex flex-col items-start gap-1">
         {pending.blocks.length === 0 && pending.status === "streaming" && (
           <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
@@ -1036,9 +1459,7 @@ function PendingBubble({
           <span className="text-xs text-muted-foreground">[已中断]</span>
         )}
         {pending.status === "error" && pending.errorMsg && (
-          <div className="max-w-[85%] rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive">
-            {pending.errorMsg}
-          </div>
+          <AssistantTextBubble text={formatErrorBubbleText(null, pending.errorMsg)} />
         )}
         {(pending.status === "error" || pending.status === "aborted") && (
           <Button
@@ -1059,10 +1480,4 @@ function PendingBubble({
       </div>
     </div>
   );
-}
-
-function extractErr(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
-  if (e instanceof Error) return e.message;
-  return String(e);
 }

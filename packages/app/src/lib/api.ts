@@ -31,6 +31,7 @@ export interface Conversation {
   id: string;
   title: string | null;
   agent_profile: string | null;
+  last_model?: string | null;
   created_at: string;
   updated_at: string;
   message_count: number;
@@ -60,7 +61,13 @@ export interface Message {
   content: string | AnthropicBlock[];
   seq?: number;
   created_at?: string;
-  provider_name?: string | null;
+  provider_snapshot?: string | null;
+}
+
+export interface ReferenceSuggestion {
+  value: string;
+  label: string;
+  kind: string;
 }
 
 export interface Tool {
@@ -75,6 +82,7 @@ export interface Tool {
 }
 
 export interface Provider {
+  id: string;
   name: string;
   type: string;
   options: Record<string, unknown>;
@@ -147,7 +155,7 @@ export interface ProviderStatusResponse {
 }
 
 export interface ProviderHealthSummary {
-  provider_name: string;
+  provider_snapshot: string;
   last_ok: boolean;
   latency_ms: number | null;
   error_code: string | null;
@@ -206,7 +214,7 @@ export interface PromptTrace {
   version_id: string;
   version: string;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   request: Record<string, unknown>;
   source_refs: Array<Record<string, unknown>>;
@@ -223,7 +231,7 @@ export interface ContextSlice {
 export interface ContextSnapshot {
   id: string;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   request: Record<string, unknown>;
   slices: ContextSlice[];
@@ -235,8 +243,12 @@ export interface ContextSnapshot {
 export interface ContextTrace {
   id: string;
   snapshot_id: string;
+  bundle_id: string | null;
+  bundle_name: string | null;
+  version_id: string | null;
+  version: string | null;
   conversation_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   prompt_trace_id: string | null;
   policy: Record<string, unknown>;
@@ -247,6 +259,32 @@ export interface ContextTrace {
 export interface ContextInspectResult {
   snapshot: ContextSnapshot | null;
   trace: ContextTrace | null;
+}
+
+export interface ContextBundle {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  version_count: number;
+  active_version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextVersion {
+  id: string;
+  bundle_id: string;
+  bundle_name: string;
+  version: string;
+  spec: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextBundleDetail extends ContextBundle {
+  versions?: ContextVersion[];
 }
 
 export interface MemoryEntry {
@@ -360,11 +398,18 @@ export interface SkillCurateBuckets {
 }
 
 export interface AgentProfile {
+  id: string;
   name: string;
+  agent_label: string | null;
   role: string;
-  prompt_bundle: string | null;
-  tool_profile: string | null;
-  provider_profile: string | null;
+  prompt_id: string | null;
+  prompt_label: string | null;
+  context_id: string | null;
+  context_label: string | null;
+  toolset_id: string | null;
+  toolset_label: string | null;
+  provider_id: string | null;
+  provider_label: string | null;
   budget: Record<string, unknown>;
   meta: Record<string, unknown>;
   reflection_enabled: boolean;
@@ -438,6 +483,7 @@ export interface PromptBundleDetail extends PromptBundle {
 }
 
 export interface Toolset {
+  id: string;
   name: string;
   description: string | null;
   members: string[];
@@ -473,7 +519,7 @@ export interface TraceTurn {
   agent_profile: string | null;
   task_id: string | null;
   task_run_id: string | null;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   prompt_trace_id: string | null;
   context_trace_id: string | null;
@@ -491,13 +537,15 @@ export interface TraceTurn {
   duration_ms: number | null;
   started_at: string;
   finished_at: string | null;
+  provider_calls_count: number;
+  tool_calls_count: number;
   meta: Record<string, unknown>;
 }
 
 export interface TraceProviderCall {
   id: string;
   turn_id: string;
-  provider_name: string;
+  provider_snapshot: string;
   model: string | null;
   log_id: string | null;
   request_summary: Record<string, unknown>;
@@ -530,17 +578,24 @@ export interface TraceCheckpoint {
   created_at: string;
 }
 
+export interface TraceExecutionGroup {
+  index: number;
+  provider_call: TraceProviderCall | null;
+  tool_calls: TraceToolCall[];
+}
+
 export interface TraceTree {
   turn: TraceTurn;
   provider_calls: TraceProviderCall[];
   tool_calls: TraceToolCall[];
   checkpoints: TraceCheckpoint[];
+  execution_groups: TraceExecutionGroup[];
 }
 
 export interface ListTracesParams {
   conversation_id?: string;
   task_id?: string;
-  provider_name?: string;
+  provider_snapshot?: string;
   status?: TurnStatus;
   limit?: number;
   offset?: number;
@@ -640,12 +695,19 @@ export interface DiffResult {
 }
 
 const apiCore = {
+  cancelChat(stream_id: string): Promise<{ cancelled: boolean }> {
+    return rpc("cancel_chat", { stream_id });
+  },
+
   listConversations(): Promise<{ conversations: Conversation[] }> {
     return rpc("list_conversations");
   },
 
   getConversation(conversation_id: string): Promise<{ conversation: Conversation; messages: Message[] }> {
     return rpc("get_conversation", { conversation_id });
+  },
+  completeReference(query: string): Promise<{ items: ReferenceSuggestion[] }> {
+    return rpc("complete_reference", { query });
   },
 
   renameConversation(conversation_id: string, title: string | null): Promise<{ conversation: Conversation }> {
@@ -681,6 +743,7 @@ const apiCore = {
     return Promise.resolve({
       id,
       title: req.title ?? null,
+      agent_profile: null,
       last_model: null,
       message_count: 0,
       created_at: now,
@@ -712,7 +775,7 @@ const apiCore = {
     return rpc("config_tool", { name, options });
   },
 
-  updateTool(name: string, req: { enabled?: boolean; options?: Record<string, unknown> }): Promise<{ tool: Tool }> {
+  setToolState(name: string, req: { enabled?: boolean; options?: Record<string, unknown> }): Promise<{ tool: Tool }> {
     if (req.options !== undefined) {
       return apiCore.configTool(name, req.options);
     }
@@ -760,7 +823,10 @@ const apiCore = {
     return rpc("add_toolset", { ...req });
   },
 
-  updateToolset(name: string, req: Omit<ToolsetPayload, "name">): Promise<{ toolset: Toolset }> {
+  updateToolset(
+    name: string,
+    req: Omit<ToolsetPayload, "name"> & { rename?: string },
+  ): Promise<{ toolset: Toolset }> {
     return rpc("update_toolset", { name, ...req });
   },
 
@@ -780,8 +846,8 @@ const apiCore = {
     return rpc("list_providers");
   },
 
-  showProvider(name: string): Promise<{ provider: Provider }> {
-    return rpc("show_provider", { name });
+  showProvider(ref: string): Promise<{ provider: Provider }> {
+    return rpc("show_provider", { name: ref });
   },
 
   addProvider(req: {
@@ -794,29 +860,30 @@ const apiCore = {
   },
 
   updateProvider(
-    name: string,
+    ref: string,
     req: {
+      rename?: string;
       type?: string;
       options?: Record<string, unknown>;
       params?: Record<string, unknown>;
     },
   ): Promise<{ provider: Provider }> {
-    return rpc("update_provider", { name, ...req });
+    return rpc("update_provider", { name: ref, ...req });
   },
 
-  deleteProvider(name: string): Promise<{ deleted: string }> {
-    return rpc("delete_provider", { name });
+  deleteProvider(ref: string): Promise<{ deleted: string }> {
+    return rpc("delete_provider", { name: ref });
   },
 
-  useProvider(name: string): Promise<{ provider: Provider }> {
-    return rpc("use_provider", { name });
+  useProvider(ref: string): Promise<{ provider: Provider }> {
+    return rpc("use_provider", { name: ref });
   },
 
-  async duplicateProvider(name: string, as_?: string): Promise<{ provider: Provider }> {
+  async duplicateProvider(ref: string, as_?: string): Promise<{ provider: Provider }> {
     const { providers } = await apiCore.listProviders();
-    const src = providers.find((p) => p.name === name);
-    if (!src) throw new RpcError(-32001, `provider ${name} not found`);
-    const newName = (as_ ?? `${name}_copy`).trim();
+    const src = providers.find((p) => p.id === ref);
+    if (!src) throw new RpcError(-32001, `provider ${ref} not found`);
+    const newName = (as_ ?? `${src.name}_copy`).trim();
     const { provider } = await apiCore.addProvider({
       name: newName,
       type: src.type,
@@ -826,8 +893,8 @@ const apiCore = {
     return { provider };
   },
 
-  probeProvider(name: string): Promise<ProbeResult> {
-    return rpc("probe_provider", { name });
+  probeProvider(ref: string): Promise<ProbeResult> {
+    return rpc("probe_provider", { name: ref });
   },
 
   getProviderStatus(): Promise<ProviderStatusResponse> {
@@ -903,6 +970,22 @@ const apiCore = {
     return rpc("list_context_snapshots", { ...params });
   },
 
+  listContextBundles(): Promise<{ bundles: ContextBundle[] }> {
+    return rpc("list_context_bundles");
+  },
+
+  getContextBundle(name: string): Promise<{ bundle: ContextBundleDetail }> {
+    return rpc("get_context_bundle", { name });
+  },
+
+  listContextVersions(bundle_name: string): Promise<{ versions: ContextVersion[] }> {
+    return rpc("list_context_versions", { bundle_name });
+  },
+
+  getContextVersion(bundle_name: string, version: string): Promise<{ version: ContextVersion }> {
+    return rpc("get_context_version", { bundle_name, version });
+  },
+
   getContextSnapshot(snapshot_id: string): Promise<{ snapshot: ContextSnapshot }> {
     return rpc("get_context_snapshot", { snapshot_id });
   },
@@ -917,12 +1000,38 @@ const apiCore = {
     return rpc("inspect_context", { context_id });
   },
 
+  addContextBundle(payload: {
+    name: string;
+    description?: string | null;
+    spec?: Record<string, unknown> | null;
+  }): Promise<{ bundle: ContextBundle; version: ContextVersion }> {
+    return rpc("add_context_bundle", payload as Record<string, unknown>);
+  },
+
+  updateContextBundle(
+    payload: {
+      name: string;
+      rename?: string | null;
+      description?: string | null;
+      spec?: Record<string, unknown> | null;
+    },
+  ): Promise<{ bundle: ContextBundle; version: ContextVersion }> {
+    return rpc("update_context_bundle", payload as Record<string, unknown>);
+  },
+
+  activateContextBundle(payload: {
+    name: string;
+    version?: string | null;
+  }): Promise<{ bundle: ContextBundle; version: ContextVersion | null }> {
+    return rpc("activate_context_bundle", payload as Record<string, unknown>);
+  },
+
   listMemories(params: {
     kind?: string;
     pinned?: boolean;
     archived?: boolean;
     conversation_id?: string;
-    provider_name?: string;
+    provider_snapshot?: string;
     tag?: string;
     search?: string;
     limit?: number;
@@ -989,7 +1098,7 @@ const apiCore = {
   },
 
   updatePromptBundle(
-    payload: PromptBundlePayload,
+    payload: PromptBundlePayload & { rename?: string },
   ): Promise<{ bundle: PromptBundle; version: PromptVersion }> {
     return rpc("update_prompt_bundle", payload as unknown as Record<string, unknown>);
   },
@@ -1009,9 +1118,10 @@ const apiCore = {
   createAgent(payload: {
     name: string;
     role: string;
-    prompt_bundle?: string | null;
-    tool_profile?: string | null;
-    provider_profile?: string | null;
+    prompt_id?: string | null;
+    context_id?: string | null;
+    toolset_id?: string | null;
+    provider_id?: string | null;
     budget?: Record<string, unknown>;
     meta?: Record<string, unknown>;
     reflection_enabled?: boolean;
@@ -1023,10 +1133,12 @@ const apiCore = {
   updateAgent(
     name: string,
     payload: {
+      rename?: string;
       role?: string | null;
-      prompt_bundle?: string | null;
-      tool_profile?: string | null;
-      provider_profile?: string | null;
+      prompt_id?: string | null;
+      context_id?: string | null;
+      toolset_id?: string | null;
+      provider_id?: string | null;
       budget?: Record<string, unknown>;
       meta?: Record<string, unknown>;
       reflection_enabled?: boolean;

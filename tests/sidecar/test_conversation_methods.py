@@ -16,8 +16,8 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.conversation import ConversationService
 from chariot.sidecar.methods import register_methods
 
 
@@ -79,9 +79,7 @@ async def _call(server: JsonRpcServer, method: str, params: dict[str, Any]) -> d
 @pytest.mark.asyncio
 async def test_update_conversation_config_updates_agent(server: JsonRpcServer, agent: AIAgent) -> None:
     """RPC happy path:更新 agent_profile,返回最新 conversation。"""
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
+    await ConversationService(agent).create("01CONV")
 
     resp = await _call(
         server,
@@ -100,10 +98,9 @@ async def test_update_conversation_config_updates_agent(server: JsonRpcServer, a
 @pytest.mark.asyncio
 async def test_update_conversation_config_keeps_agent_when_not_given(server: JsonRpcServer, agent: AIAgent) -> None:
     """不传 agent_profile,保持原值。"""
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
-        await repo.update_config("01CONV", agent_profile="old-agent")
+    service = ConversationService(agent)
+    await service.create("01CONV")
+    await service.update_config("01CONV", agent_profile="old-agent")
 
     resp = await _call(
         server,
@@ -120,10 +117,9 @@ async def test_update_conversation_config_keeps_agent_when_not_given(server: Jso
 @pytest.mark.asyncio
 async def test_update_conversation_config_updates_only_agent(server: JsonRpcServer, agent: AIAgent) -> None:
     """只传 agent_profile,覆盖原值。"""
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
-        await repo.update_config("01CONV", agent_profile="old-agent")
+    service = ConversationService(agent)
+    await service.create("01CONV")
+    await service.update_config("01CONV", agent_profile="old-agent")
 
     resp = await _call(
         server,
@@ -160,11 +156,14 @@ async def test_update_conversation_config_not_found(server: JsonRpcServer) -> No
 @pytest.mark.asyncio
 async def test_get_conversation_returns_messages(server: JsonRpcServer, agent: AIAgent) -> None:
     """get_conversation 返回 conversation + messages。"""
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
-        await repo.append_message("01CONV", "user", "hello")
-        await repo.append_message("01CONV", "assistant", "hi", provider_name="mock")
+    service = ConversationService(agent)
+    await service.create("01CONV")
+    await service.append_user_message("01CONV", "hello")
+    await service.append_assistant_message(
+        "01CONV",
+        [{"type": "text", "text": "hi"}],
+        provider_snapshot="mock",
+    )
 
     resp = await _call(server, "get_conversation", {"conversation_id": "01CONV"})
     assert "result" in resp
@@ -187,9 +186,7 @@ async def test_get_conversation_not_found(server: JsonRpcServer) -> None:
 
 @pytest.mark.asyncio
 async def test_rename_conversation(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV", title="old")
+    await ConversationService(agent).create("01CONV", title="old")
 
     resp = await _call(
         server,
@@ -207,9 +204,7 @@ async def test_rename_conversation(server: JsonRpcServer, agent: AIAgent) -> Non
 
 @pytest.mark.asyncio
 async def test_delete_conversation(server: JsonRpcServer, agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        repo = ConversationRepo(session)
-        await repo.create("01CONV")
+    await ConversationService(agent).create("01CONV")
 
     resp = await _call(server, "delete_conversation", {"conversation_id": "01CONV"})
     assert resp["result"]["deleted"] == "01CONV"

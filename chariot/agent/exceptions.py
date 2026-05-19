@@ -58,11 +58,11 @@ class ConfigError(Exception):
 
 
 class ProviderNotFound(ConfigError):  # noqa: N818 — 短名对调用方更友好,语义明显是异常
-    """指定 provider name 在 `providers` 表里找不到。"""
+    """指定 provider ref(id / slug)在 `providers` 表里找不到。"""
 
 
 class DuplicateProviderName(ConfigError):  # noqa: N818 — 同上
-    """provider name 已存在(create / duplicate 目标名冲突)。"""
+    """provider 稳定引用冲突(create / copy / reslug 目标 slug 冲突)。"""
 
 
 class ToolNotFound(ConfigError):  # noqa: N818 — 同上

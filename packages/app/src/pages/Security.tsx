@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleJson } from "@/components/collapsible-json";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -624,9 +625,7 @@ function LastResultBlock({
           <span className="font-mono">{result.entry.id}</span>
           <span className="font-mono">{result.entry.name}</span>
         </div>
-        <pre className="overflow-auto rounded border border-border bg-background p-2 leading-6 whitespace-pre-wrap break-words">
-          {JSON.stringify(p, null, 2)}
-        </pre>
+        <CollapsibleJson title="Payload JSON" value={p} defaultExpanded maxHeightClassName="max-h-72" />
       </div>
     );
   }

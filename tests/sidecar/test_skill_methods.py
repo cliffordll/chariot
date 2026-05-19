@@ -16,8 +16,8 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.audit.hooks import AuditHookManager
 from chariot.database.session import dispose_db
-from chariot.repos.audit_repo import AuditRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.audit import AuditService
 from chariot.sidecar.methods import register_methods
 
 
@@ -196,8 +196,7 @@ async def test_delete_skill(server: JsonRpcServer) -> None:
 
 async def test_install_skill_writes_audit_event(server: JsonRpcServer, agent: AIAgent) -> None:
     await _call(server, "install_skill", {"content": _VALID_YAML})
-    async with agent.session_maker() as session:
-        events = await AuditRepo(session).list_events(limit=10)
+    events = await AuditService(agent).list_events(limit=10)
     skill_events = [e for e in events if e.event_type == AuditHookManager.EVENT_SKILL_STORE]
     assert len(skill_events) >= 1
     payload = skill_events[0].payload

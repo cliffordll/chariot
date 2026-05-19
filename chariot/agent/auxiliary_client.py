@@ -1,8 +1,8 @@
 """AuxiliaryClient —— 副 model wrapper(B3 wave 2,B4 拓展为通用 generate)。
 
 设计动机:context auto-compression / critic 都需要"调独立路由的 LLM 做副任务",
-但又不想新增 BaseProvider 子类。`AuxiliaryClient` 是 entry-level 的"指向某个
-provider entry + 独立 model id + 独立 sampling params" 包装,内部仍走现有
+        但又不想新增 BaseProvider 子类。`AuxiliaryClient` 是 entry-level 的"指向某个
+provider + 独立 model id + 独立 sampling params" 包装,内部仍走现有
 ProviderRegistry。
 
 封装策略(CLAUDE.md ⭐ 封装与内聚最高优先级):
@@ -76,7 +76,7 @@ class AuxiliaryClient:
     ) -> ChatRequest:
         """用 entry 默认 params 装一个 ChatRequest;`overrides` 可逐字段覆盖。
 
-        默认 baking:`provider_name` / `model` / `max_tokens` / `temperature` / `top_p`
+        默认 baking:`provider_ref` / `model` / `max_tokens` / `temperature` / `top_p`
         全从 `entry.params` 取,缺省值用 entry / provider 的 fallback。
         """
         params = self._entry.params
@@ -85,7 +85,7 @@ class AuxiliaryClient:
         top_p = params.get("top_p")
         model = self._entry.model or self._provider.config.model
         base: dict[str, Any] = {
-            "provider_name": self._entry.provider_entry,
+            "provider_ref": self._entry.provider_id,
             "messages": messages,
             "model": model,
             "max_tokens": max_tokens,

@@ -1,7 +1,7 @@
 """Toolset 领域数据形态。
 
 `Toolset` 是 0.7.2-tool 新引入的命名实体:把一组 tool name 收集成可命名 /
-可绑定的集合,作为 `agent_profile.tool_profile` 字段的引用目标。
+可绑定的集合,作为 `agent_profile.toolset_id` 字段的引用目标。
 
 设计:docs/tool-profile-design.md。
 """
@@ -19,6 +19,7 @@ class Toolset:
 
     name: str
     description: str | None
+    id: str = ""
     members: tuple[str, ...] = ()
     meta: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
@@ -31,3 +32,4 @@ class ToolsetMember:
 
     toolset_name: str
     tool_name: str
+    toolset_id: str | None = None

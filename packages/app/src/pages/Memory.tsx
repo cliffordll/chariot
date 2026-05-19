@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { JsonTree } from "@/components/collapsible-json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -124,42 +125,59 @@ export default function Memory() {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-44 flex-1 space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">kind</label>
-            <Input
-              value={kindDraft}
-              onChange={(e) => setKindDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyFilter();
-                }
-              }}
-              placeholder="Optional memory kind"
-            />
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-44 flex-1 space-y-1">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">kind</label>
+              <Input
+                value={kindDraft}
+                onChange={(e) => setKindDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyFilter();
+                  }
+                }}
+                placeholder="Optional memory kind"
+              />
+            </div>
+            <div className="min-w-64 flex-[2] space-y-1">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">search</label>
+              <Input
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyFilter();
+                  }
+                }}
+                placeholder="Search memory text"
+              />
+            </div>
+            <Button onClick={applyFilter}>Apply</Button>
+            <Button variant="outline" onClick={clearFilter}>
+              Clear
+            </Button>
+            <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
+              <Badge variant="outline">{summary.memories} memories</Badge>
+            </div>
           </div>
-          <div className="min-w-64 flex-[2] space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">search</label>
-            <Input
-              value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyFilter();
-                }
-              }}
-              placeholder="Search memory text"
-            />
-          </div>
-          <Button onClick={applyFilter}>Apply</Button>
-          <Button variant="outline" onClick={clearFilter}>
-            Clear
-          </Button>
-          <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">{summary.memories} memories</Badge>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Kind 是自由分类字段。常见示例:
+            {" "}
+            <code>preference</code>
+            {" "}
+            (用户偏好),
+            {" "}
+            <code>instruction</code>
+            {" "}
+            (命令约束),
+            {" "}
+            <code>lesson</code>
+            {" "}
+            (经验教训)。
+          </p>
         </div>
       </div>
 
@@ -187,13 +205,12 @@ export default function Memory() {
                     <TableHead className="w-20 text-center">pinned</TableHead>
                     <TableHead className="w-24 text-center">archived</TableHead>
                     <TableHead>text</TableHead>
-                    <TableHead className="w-24 text-right">action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {memories.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
                         No memory entries yet.
                       </TableCell>
                     </TableRow>
@@ -201,29 +218,65 @@ export default function Memory() {
                     memories.map((memory) => {
                       const active = detail.kind !== "idle" && detail.id === memory.id;
                       return (
-                        <TableRow key={memory.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {formatDate(memory.created_at)}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{memory.kind}</TableCell>
-                          <TableCell className="text-center font-mono text-xs">
-                            {memory.pinned ? "yes" : "no"}
-                          </TableCell>
-                          <TableCell className="text-center font-mono text-xs">
-                            {memory.archived ? "yes" : "no"}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{truncate(memory.text, 90)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant={active ? "default" : "outline"}
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void inspect(memory.id)}
-                            >
-                              {active ? "Hide" : "Inspect"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
+                        <Fragment key={memory.id}>
+                          <TableRow
+                            className="cursor-pointer"
+                            data-state={active ? "selected" : undefined}
+                            onClick={() => void inspect(memory.id)}
+                          >
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {formatDate(memory.created_at)}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{memory.kind}</TableCell>
+                            <TableCell className="text-center font-mono text-xs">
+                              {memory.pinned ? "yes" : "no"}
+                            </TableCell>
+                            <TableCell className="text-center font-mono text-xs">
+                              {memory.archived ? "yes" : "no"}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{truncate(memory.text, 90)}</TableCell>
+                          </TableRow>
+                          {detail.kind === "loading" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-muted/10 px-4 py-4 text-sm text-muted-foreground">
+                                Loading memory detail...
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {detail.kind === "err" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-destructive/5 px-4 py-4 text-sm text-destructive">
+                                Unable to inspect {detail.id}: {detail.message}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {detail.kind === "ok" && detail.id === memory.id && (
+                            <TableRow>
+                              <TableCell colSpan={5} className="bg-muted/10 px-4 py-4">
+                                <div className="space-y-4">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline" className="font-mono text-[10px]">
+                                      memory
+                                    </Badge>
+                                    <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
+                                  </div>
+                                  <JsonBlock
+                                    title="Memory"
+                                    value={detail.memory}
+                                  />
+                                  <JsonBlock
+                                    title="Events"
+                                    value={detail.events}
+                                  />
+                                  <JsonBlock
+                                    title="Links"
+                                    value={detail.links}
+                                  />
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
                       );
                     })
                   )}
@@ -231,31 +284,6 @@ export default function Memory() {
               </Table>
             </div>
           </section>
-
-          {detail.kind === "loading" && (
-            <p className="text-sm text-muted-foreground">Loading memory detail...</p>
-          )}
-          {detail.kind === "err" && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              Unable to inspect {detail.id}: {detail.message}
-            </div>
-          )}
-          {detail.kind === "ok" && (
-            <section className="space-y-4 rounded-lg border border-border p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  memory
-                </Badge>
-                <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <JsonBlock title="Memory" value={detail.memory} />
-                <JsonBlock title="Meta" value={detail.memory.meta} />
-              </div>
-              <JsonBlock title="Events" value={detail.events} />
-              <JsonBlock title="Links" value={detail.links} />
-            </section>
-          )}
         </div>
       )}
     </section>
@@ -282,13 +310,21 @@ function SectionHeader({
   );
 }
 
-function JsonBlock({ title, value }: { title: string; value: unknown }) {
+function JsonBlock({
+  title,
+  value,
+}: {
+  title: string;
+  value: unknown;
+}) {
   return (
-    <div className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">{title}</h3>
-      <pre className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">{title}</h3>
+        <div className="max-h-[28rem] overflow-auto rounded-lg border border-border bg-background/80 p-3 text-xs font-mono">
+          <JsonTree value={value} />
+        </div>
+      </div>
     </div>
   );
 }

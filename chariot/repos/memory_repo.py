@@ -28,7 +28,7 @@ class MemoryRepo:
         pinned: bool | None = None,
         archived: bool | None = False,
         conversation_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         tag: str | None = None,
         search: str | None = None,
         limit: int = 50,
@@ -41,7 +41,7 @@ class MemoryRepo:
             pinned=pinned,
             archived=archived,
             conversation_id=conversation_id,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             tag=tag,
             search=search,
         )
@@ -186,7 +186,7 @@ class MemoryRepo:
         self,
         *,
         conversation_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         tags: list[str] | None = None,
         limit: int = 8,
         policy: MemoryPolicy | None = None,
@@ -202,9 +202,9 @@ class MemoryRepo:
                 archived=False,
                 limit=limit,
             )
-        if provider_name is not None:
+        if provider_snapshot is not None:
             provider_entries = await self.list_entries(
-                provider_name=provider_name,
+                provider_snapshot=provider_snapshot,
                 archived=False,
                 limit=limit,
             )
@@ -231,7 +231,7 @@ class MemoryRepo:
         pinned: bool | None,
         archived: bool | None,
         conversation_id: str | None,
-        provider_name: str | None,
+        provider_snapshot: str | None,
         tag: str | None,
         search: str | None,
     ):
@@ -253,13 +253,13 @@ class MemoryRepo:
                     )
                 )
             )
-        if provider_name is not None:
+        if provider_snapshot is not None:
             stmt = stmt.where(
                 exists(
                     select(MemoryLinkRow.id).where(
                         MemoryLinkRow.memory_id == MemoryRow.id,
                         MemoryLinkRow.link_type == "provider",
-                        MemoryLinkRow.link_value == provider_name,
+                        MemoryLinkRow.link_value == provider_snapshot,
                     )
                 )
             )

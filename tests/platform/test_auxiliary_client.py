@@ -33,7 +33,7 @@ class _ErroringProvider(BaseProvider):
 async def test_summarize_returns_text_from_mock_provider() -> None:
     """MockProvider echo 末轮 user content;summarize 应聚合 [mock] echo: <text>。"""
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="summarizer", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="summarizer", provider_id="mock"),
         provider=MockProvider.create({}),
     )
     result = await aux.summarize("hello world")
@@ -43,7 +43,7 @@ async def test_summarize_returns_text_from_mock_provider() -> None:
 
 async def test_summarize_empty_input_returns_empty() -> None:
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="summarizer", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="summarizer", provider_id="mock"),
         provider=MockProvider.create({}),
     )
     assert await aux.summarize("") == ""
@@ -52,7 +52,7 @@ async def test_summarize_empty_input_returns_empty() -> None:
 
 async def test_summarize_raises_on_provider_error() -> None:
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="summarizer", provider_entry="err"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="summarizer", provider_id="err"),
         provider=_ErroringProvider(),
     )
     with pytest.raises(AuxiliarySummarizeFailed):
@@ -62,9 +62,9 @@ async def test_summarize_raises_on_provider_error() -> None:
 async def test_summarize_respects_max_tokens_param() -> None:
     """params.max_tokens 透传到 ChatRequest;mock 不 enforce 但应不报错。"""
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(
+        entry=AuxiliaryClientEntry.from_provider_id(
             name="summarizer",
-            provider_entry="mock",
+            provider_id="mock",
             params={"max_tokens": 32},
         ),
         provider=MockProvider.create({}),

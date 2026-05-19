@@ -10,8 +10,7 @@
 
 写:
 - `chariot conversation show <id>`:详情 + 最近 N 条 messages 摘要
-- `chariot conversation delete <id>`:删除(cascade messages)
-- `chariot conversation rm <id>`:删除别名(兼容)
+- `chariot conversation delete <id>`:删除会话
 - `chariot conversation rename <id> <new-title>`:改 title
 """
 
@@ -115,21 +114,22 @@ async def _show(conversation_id: str, tail: int) -> None:
             preview = _truncate(content_data, 80)
         else:
             preview = _truncate(json.dumps(content_data, ensure_ascii=False), 80)
-        marker = f" [{m.provider_name}]" if m.provider_name else ""
+        provider_snapshot = getattr(m, "provider_snapshot", None)
+        marker = f" [{provider_snapshot}]" if provider_snapshot else ""
         Renderer.out(f"#{m.seq:3d} {m.role:9s}{marker}: {preview}")
 
 
-# ---------- delete / rm ----------
+# ---------- delete ----------
 
 
 @conversation_app.command("delete", help="删除会话(cascade messages)")
-def rm_cmd(
+def delete_cmd(
     conversation_id: Annotated[str, typer.Argument(help="conversation id (ULID)")],
 ) -> None:
-    asyncio.run(_rm(conversation_id))
+    asyncio.run(_delete(conversation_id))
 
 
-async def _rm(conversation_id: str) -> None:
+async def _delete(conversation_id: str) -> None:
     async with installed_runtime() as agent:
         try:
             await ConversationService(agent).delete(conversation_id)

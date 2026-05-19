@@ -23,7 +23,8 @@ class PromptComposer:
     def build_snapshot(
         req: ChatRequest,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_snapshot: str,
         model: str | None,
         bundle_name: str,
         version: str,
@@ -33,7 +34,7 @@ class PromptComposer:
         request = asdict(req)
         layers = PromptComposer._build_layers(
             req,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             memory_entries=memory_entries,
             memory_policy=memory_policy,
@@ -50,20 +51,21 @@ class PromptComposer:
         return PromptSnapshot(
             bundle_name=bundle_name,
             version=version,
-            provider_name=provider_name,
+            provider_snapshot=provider_snapshot,
             model=model,
             conversation_id=req.conversation_id,
             request=request,
             layers=layers,
             source_refs=source_refs,
             prompt_size=prompt_size,
+            provider_id=provider_id,
         )
 
     @staticmethod
     def _build_layers(
         req: ChatRequest,
         *,
-        provider_name: str,
+        provider_snapshot: str,
         model: str | None,
         memory_entries: list[dict[str, Any]] | None,
         memory_policy: dict[str, Any] | None,
@@ -76,7 +78,7 @@ class PromptComposer:
                 name="runtime",
                 source="AIAgent runtime context",
                 content={
-                    "provider_name": provider_name,
+                    "provider_snapshot": provider_snapshot,
                     "model": model,
                     "conversation_id": req.conversation_id,
                     "agent_id": req.agent_id,

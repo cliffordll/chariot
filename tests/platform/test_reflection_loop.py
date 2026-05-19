@@ -38,7 +38,7 @@ def _v(verdict: str, reason: str = "stub reason") -> CriticVerdict:
 
 
 def _req(text: str = "do the task") -> ChatRequest:
-    return ChatRequest(provider_name="mock", messages=[Message(role="user", content=text)])
+    return ChatRequest(provider_ref="mock", messages=[Message(role="user", content=text)])
 
 
 # ---- AssistantBuffer ----
@@ -253,7 +253,7 @@ async def test_step_passes_tool_failure_count_in_extra_context() -> None:
 async def test_step_with_real_critic_falls_back_unsure() -> None:
     """真 CriticAgent(MockProvider 不会输出 VERDICT)→ UNSURE → 不重试。"""
     aux = AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="mock"),
         provider=__import__("chariot.providers.builtin.mock", fromlist=["MockProvider"]).MockProvider.create({}),
     )
     critic = CriticAgent(aux)

@@ -41,9 +41,10 @@ REFERENCE_RESOLVERS: dict[str, type[BaseReferenceResolver]] = {
 
 
 # 匹配 @file:key / @diff:key / @url:key / @session:key
+# 冒号后允许出现若干空白,兼容 `@url: https://...` 这类更自然的写法。
 # key 字符集:任何非空白(简单宽松;具体安全校验在 resolver 内部做)
 _REFERENCE_PATTERN = re.compile(
-    r"@(?P<type>file|diff|url|session):(?P<key>\S*)",
+    r"@(?P<type>file|url|session):\s*(?P<key>\S*)|@(?P<diff_type>diff)(?::\s*(?P<diff_key>\S*))?",
 )
 
 
@@ -118,12 +119,17 @@ class ReferenceExpander:
         matches = list(_REFERENCE_PATTERN.finditer(text))
         if not matches:
             return text
-        results = await asyncio.gather(*(self._resolve_one(m.group("type"), m.group("key")) for m in matches))
+        results = await asyncio.gather(*(self._resolve_match(m) for m in matches))
         # 替换逆序避免下标漂移
         out = text
         for m, replacement in zip(reversed(matches), reversed(results), strict=True):
             out = out[: m.start()] + replacement + out[m.end() :]
         return out
+
+    async def _resolve_match(self, match: re.Match[str]) -> str:
+        type_id = match.group("type") or match.group("diff_type") or ""
+        key = match.group("key") or match.group("diff_key") or ""
+        return await self._resolve_one(type_id, key)
 
     async def _resolve_one(self, type_id: str, key: str) -> str:
         resolver = self._resolvers.get(type_id)

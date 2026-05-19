@@ -31,10 +31,10 @@ class TestTraceWriterHappyPath:
         sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock", conversation_id="C1")
+        turn = await writer.begin_turn(provider_snapshot="mock", conversation_id="C1")
         assert turn.turn_id is not None
 
-        pc = turn.begin_provider_call(provider_name="mock", model="mock-1")
+        pc = turn.begin_provider_call(provider_snapshot="mock", model="mock-1")
         await pc.finish(response_summary={"stop_reason": "end_turn", "output_tokens": 5})
 
         tc = turn.begin_tool_call(tool_name="read_file", arguments={"path": "README.md"})
@@ -71,8 +71,8 @@ class TestTraceWriterHappyPath:
         sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock")
-        pc = turn.begin_provider_call(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
+        pc = turn.begin_provider_call(provider_snapshot="mock")
         await pc.finish(error_type="upstream_server_error")
         await turn.finalize(status=TurnStatus.FAILED, error_type="upstream_server_error")
 
@@ -87,7 +87,7 @@ class TestTraceWriterHappyPath:
         sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
         tc = turn.begin_tool_call(tool_name="shell_exec", arguments={"command": "ls /tmp"})
         await tc.finish(status=ToolCallStatus.ERROR, error_message="permission denied")
         await turn.finalize(status=TurnStatus.COMPLETED)
@@ -105,7 +105,7 @@ class TestTraceWriterIdempotence:
         sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
         await turn.finalize(status=TurnStatus.COMPLETED, stop_reason="end_turn")
         # 第二次 finalize 直接 no-op,不抛
         await turn.finalize(status=TurnStatus.FAILED, error_type="oops")
@@ -120,8 +120,8 @@ class TestTraceWriterIdempotence:
         sessionmaker: async_sessionmaker[AsyncSession],
     ) -> None:
         writer = TraceWriter(sessionmaker)
-        turn = await writer.begin_turn(provider_name="mock")
-        pc = turn.begin_provider_call(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
+        pc = turn.begin_provider_call(provider_snapshot="mock")
         await pc.finish(response_summary={"stop_reason": "end_turn"})
         await pc.finish(error_type="oops")  # 第二次 no-op
         await turn.finalize(status=TurnStatus.COMPLETED)
@@ -137,9 +137,9 @@ class TestTraceWriterDisabled:
     async def test_sessionmaker_none_no_writes(self) -> None:
         """sessionmaker=None 时所有 handle 退化为 no-op,不抛错。"""
         writer = TraceWriter(None)
-        turn = await writer.begin_turn(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
         assert turn.turn_id is None  # disabled 状态
-        pc = turn.begin_provider_call(provider_name="mock")
+        pc = turn.begin_provider_call(provider_snapshot="mock")
         await pc.finish(response_summary={"stop_reason": "end_turn"})
         tc = turn.begin_tool_call(tool_name="read_file")
         await tc.finish(status=ToolCallStatus.OK)
@@ -161,9 +161,9 @@ class TestTraceWriterFailureTolerance:
             raise RuntimeError("DB down")
 
         monkeypatch.setattr(TraceRepo, "create_turn", boom)
-        turn = await writer.begin_turn(provider_name="mock")
+        turn = await writer.begin_turn(provider_snapshot="mock")
         assert turn.turn_id is None  # 失败 → handle 退化
         # 派生事件 + finalize 都 no-op,不抛
-        await turn.begin_provider_call(provider_name="mock").finish()
+        await turn.begin_provider_call(provider_snapshot="mock").finish()
         await turn.begin_tool_call(tool_name="x").finish()
         await turn.finalize(status=TurnStatus.COMPLETED)

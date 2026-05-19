@@ -90,7 +90,7 @@ async def agent(tmp_path: Path):
 async def test_reflection_disabled_runs_single_turn(agent: AIAgent) -> None:
     """req.reflection_enabled=False → 单轮,即使产出含 FAILED 也不重试。"""
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="write sort")],
         reflection_enabled=False,
     )
@@ -102,7 +102,9 @@ async def test_reflection_disabled_runs_single_turn(agent: AIAgent) -> None:
     text_chunks = [ev.delta["text"] for ev in events if ev.kind == "content_block_delta" and ev.delta]
     assert any("FAILED" in t for t in text_chunks)
     # trace_turns 只有 1 条
-    async with agent.session_maker() as session:
+    sm = agent._sessionmaker
+    assert sm is not None
+    async with sm() as session:
         rows = (await session.execute(select(TraceTurnRow))).scalars().all()
     assert len(rows) == 1
     assert json.loads(rows[0].meta) == {}
@@ -116,7 +118,7 @@ async def test_reflection_enabled_triggers_retry_on_self_report_fail(agent: AIAg
     - trace_turns 两条;第二条 meta 含 reflection_iteration=1 + previous_verdict='FAIL'
     """
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="write sort")],
         reflection_enabled=True,
         reflection_max_retries=2,
@@ -131,7 +133,9 @@ async def test_reflection_enabled_triggers_retry_on_self_report_fail(agent: AIAg
     assert agent._providers["mock"]._call_count == 2
 
     # trace_turns 两条
-    async with agent.session_maker() as session:
+    sm = agent._sessionmaker
+    assert sm is not None
+    async with sm() as session:
         rows = (await session.execute(select(TraceTurnRow).order_by(TraceTurnRow.started_at.asc()))).scalars().all()
     assert len(rows) == 2
     first_meta = json.loads(rows[0].meta)
@@ -152,7 +156,7 @@ async def test_reflection_enabled_no_critic_falls_back_to_single(tmp_path: Path)
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="x")],
             reflection_enabled=True,
             reflection_max_retries=2,
@@ -172,7 +176,7 @@ async def test_reflection_max_retries_zero_disables(tmp_path: Path) -> None:
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="x")],
             reflection_enabled=True,
             reflection_max_retries=0,
@@ -187,7 +191,7 @@ async def test_reflection_max_retries_zero_disables(tmp_path: Path) -> None:
 # stub helper: AuxiliaryClient 直接构造(无需真 provider)用在导入校验上
 def _build_aux_for_imports() -> AuxiliaryClient:
     return AuxiliaryClient(
-        entry=AuxiliaryClientEntry(name="critic", provider_entry="mock"),
+        entry=AuxiliaryClientEntry.from_provider_id(name="critic", provider_id="mock"),
         provider=MockProvider.create({}),
     )
 

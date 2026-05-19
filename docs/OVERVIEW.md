@@ -1,6 +1,6 @@
 # Chariot —— 当前状态全景
 
-> 截止 B7 wave 1(`feat/0.8.6-rl`,2026-05)。
+> 截止 B7 wave 1 + 0.8.9 identity / snapshot 收口(`feat/0.8.9-boundary`,2026-05)。
 > 跟 `ARCHITECTURE.md`(早期愿景)的差异:本文只描述**当前真实跑得起来**的代码,
 > 不写"将来 X 会怎么做"的设想。后续开发方向单独放在 §10。
 
@@ -62,12 +62,20 @@ API 的本地代理(0.6.0 之前的形态)。
 ChatRequest ─► AIAgent.run_chat
                    │
                    │ 1. _apply_profile_reflection(透传 agent_profile.reflection_*)
-                   │ 2. _resolve_binding(解析 agent_profile)
-                   │ 3. 分支:reflection_enabled? → _run_chat_reflective 循环 N 次
+                   │ 2. _resolve_binding(解析 agent_profile → provider_id /
+                   │    prompt_id / toolset_id)
+                   │ 3. _resolve_effective_provider(profile.provider_id 覆盖
+                   │    req.provider_ref)
+                   │ 4. 分支:reflection_enabled? → _run_chat_reflective 循环 N 次
                    │
                    ├─ stateless 路径 ──► _run_stateless_chat
-                   │       │ load memory entries / prompt bundle / refs
-                   │       │ → _prepare_request → SkillActivator.activate
+                   │       │ load memory entries
+                   │       │ → _prepare_request
+                   │       │   ├─ PromptComposer.render_layers_text
+                   │       │   ├─ _inject_default_tools
+                   │       │   │   └─ 只有 agent_profile.toolset_id 解析成功才
+                   │       │   │      注入 tool schemas;否则 tools=[]
+                   │       │   └─ SkillActivator.activate
                    │       │ → @reference expansion
                    │       │ → AgentLoop.stream_chat
                    │       └─ capture_memory(成功) / capture_error_memory(失败)
@@ -76,6 +84,7 @@ ChatRequest ─► AIAgent.run_chat
                            │ ConversationLockManager.acquire(进程内 + DB 双层锁)
                            │ persist new user messages
                            │ load history → build full_req → _prepare_request
+                           │ @reference expansion
                            │ ContextCompressor.maybe_compress(长对话)
                            │ prompt_trace 记录
                            │ → AgentLoop.stream_chat
@@ -142,7 +151,7 @@ chariot/
 │                 memory / prompt / skill / task / tool / trace / ...)
 ├── models/       领域 frozen dataclass(agent_profile / trace / tool / provider)
 ├── services/     上层组合服务(agent / tool / toolset / trace)
-├── database/     session + migrations(022_*.sql + ORM models)
+├── database/     session + migrations(001_init + 002_squashed_current + 003..006 identity)
 ├── rpc/          stdio JSON-RPC 框架(sidecar / ACP / MCP 共用)
 ├── cli/          typer-based CLI 子命令(每个领域一个 commands/*.py)
 └── sidecar/      JSON-RPC method 适配器(methods/*.py)+ __main__ stdio loop
@@ -193,7 +202,7 @@ docs/
 ### 3.2 providers —— BaseProvider 抽象 + builtin
 
 - **入口**:`BaseProvider` ABC + `ProviderRegistry`(type → 工厂注册)
-- **builtin**:`mock`(测试)/ `anthropic`(透传 + SSE 解析)+(0.7.0 起规划 OpenAI)
+- **builtin**:`mock`(测试)/ `anthropic`(透传 + SSE 解析)/ `openai`
 - **职责**:`generate(ChatRequest) → AsyncIterator[ChatEvent]` 唯一接口;非 Claude
   provider(0.7.0+ openai 等)在子类内部翻译 wire format,**不污染**内核 IR
 - **关联表**:`providers`(name → type + options)+ `provider_health`(latency / status / 上次 probe)
@@ -376,7 +385,29 @@ docs/
 
 ### 6.2 Migrations(`chariot/database/migrations/`)
 
-22 条 SQL 顺序迁移(`PRAGMA user_version`),最新 v22:`agent_profiles.default_skill`。
+当前迁移目录采用“基线 + 增量”结构：
+
+- `001_init.sql`
+- `002_squashed_current.sql`
+- `003_agent_profile_identity.sql`
+- `004_auxiliary_identity.sql`
+- `005_toolset_identity.sql`
+- `006_job_identity.sql`
+
+当前 `PRAGMA user_version = 6`。
+
+其中 `003` 到 `006` 已完成这轮实体身份治理的核心落地：
+
+- `agent_profiles.id`
+- `tasks.agent_profile_id`
+- `scheduled_jobs.agent_profile_id`
+- `auxiliary_clients.id`
+- `toolsets.id`
+- `toolset_members.toolset_id`
+- `agent_profiles.toolset_id`
+- `scheduled_jobs.id`
+- `job_runs.job_id`
+
 B7 wave 1 加 `EVENT_RL_EXPORT` 事件类型但**未**改 schema(纯字符串)。
 
 ### 6.3 Disk(`~/.chariot/`)
@@ -459,7 +490,7 @@ stateful + agent_profile + reflection + skill 全开的场景:
    └─ branch: reflection_enabled=True → _run_chat_reflective 循环
 
 4. iteration 0:
-   ├─ _run_chat_once → _resolve_binding(reviewer profile)→ provider 路由(profile.provider_profile)
+   ├─ _run_chat_once → _resolve_binding(reviewer profile)→ provider 路由(profile.provider_id / req.provider_ref)
    ├─ trace.begin_turn(写 trace_turns 一行,status=running)
    ├─ _run_stateful_chat
    │  ├─ ConversationLockManager.acquire("cv-1") 双层锁

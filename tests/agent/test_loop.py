@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -122,6 +123,41 @@ class _StubTool(BaseTool):
         }
 
 
+class _StubMessageStore:
+    def __init__(self) -> None:
+        self.assistant_messages: list[dict[str, Any]] = []
+        self.tool_result_messages: list[dict[str, Any]] = []
+
+    async def append_assistant_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+        *,
+        provider_snapshot: str | None = None,
+        agent_profile: str | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "conversation_id": conversation_id,
+            "content": content,
+            "provider_snapshot": provider_snapshot,
+            "agent_profile": agent_profile,
+        }
+        self.assistant_messages.append(row)
+        return row
+
+    async def append_tool_result_message(
+        self,
+        conversation_id: str,
+        content: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        row = {
+            "conversation_id": conversation_id,
+            "content": content,
+        }
+        self.tool_result_messages.append(row)
+        return row
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -130,7 +166,7 @@ class _StubTool(BaseTool):
 @pytest.fixture
 def req() -> ChatRequest:
     return ChatRequest(
-        provider_name="scripted",
+        provider_ref="scripted",
         messages=[Message(role="user", content="hi")],
     )
 
@@ -139,13 +175,17 @@ def _make_loop(
     turns: list[list[ChatEvent]],
     tools: dict[str, BaseTool] | None = None,
     *,
+    message_store: _StubMessageStore | None = None,
+    conversation_id: str | None = None,
+    provider_snapshot: str | None = None,
     max_iter: int = 10,
 ) -> AgentLoop:
     return AgentLoop(
         provider=_ScriptedProvider(turns),
         tools=tools or {},
-        repo=None,
-        conversation_id=None,
+        message_store=message_store,
+        conversation_id=conversation_id,
+        provider_snapshot=provider_snapshot,
         max_iter=max_iter,
     )
 
@@ -328,7 +368,7 @@ class TestProviderError:
         loop = AgentLoop(
             provider=_RaisingProvider(),
             tools={},
-            repo=None,
+            message_store=None,
             conversation_id=None,
         )
         events = [ev async for ev in loop.stream_chat(req)]
@@ -338,6 +378,102 @@ class TestProviderError:
         assert ev.error_type == "upstream_auth_failed"
         assert ev.error_message is not None
         assert "401" in ev.error_message
+
+    async def test_provider_error_persists_error_message(self, req: ChatRequest) -> None:
+        store = _StubMessageStore()
+        events_seq = [
+            ChatEvent.message_start(message_id="msg_x", model="scripted-1"),
+            ChatEvent.error_event(
+                error_type="upstream_stream_error",
+                error_message="simulated mid-stream",
+            ),
+        ]
+        loop = _make_loop(
+            [events_seq],
+            message_store=store,
+            conversation_id="conv_err",
+            provider_snapshot="scripted",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 1
+        assert store.assistant_messages[0]["content"] == [
+            {"type": "text", "text": "[error] upstream_stream_error: simulated mid-stream"}
+        ]
+
+    async def test_provider_raise_persists_error_message(self, req: ChatRequest) -> None:
+        class _RaisingProvider(BaseProvider):
+            def __init__(self) -> None:
+                self.config = BaseProviderConfig(name="raising", model="scripted-1")
+
+            @classmethod
+            def create(cls, options: dict[str, Any]) -> _RaisingProvider:
+                return cls()
+
+            async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+                raise ProviderError("upstream_auth_failed", "401 from upstream")
+                yield  # pragma: no cover
+
+        store = _StubMessageStore()
+        loop = AgentLoop(
+            provider=_RaisingProvider(),
+            tools={},
+            message_store=store,
+            conversation_id="conv_raise",
+            provider_snapshot="raising",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 1
+        assert store.assistant_messages[0]["content"] == [
+            {"type": "text", "text": "[error] upstream_auth_failed: 401 from upstream"}
+        ]
+
+
+class TestCancellation:
+    async def test_cancellation_persists_partial_and_cancelled_message(self, req: ChatRequest) -> None:
+        class _BlockingProvider(BaseProvider):
+            def __init__(self) -> None:
+                self.config = BaseProviderConfig(name="blocking", model="scripted-1")
+                self.started = asyncio.Event()
+
+            @classmethod
+            def create(cls, options: dict[str, Any]) -> _BlockingProvider:
+                return cls()
+
+            async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+                del req
+                yield ChatEvent.message_start(message_id="m1", model="scripted-1")
+                yield ChatEvent.text_block_start(index=0)
+                yield ChatEvent.text_delta("partial", index=0)
+                self.started.set()
+                await asyncio.Future[None]()
+                yield  # pragma: no cover
+
+        provider = _BlockingProvider()
+        store = _StubMessageStore()
+        loop = AgentLoop(
+            provider=provider,
+            tools={},
+            message_store=store,
+            conversation_id="conv_cancel",
+            provider_snapshot="blocking",
+        )
+
+        async def _consume() -> list[ChatEvent]:
+            return [ev async for ev in loop.stream_chat(req)]
+
+        task = asyncio.create_task(_consume())
+        await provider.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert len(store.assistant_messages) == 2
+        assert store.assistant_messages[0]["content"] == [{"type": "text", "text": "partial"}]
+        assert store.assistant_messages[1]["content"] == [{"type": "text", "text": "[cancelled] interrupted by user"}]
 
 
 class TestProviderContractValidation:
@@ -357,3 +493,27 @@ class TestProviderContractValidation:
         assert events[-1].error_type == "invalid_provider_event"
         assert events[-1].error_message is not None
         assert "content_block_delta" in events[-1].error_message
+
+
+class TestMessagePersistenceBoundary:
+    async def test_persists_via_message_store(self, req: ChatRequest) -> None:
+        store = _StubMessageStore()
+        turns = [
+            _tool_use_turn("toolu_1", "stub", ["{}"]),
+            _text_turn(),
+        ]
+        loop = _make_loop(
+            turns,
+            {"stub": _StubTool("stub")},
+            message_store=store,
+            conversation_id="conv_1",
+            provider_snapshot="scripted",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 2
+        assert store.assistant_messages[0]["conversation_id"] == "conv_1"
+        assert store.assistant_messages[0]["provider_snapshot"] == "scripted"
+        assert len(store.tool_result_messages) == 1
+        assert store.tool_result_messages[0]["content"][0]["type"] == "tool_result"

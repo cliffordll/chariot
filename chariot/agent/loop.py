@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from collections.abc import AsyncIterator
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from chariot.guardrails import GuardrailEngine
     from chariot.guardrails.approval import ApprovalPolicy
     from chariot.providers.base import BaseProvider
-    from chariot.repos.conversation_repo import ConversationRepo
+    from chariot.services.conversation import ConversationMessageStore
     from chariot.tools.base import BaseTool
     from chariot.trace import TurnHandle
 
@@ -34,7 +35,7 @@ class AgentLoop:
         *,
         provider: BaseProvider,
         tools: dict[str, BaseTool],
-        repo: ConversationRepo | None,
+        message_store: ConversationMessageStore | None,
         conversation_id: str | None,
         max_iter: int = _DEFAULT_MAX_ITER,
         turn: TurnHandle | None = None,
@@ -43,7 +44,9 @@ class AgentLoop:
         audit_hooks: AuditHookManager | None = None,
         todo_store: Any | None = None,
         agent_profile: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tools
@@ -54,14 +57,14 @@ class AgentLoop:
             audit_hooks=audit_hooks,
             todo_store=todo_store,
         )
-        self._repo = repo
+        self._message_store = message_store
         self._conversation_id = conversation_id
         self._max_iter = max_iter
         self._turn = turn
         self._agent_profile = agent_profile
-        self._provider_name = (
-            provider_name  # entry name,用于持久化 last_provider  # Phase B1:trace 写入 handle;None = 不记录
-        )
+        self._provider_snapshot = provider_snapshot  # provider 展示快照,用于持久化 last_provider;None = 不记录
+        self._prompt_trace_id = prompt_trace_id
+        self._context_trace_id = context_trace_id
 
     async def stream_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
         current_req = req
@@ -77,8 +80,10 @@ class AgentLoop:
             # Phase B1:provider call trace 配对(turn=None 时退化为 no-op)
             pc_handle = (
                 self._turn.begin_provider_call(
-                    provider_name=self._provider.config.name,
+                    provider_snapshot=self._provider_snapshot or self._provider.config.name,
                     model=self._provider.config.model,
+                    prompt_trace_id=self._prompt_trace_id,
+                    context_trace_id=self._context_trace_id,
                 )
                 if self._turn is not None
                 else None
@@ -98,21 +103,35 @@ class AgentLoop:
                         error_type = event.error_type
                         if pc_handle is not None:
                             await pc_handle.finish(error_type=event.error_type)
+                        await self._persist_assistant(assistant_blocks)
+                        await self._persist_error(event)
                         return
                 validator.ensure_complete()
             except ProviderContractError as e:
                 if pc_handle is not None:
                     await pc_handle.finish(error_type="invalid_provider_event")
-                yield ChatEvent.error_event(
+                err = ChatEvent.error_event(
                     error_type="invalid_provider_event",
                     error_message=str(e),
                 )
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_error(err)
+                yield err
                 return
             except ProviderError as e:
                 if pc_handle is not None:
                     await pc_handle.finish(error_type=e.code)
-                yield ChatEvent.error_event(error_type=e.code, error_message=e.message)
+                err = ChatEvent.error_event(error_type=e.code, error_message=e.message)
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_error(err)
+                yield err
                 return
+            except asyncio.CancelledError:
+                if pc_handle is not None:
+                    await pc_handle.finish(error_type="cancelled")
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_cancelled()
+                raise
 
             # 正常或 stop_reason 结束 → 写 provider call 完成摘要
             if pc_handle is not None and not saw_error:
@@ -197,30 +216,54 @@ class AgentLoop:
         return sr if isinstance(sr, str) else None
 
     async def _persist_assistant(self, assistant_blocks: list[dict[str, Any]]) -> None:
-        if self._repo is None or self._conversation_id is None:
+        if self._message_store is None or self._conversation_id is None:
             return
         if not assistant_blocks:
             return
         content = [entry["block"] for entry in assistant_blocks]
-        await self._repo.append_message(
+        await self._message_store.append_assistant_message(
             self._conversation_id,
-            role="assistant",
             content=content,
-            provider_name=self._provider_name,
+            provider_snapshot=self._provider_snapshot,
             agent_profile=self._agent_profile,
         )
 
     async def _persist_tool_results(self, tool_results: list[ChatEvent]) -> None:
-        if self._repo is None or self._conversation_id is None:
+        if self._message_store is None or self._conversation_id is None:
             return
         if not tool_results:
             return
         content = [self._tool_result_event_to_block(ev) for ev in tool_results]
-        await self._repo.append_message(
+        await self._message_store.append_tool_result_message(
             self._conversation_id,
-            role="user",
             content=content,
         )
+
+    async def _persist_error(self, event: ChatEvent) -> None:
+        if self._message_store is None or self._conversation_id is None:
+            return
+        if event.kind != "error" or event.error_type is None or event.error_message is None:
+            return
+        await self._message_store.append_assistant_message(
+            self._conversation_id,
+            content=[{"type": "text", "text": self._format_error_text(event)}],
+            provider_snapshot=self._provider_snapshot,
+            agent_profile=self._agent_profile,
+        )
+
+    async def _persist_cancelled(self) -> None:
+        if self._message_store is None or self._conversation_id is None:
+            return
+        await self._message_store.append_assistant_message(
+            self._conversation_id,
+            content=[{"type": "text", "text": "[cancelled] interrupted by user"}],
+            provider_snapshot=self._provider_snapshot,
+            agent_profile=self._agent_profile,
+        )
+
+    @staticmethod
+    def _format_error_text(event: ChatEvent) -> str:
+        return f"[error] {event.error_type}: {event.error_message}"
 
     @staticmethod
     def _tool_result_event_to_block(ev: ChatEvent) -> dict[str, Any]:

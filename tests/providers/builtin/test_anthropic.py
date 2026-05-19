@@ -128,7 +128,7 @@ def _make_provider(
 
 def _make_req() -> ChatRequest:
     return ChatRequest(
-        provider_name="anthropic",
+        provider_ref="anthropic",
         messages=[Message(role="user", content="hi")],
     )
 
@@ -466,7 +466,7 @@ class TestBuildBody:
 
     def test_excludes_chariot_extension_fields(self) -> None:
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
             conversation_id="01H...",
             agent_id="agent_main",
@@ -477,7 +477,7 @@ class TestBuildBody:
 
     def test_excludes_none_fields(self) -> None:
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
         )
         body = self._provider()._build_body(req)
@@ -489,7 +489,7 @@ class TestBuildBody:
 
     def test_forces_stream_true(self) -> None:
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
         )
         body = self._provider()._build_body(req)
@@ -497,7 +497,7 @@ class TestBuildBody:
 
     def test_keeps_messages_and_max_tokens(self) -> None:
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
             max_tokens=2048,
         )
@@ -507,7 +507,7 @@ class TestBuildBody:
 
     def test_keeps_explicit_temperature(self) -> None:
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
             temperature=0.5,
         )
@@ -516,18 +516,18 @@ class TestBuildBody:
 
     def test_writes_body_model_from_config_model(self) -> None:
         """body.model 必须从 self.config.model(LLM 真实 id)写入,跟
-        req.provider_name(chariot 路由的 entry name)无关。漏掉这步上游报
+        req.provider_ref(chariot 路由的 entry ref)无关。漏掉这步上游报
         not_found_error。
         """
         req = ChatRequest(
-            provider_name="ollama-qwen",  # chariot entry name
+            provider_ref="ollama-qwen",  # chariot entry ref
             messages=[Message(role="user", content="hi")],
         )
         # _make_provider 默认 config.model="claude-test"
         body = self._provider()._build_body(req)
         assert body["model"] == "claude-test"
-        # provider_name 不进 body
-        assert "provider_name" not in body
+        # provider_ref 不进 body
+        assert "provider_ref" not in body
         assert "ollama-qwen" not in str(body)
 
     def test_per_call_model_override_takes_precedence(self) -> None:
@@ -537,7 +537,7 @@ class TestBuildBody:
         ClientSpec / httpx client(零客户端开销)。
         """
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
             model="claude-haiku-4-5",  # per-call 覆盖
         )
@@ -548,7 +548,7 @@ class TestBuildBody:
     def test_per_call_model_none_falls_back_to_config(self) -> None:
         """`req.model=None`(默认)→ 回退 self.config.model;不写 null。"""
         req = ChatRequest(
-            provider_name="anthropic",
+            provider_ref="anthropic",
             messages=[Message(role="user", content="hi")],
             # model 默认 None
         )

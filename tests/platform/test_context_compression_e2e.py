@@ -41,7 +41,7 @@ async def _seed_long_conversation(sm: async_sessionmaker[AsyncSession], conv_id:
         await repo.create(conv_id)
         for i in range(8):
             await repo.append_message(conv_id, "user", f"u{i} {big}")
-            await repo.append_message(conv_id, "assistant", f"a{i} {big}", provider_name="mock")
+            await repo.append_message(conv_id, "assistant", f"a{i} {big}", provider_snapshot="mock")
 
 
 async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], agent: AIAgent) -> None:
@@ -53,7 +53,7 @@ async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], ag
     async with sm() as session:
         aux_entry = await AuxiliaryRepo(session).get_entry("summarizer")
     assert aux_entry is not None
-    provider = agent.providers[aux_entry.provider_entry]
+    provider = agent.providers[aux_entry.provider_id]
     agent._context_compressor = ContextCompressor(
         AuxiliaryClient(entry=aux_entry, provider=provider),
         threshold=0.1,
@@ -64,13 +64,14 @@ async def _tighten_summarizer_threshold(sm: async_sessionmaker[AsyncSession], ag
 async def test_stateful_run_with_long_history_triggers_compression(
     agent: AIAgent,
 ) -> None:
-    sm = agent.session_maker
+    sm = agent._sessionmaker
+    assert sm is not None
     conv_id = "01CONVLONG"
     await _seed_long_conversation(sm, conv_id)
     await _tighten_summarizer_threshold(sm, agent)
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         conversation_id=conv_id,
         messages=[Message(role="user", content="please answer briefly")],
     )
@@ -93,14 +94,15 @@ async def test_stateful_run_with_long_history_triggers_compression(
 
 async def test_stateful_run_short_history_no_compression(agent: AIAgent) -> None:
     """短对话 → 不触发压缩,trace meta 不含 context_compressed。"""
-    sm = agent.session_maker
+    sm = agent._sessionmaker
+    assert sm is not None
     conv_id = "01CONVSHORT"
     async with sm() as session:
         await ConversationRepo(session).create(conv_id)
         await ConversationRepo(session).append_message(conv_id, "user", "hi")
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         conversation_id=conv_id,
         messages=[Message(role="user", content="hello again")],
     )

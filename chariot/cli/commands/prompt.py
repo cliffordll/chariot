@@ -66,6 +66,7 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         return
     rows = [
         (
+            entry.id,
             entry.name,
             "yes" if entry.is_active else "no",
             str(entry.version_count),
@@ -74,7 +75,7 @@ def _render_bundle_rows(entries: list[Any]) -> None:
         )
         for entry in entries
     ]
-    Renderer.table(["bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
+    Renderer.table(["id", "bundle", "active", "versions", "current", "description"], rows, title="prompt bundles")
 
 
 def _render_layers_table(layers: list[dict[str, Any]]) -> None:
@@ -110,7 +111,7 @@ def _render_trace_rows(entries: list[Any]) -> None:
             entry.bundle_name,
             entry.version,
             entry.conversation_id or "-",
-            entry.provider_name,
+            entry.provider_snapshot,
             entry.model or "-",
             str(entry.prompt_size),
             _fmt_dt(entry.created_at),
@@ -338,7 +339,7 @@ async def _inspect(trace_id: str) -> None:
             "bundle": trace.bundle_name,
             "version": trace.version,
             "conversation_id": trace.conversation_id or "-",
-            "provider": trace.provider_name,
+            "provider": trace.provider_snapshot,
             "model": trace.model or "-",
             "prompt_size": trace.prompt_size,
             "created_at": _fmt_dt(trace.created_at),
@@ -397,6 +398,7 @@ async def _add(name: str, *, description: str, layers: list[str]) -> None:
 @prompt_app.command("update", help="更新 bundle 的说明或 layers，并生成新版本；空层表示不改 layers")
 def update_cmd(
     name: Annotated[str, typer.Argument(help="bundle 名称")],
+    rename: Annotated[str | None, typer.Option("--rename", help="新的 bundle 名称")] = None,
     description: Annotated[
         str,
         typer.Option("--description", "-d", help="新的 bundle 说明"),
@@ -410,12 +412,12 @@ def update_cmd(
         ),
     ] = [],
 ) -> None:
-    asyncio.run(_update(name, description=description, layers=layers))
+    asyncio.run(_update(name, rename=rename, description=description, layers=layers))
 
 
-async def _update(name: str, *, description: str | object, layers: list[str]) -> None:
-    if description is _MISSING and not layers:
-        Renderer.die("至少提供 `--description` 或 `--layer` 之一。")
+async def _update(name: str, *, rename: str | None, description: str | object, layers: list[str]) -> None:
+    if rename is None and description is _MISSING and not layers:
+        Renderer.die("至少提供 `--rename` / `--description` / `--layer` 之一。")
         return
     parsed_layers = _parse_layers(layers) if layers else None
     kwargs: dict[str, Any] = {}
@@ -425,10 +427,15 @@ async def _update(name: str, *, description: str | object, layers: list[str]) ->
         kwargs["layers"] = parsed_layers
     async with installed_runtime() as agent:
         try:
-            entry = await _prompt_repo(agent).update_bundle(name, **kwargs)
+            repo = _prompt_repo(agent)
+            if rename is not None:
+                renamed = await repo.rename_bundle(name, new_name=rename)
+                name = renamed.name
+            entry = await repo.update_bundle(name, **kwargs) if kwargs else await repo.get_active_version(name)
         except ConfigError as exc:
             Renderer.die(f"更新失败: {exc}")
             return
+    assert entry is not None
     Renderer.out(f"~ {entry.bundle_name}:{entry.version}")
 
 

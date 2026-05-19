@@ -24,7 +24,7 @@ async def session_maker(tmp_path: Path):
 
 
 async def _seed_turn(repo: TraceRepo, *, provider: str = "mock", model: str = "mock-1") -> str:
-    turn = await repo.create_turn(provider_name=provider, model=model)
+    turn = await repo.create_turn(provider_snapshot=provider, model=model)
     await repo.finalize_turn(
         turn.id,
         status=TurnStatus.COMPLETED,
@@ -44,7 +44,7 @@ async def test_populate_fills_from_trace(session_maker) -> None:
         turn_id = await _seed_turn(repo)
         await repo.record_provider_call(
             turn_id=turn_id,
-            provider_name="mock",
+            provider_snapshot="mock",
             model="mock-1",
             request_summary={"message_count": 1},
             response_summary={"stop_reason": "end_turn"},
@@ -96,7 +96,7 @@ async def test_populate_multiple_provider_calls_counts_turns(session_maker) -> N
         for _ in range(2):
             await repo.record_provider_call(
                 turn_id=turn_id,
-                provider_name="mock",
+                provider_snapshot="mock",
                 model="mock-1",
                 request_summary={},
                 response_summary={},

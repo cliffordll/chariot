@@ -15,6 +15,30 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class ContextBundleEntry:
+    id: str
+    name: str
+    description: str | None
+    is_active: bool
+    version_count: int
+    active_version: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ContextVersionEntry:
+    id: str
+    bundle_id: str
+    bundle_name: str
+    version: str
+    spec: dict[str, Any]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class ContextSlice:
     name: str
     source: str
@@ -24,19 +48,21 @@ class ContextSlice:
 @dataclass(frozen=True)
 class ContextSnapshot:
     conversation_id: str | None
-    provider_name: str
+    provider_snapshot: str
     model: str | None
     request: dict[str, Any]
     slices: list[ContextSlice]
     source_refs: list[dict[str, Any]]
     context_size: int
+    provider_id: str | None = None
 
 
 @dataclass(frozen=True)
 class ContextSnapshotEntry:
     id: str
     conversation_id: str | None
-    provider_name: str
+    provider_id: str | None
+    provider_snapshot: str
     model: str | None
     request: dict[str, Any]
     slices: list[dict[str, Any]]
@@ -49,8 +75,13 @@ class ContextSnapshotEntry:
 class ContextTraceEntry:
     id: str
     snapshot_id: str
+    bundle_id: str | None
+    bundle_name: str | None
+    version_id: str | None
+    version: str | None
     conversation_id: str | None
-    provider_name: str
+    provider_id: str | None
+    provider_snapshot: str
     model: str | None
     prompt_trace_id: str | None
     policy: dict[str, Any]

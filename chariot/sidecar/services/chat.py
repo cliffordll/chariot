@@ -16,14 +16,18 @@ class ChatService:
 
     async def open_chat(self, params: dict[str, Any]) -> tuple[str, ChatRequest, Any]:
         req = ChatRequestDecoder.parse(params)
+        stream_id = self._optional_str(params, "stream_id") or uuid.uuid4().hex
         base_url = self._optional_str(params, "base_url")
         api_key = self._optional_str(params, "api_key")
         agent = await self._runtime.reserve_chat_agent(
-            req.provider_name,
+            req.provider_ref,
             base_url=base_url,
             api_key=api_key,
         )
-        return uuid.uuid4().hex, req, agent.run_chat(req)
+        return stream_id, req, agent.run_chat(req)
+
+    def cancel_chat(self, stream_id: str) -> bool:
+        return self._runtime.cancel_chat(stream_id)
 
     @staticmethod
     def _optional_str(params: dict[str, Any], key: str) -> str | None:
@@ -60,14 +64,14 @@ class ChatRequestDecoder:
 
     @classmethod
     def parse(cls, params: dict[str, Any]) -> ChatRequest:
-        pn = params.get("provider_name")
+        provider_ref = params.get("provider_ref")
         # 空串视为 null(与前端未选 provider 对齐)
-        if pn == "":
-            pn = None
-        if pn is not None and (not isinstance(pn, str) or not pn):
+        if provider_ref == "":
+            provider_ref = None
+        if provider_ref is not None and (not isinstance(provider_ref, str) or not provider_ref):
             raise RpcError(
                 JsonRpcServer.ERR_INVALID_PARAMS,
-                "'provider_name' must be a non-empty string or null",
+                "'provider_ref' must be a non-empty string or null",
             )
 
         msgs_raw = params.get("messages")
@@ -80,7 +84,7 @@ class ChatRequestDecoder:
 
         messages = [cls._message(m, idx=i) for i, m in enumerate(msgs_list)]
 
-        kwargs: dict[str, Any] = {"provider_name": pn, "messages": messages}
+        kwargs: dict[str, Any] = {"provider_ref": provider_ref, "messages": messages}
         for key in cls._OPTIONAL_FIELDS:
             if key in params:
                 kwargs[key] = params[key]

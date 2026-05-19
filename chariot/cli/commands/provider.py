@@ -1,34 +1,34 @@
-"""`chariot provider <subcmd>` —— Provider entry CRUD + 默认切换。
+"""`chariot provider <subcmd>` —— Provider CRUD + 默认切换。
 
 子命令:list / show / status / use / probe / add / update / delete / copy。
 
 0.6.0 库化版:撤旧 ProxyClient,直接走 ProviderRepo + ProviderProber。
 0.6.0 起 `chariot model` rename 成 `chariot provider`(跟 ProviderRegistry /
-BaseProvider / `providers` 表对齐);v7 起加默认 provider 机制(`is_default` 列)。
+BaseProvider / `providers` 表对齐);0.8.9 起默认 provider 改存 `settings.default_provider_id`。
 
 二级子命令组(typer.Typer 嵌套):
 
 只读:
-- `chariot provider list`:列出 entries(name / type / default 标记)+ 已注册 type
-- `chariot provider show [<name>]`:不带参数 = 当前默认;带参数 = 指定 entry 详情
+- `chariot provider list`:列出 providers(name / slug / type / default 标记)+ 已注册 type
+- `chariot provider show [<ref>]`:不带参数 = 当前默认;带参数 = 指定 provider 详情
   (api_key 本体打码,只显示来源标识)
 - `chariot provider status`:默认 provider + capabilities 概览
-- `chariot provider probe <name>`:发 1 条最小请求验通断(**~1 token 费用**;mock 零费用)
+- `chariot provider probe <ref>`:发 1 条最小请求验通断(**~1 token 费用**;mock 零费用)
 
 切换:
-- `chariot provider use <name>`:把 <name> 设为默认;`chariot chat` 不带 `--provider`
+- `chariot provider use <ref>`:把目标 provider 设为默认;`chariot chat` 不带 `--provider`
   时走它
 
 CRUD:
-- `chariot provider add --name X --type Y -o k=v -o k=v ... [-p k=v]`: ?? entry
-  ?: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b
+- `chariot provider add --name X --type Y -o k=v -o k=v ... [-p k=v]`: 新增 provider
+  例: `chariot provider add --name ollama-qwen --type anthropic -o model=qwen2.5:1.5b
         -o base_url=http://127.0.0.1:52806 -o api_key=EMPTY`
-- `chariot provider update <name> [--type T] [-o k=v] [-p k=v]`: ?? entry
-- `chariot provider delete <name>`: ?? entry
-- `chariot provider rm <name>`: ?? entry ??(??)
-- `chariot provider copy <name> [--as new-name]`: ??(???? _copy_N)
+- `chariot provider update <ref> [--type T] [-o k=v] [-p k=v]`: 更新 provider
+- `chariot provider delete <ref>`: 删除 provider
+- `chariot provider rm <ref>`: `delete` 的兼容别名
+- `chariot provider copy <ref> [--as new-name]`: 复制现有 provider
 
-`-o key=value` / `-p key=value` ????;value ?????????
+`-o key=value` / `-p key=value` 可重复;value 按 bool / 数字 / JSON / 字符串解析。
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from chariot.services.provider import ProviderService
 
 provider_app = typer.Typer(
     name="provider",
-    help="管理 provider entries(0.3.1 起按 entry name 路由)",
+    help="管理 providers(0.8.9 起按 slug / id 路由,兼容 legacy name)",
     no_args_is_help=True,
 )
 
@@ -55,7 +55,7 @@ provider_app = typer.Typer(
 # ---------- list ----------
 
 
-@provider_app.command("list", help="列出 entries(name / type / default 标记)")
+@provider_app.command("list", help="列出 providers(name / slug / type / default 标记)")
 def list_cmd() -> None:
     asyncio.run(_list())
 
@@ -63,30 +63,30 @@ def list_cmd() -> None:
 async def _list() -> None:
     async with installed_runtime() as agent:
         entries, default = await ProviderService(agent).list_with_default()
-    default_name = default.name if default is not None else None
+    default_id = default.id if default is not None else None
 
     if not entries:
-        Renderer.out("(DB 里没有 entry — `chariot provider add` 加一条)")
+        Renderer.out("(DB 里没有 provider — `chariot provider add` 加一条)")
     else:
-        rows = [(e.name, e.type, "*" if e.name == default_name else "", _caps_short(e.type)) for e in entries]
-        Renderer.table(["name", "type", "default", "capabilities"], rows, title="entries")
+        rows = [(e.id, e.name, e.slug, e.type, "*" if e.id == default_id else "", _caps_short(e.type)) for e in entries]
+        Renderer.table(["id", "name", "slug", "type", "default", "capabilities"], rows, title="providers")
 
     types = sorted(ProviderRegistry.known_types())
     Renderer.out(f"已注册 type:{', '.join(types)}")
-    if default_name is None and entries:
+    if default_id is None and entries:
         Renderer.out(
-            "(没有默认 provider — `chariot provider use <name>` 设一个)",
+            "(没有默认 provider — `chariot provider use <ref>` 设一个)",
         )
 
 
 # ---------- show ----------
 
 
-@provider_app.command("show", help="展示 entry 详情(不带参数 = 当前默认)")
+@provider_app.command("show", help="展示 provider 详情(不带参数 = 当前默认)")
 def show_cmd(
     name: Annotated[
         str | None,
-        typer.Argument(help="entry 名;省略 = 显示当前默认 provider"),
+        typer.Argument(help="provider 引用;省略 = 显示当前默认 provider"),
     ] = None,
 ) -> None:
     asyncio.run(_show(name))
@@ -99,20 +99,22 @@ async def _show(name: str | None) -> None:
             entry = await service.get_default()
             if entry is None:
                 Renderer.die(
-                    "没有默认 provider — `chariot provider use <name>` 设一个,"
-                    "或 `chariot provider show <name>` 看具体 entry",
+                    "没有默认 provider — `chariot provider use <ref>` 设一个,"
+                    "或 `chariot provider show <ref>` 看具体 provider",
                 )
                 return
             is_default = True
         else:
             result = await service.show_with_default(name)
             if result is None:
-                Renderer.die(f"未知 entry: {name!r}(`chariot provider list` 看现有 id)")
+                Renderer.die(f"未知 provider: {name!r}(`chariot provider list` 看现有 slug / id)")
                 return
             entry, is_default = result
 
     rows: list[tuple[str, str]] = [
+        ("id", entry.id),
         ("name", entry.name),
+        ("slug", entry.slug),
         ("type", entry.type),
         ("default", "yes" if is_default else "no"),
         ("capabilities", _caps_short(entry.type)),
@@ -138,21 +140,23 @@ async def _status() -> None:
 
     rows = [
         ("provider count", str(len(entries))),
-        ("default provider", default.name if default is not None else "(none)"),
+        ("default provider", f"{default.name} ({default.slug})" if default is not None else "(none)"),
         ("registered types", ", ".join(sorted(ProviderRegistry.known_types()))),
     ]
     Renderer.table(["field", "value"], rows, title="provider status")
     if entries:
         table_rows = [
             (
+                entry.id,
                 entry.name,
+                entry.slug,
                 entry.type,
-                "*" if default is not None and entry.name == default.name else "",
+                "*" if default is not None and entry.id == default.id else "",
                 _caps_short(entry.type),
             )
             for entry in entries
         ]
-        Renderer.table(["name", "type", "default", "capabilities"], table_rows, title="providers")
+        Renderer.table(["id", "name", "slug", "type", "default", "capabilities"], table_rows, title="providers")
 
 
 def _redact(key: str, value: object) -> str:
@@ -187,10 +191,10 @@ def _caps_short(type_name: str) -> str:
 
 @provider_app.command(
     "use",
-    help="把 <name> 设为默认 provider(`chariot chat` 不带 --provider 时用)",
+    help="把 <ref> 设为默认 provider(`chariot chat` 不带 --provider 时用)",
 )
 def use_cmd(
-    name: Annotated[str, typer.Argument(help="要设为默认的 entry 名")],
+    name: Annotated[str, typer.Argument(help="要设为默认的 provider 引用")],
 ) -> None:
     asyncio.run(_use(name))
 
@@ -208,20 +212,20 @@ async def _use(name: str) -> None:
 # ---------- probe ----------
 
 
-@provider_app.command("probe", help="探一下指定 entry 通不通(消耗 ~1 token 费用)")
+@provider_app.command("probe", help="探一下指定 provider 通不通(消耗 ~1 token 费用)")
 def probe_cmd(
-    name: Annotated[str, typer.Argument(help="entry name")],
+    name: Annotated[str, typer.Argument(help="provider 引用")],
     model: Annotated[
         str | None,
-        typer.Option("--model", help="本次覆盖 entry.options.model(LLM 真实 id)"),
+        typer.Option("--model", help="本次覆盖 provider 默认 model(LLM 真实 id)"),
     ] = None,
     base_url: Annotated[
         str | None,
-        typer.Option("--base-url", help="本次覆盖 entry.options.base_url"),
+        typer.Option("--base-url", help="本次覆盖 provider 默认 base_url"),
     ] = None,
     api_key: Annotated[
         str | None,
-        typer.Option("--api-key", help="本次覆盖 entry.options.api_key"),
+        typer.Option("--api-key", help="本次覆盖 provider 默认 api_key"),
     ] = None,
 ) -> None:
     asyncio.run(_probe(name, model=model, base_url=base_url, api_key=api_key))
@@ -316,7 +320,7 @@ def _kv_error_message(label: str, raw: str, *, json_like: bool = False) -> str:
 
 @provider_app.command("add", help="新建 provider entry(写入 DB)")
 def add_cmd(
-    name: Annotated[str, typer.Option("--name", help="entry 名(用户面 ID,需唯一)")],
+    name: Annotated[str, typer.Option("--name", help="展示名;默认 slug 自动生成为 <type>-<name>")],
     type: Annotated[str, typer.Option("--type", help="provider type(mock / anthropic / ...)")],
     options: Annotated[
         list[str] | None,
@@ -360,6 +364,7 @@ async def _add(name: str, type_: str, options: list[str], params: list[str]) -> 
 @provider_app.command("update", help="更新现有 entry(改 type / options / params)")
 def update_cmd(
     name: Annotated[str, typer.Argument(help="要改的 entry 名")],
+    rename: Annotated[str | None, typer.Option("--rename", help="新的 provider 展示名")] = None,
     type: Annotated[
         str | None,
         typer.Option("--type", help="新 type(可选)"),
@@ -381,29 +386,38 @@ def update_cmd(
         ),
     ] = None,
 ) -> None:
-    asyncio.run(_update(name, type, options, params))
+    asyncio.run(_update(name, rename, type, options, params))
 
 
 async def _update(
     name: str,
+    rename: str | None,
     type_: str | None,
     options: list[str] | None,
     params: list[str] | None,
 ) -> None:
-    if type_ is None and options is None and params is None:
-        Renderer.die("至少给一个 --type / -o / -p 选项,否则无事可做")
+    if rename is None and type_ is None and options is None and params is None:
+        Renderer.die("至少给一个 --rename / --type / -o / -p 选项,否则无事可做")
         return
     opts = _parse_kv(options, label="-o") if options is not None else None
     prms = _parse_kv(params, label="-p") if params is not None else None
     async with installed_runtime() as agent:
         try:
-            entry = await ProviderService(agent).update(
-                name,
-                type=type_,
-                options=opts,
-                params=prms,
-            )
+            service = ProviderService(agent)
+            if rename is not None:
+                entry = await service.rename_provider(name, rename)
+                name = entry.id
+            if type_ is not None or opts is not None or prms is not None:
+                entry = await service.update(
+                    name,
+                    type=type_,
+                    options=opts,
+                    params=prms,
+                )
         except ProviderNotFound as e:
+            Renderer.die(f"编辑失败: {e}")
+            return
+        except DuplicateProviderName as e:
             Renderer.die(f"编辑失败: {e}")
             return
         except ConfigError as e:

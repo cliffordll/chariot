@@ -1,6 +1,6 @@
 """`chariot auxiliary <subcmd>` —— Auxiliary client(副 model)管理(B3 wave 2)。
 
-设计:Auxiliary client 是"指向某个现有 provider entry + 独立 model + 独立 params"
+设计:Auxiliary client 是"指向某个现有 provider + 独立 model + 独立 params"
 的 wrapper,给 Context auto-compression 这类"副任务调 LLM"的场景独立路由 + 独立预算。
 
 子命令:list / show / add / update / delete。`-p key=value` 重复进 params dict。
@@ -74,8 +74,10 @@ async def _list() -> None:
     if not entries:
         Renderer.out("(没有 auxiliary client)")
         return
-    rows = [(e.name, e.provider_entry, e.model or "-", json.dumps(e.params, ensure_ascii=False)) for e in entries]
-    Renderer.table(["name", "provider", "model", "params"], rows, title="auxiliary clients")
+    rows = [
+        (e.id or "-", e.name, e.provider_id, e.model or "-", json.dumps(e.params, ensure_ascii=False)) for e in entries
+    ]
+    Renderer.table(["id", "name", "provider_id", "model", "params"], rows, title="auxiliary clients")
 
 
 # ---------- show ----------
@@ -83,7 +85,7 @@ async def _list() -> None:
 
 @auxiliary_app.command("show", help="详情")
 def show_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
 ) -> None:
     asyncio.run(_show(name))
 
@@ -92,10 +94,11 @@ async def _show(name: str) -> None:
     async with installed_runtime() as agent:
         entry = await AuxiliaryService(agent).get_entry(name)
     if entry is None:
-        Renderer.die(f"未知 auxiliary client name: {name!r}")
+        Renderer.die(f"未知 auxiliary client ref: {name!r}")
         return
+    Renderer.out(f"id:             {entry.id or '-'}")
     Renderer.out(f"name:           {entry.name}")
-    Renderer.out(f"provider_entry: {entry.provider_entry}")
+    Renderer.out(f"provider_id:    {entry.provider_id}")
     Renderer.out(f"model:          {entry.model or '(继承 provider)'}")
     Renderer.out(f"params:         {json.dumps(entry.params, ensure_ascii=False)}")
 
@@ -106,7 +109,7 @@ async def _show(name: str) -> None:
 @auxiliary_app.command("add", help="新增 auxiliary client")
 def add_cmd(
     name: Annotated[str, typer.Option("--name", "-n", help="business name (e.g. summarizer)")],
-    provider: Annotated[str, typer.Option("--provider", help="provider entry name")],
+    provider: Annotated[str, typer.Option("--provider", help="provider 引用(优先 slug / id,兼容 legacy name)")],
     model: Annotated[
         str,
         typer.Option("--model", help="LLM model id;留空 = 继承 provider"),
@@ -129,7 +132,7 @@ async def _add(
         try:
             entry = await AuxiliaryService(agent).create(
                 name=name,
-                provider_entry=provider,
+                provider_id=provider,
                 model=model,
                 params=params,
             )
@@ -139,18 +142,18 @@ async def _add(
         except ConfigError as e:
             Renderer.die(str(e))
             return
-    Renderer.out(f"+ {entry.name} → {entry.provider_entry}")
+    Renderer.out(f"+ {entry.name} → {entry.provider_id}")
 
 
 # ---------- update ----------
 
 
-@auxiliary_app.command("update", help="改 provider_entry / model / params")
+@auxiliary_app.command("update", help="改 provider 绑定 / model / params")
 def update_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
     provider: Annotated[
         str,
-        typer.Option("--provider", help="新 provider entry name"),
+        typer.Option("--provider", help="新 provider 引用(优先 slug / id,兼容 legacy name)"),
     ] = "",
     model: Annotated[
         str,
@@ -177,7 +180,7 @@ async def _update(name: str, provider: str, model_arg: str, params_raw: list[str
         try:
             entry = await AuxiliaryService(agent).update(
                 name,
-                provider_entry=provider or None,
+                provider_id=provider or None,
                 model=model,
                 params=params,
             )
@@ -187,7 +190,7 @@ async def _update(name: str, provider: str, model_arg: str, params_raw: list[str
         except ConfigError as e:
             Renderer.die(str(e))
             return
-    Renderer.out(f"~ {entry.name} → {entry.provider_entry}")
+    Renderer.out(f"~ {entry.name} → {entry.provider_id}")
 
 
 # ---------- delete ----------
@@ -196,7 +199,7 @@ async def _update(name: str, provider: str, model_arg: str, params_raw: list[str
 @auxiliary_app.command("delete", help="删除 auxiliary client")
 @auxiliary_app.command("rm", help="`delete` 的兼容别名")
 def delete_cmd(
-    name: Annotated[str, typer.Argument(help="auxiliary client name")],
+    name: Annotated[str, typer.Argument(help="auxiliary client name or id")],
 ) -> None:
     asyncio.run(_delete(name))
 

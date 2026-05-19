@@ -9,7 +9,7 @@
 6. `VERIFIERS[task.verifier_type]()` 判定 → record.verdict / reason
 
 跟 AIAgent 解耦:不直接 import AIAgent,通过 AgentFactory 拿一个能 run_chat /
-拿 session_maker 的对象。这样 CLI 注入真 agent;pytest CI 注入 stub(不调
+拿领域服务的对象。这样 CLI 注入真 agent;pytest CI 注入 stub(不调
 网络)做结构性测试;未来 B6 注入"带 skill 预激活的 agent"做 ablation。
 """
 
@@ -25,7 +25,6 @@ from chariot.agent.chat_request import ChatRequest, Message
 from chariot.eval.cost import TraceCostExtractor
 from chariot.eval.verifiers import VERIFIERS
 from chariot.models.eval import GoldenTask, RunRecord, Verdict, VerifierResult
-from chariot.repos.trace_repo import TraceRepo
 
 if TYPE_CHECKING:
     from chariot.agent.run import AIAgent
@@ -77,16 +76,16 @@ class EvalRunner:
 
         conversation_id = str(ULID())
         req = ChatRequest(
-            provider_name="",  # AIAgent 内部按 active default 路由(stub 也忽略)
+            provider_ref="",  # AIAgent 内部按 active default 路由(stub 也忽略)
             messages=[Message(role="user", content=task.prompt)],
             conversation_id=conversation_id,
             agent_profile=self._agent_profile,
             model=task.model,
             system=task.system,
         )
-        # 真 agent 默认 provider 由 bootstrap 时确定;factory 注入时若不设 provider_name,
+        # 真 agent 默认 provider 由 bootstrap 时确定;factory 注入时若不设 provider_ref,
         # 走 stub 路径 / CLI 把默认填好。这里不强行设防,留给 factory 决定。
-        if not req.provider_name:
+        if not req.provider_ref:
             req = self._fill_default_provider(req, agent)
 
         final_response_buf: list[str] = []
@@ -132,26 +131,27 @@ class EvalRunner:
 
     @staticmethod
     def _fill_default_provider(req: ChatRequest, agent: AIAgent) -> ChatRequest:
-        """req.provider_name 空 → 抓 agent 第一个 provider 当默认(stub 测试场景)。"""
+        """req.provider_ref 空 → 抓 agent 第一个 provider 当默认(stub 测试场景)。"""
         import dataclasses
 
         providers = getattr(agent, "_providers", {})
         if not providers:
             return req
-        return dataclasses.replace(req, provider_name=next(iter(providers)))
+        return dataclasses.replace(req, provider_ref=next(iter(providers)))
 
     @staticmethod
     async def _fill_trace(record: RunRecord, agent: AIAgent, conversation_id: str) -> None:
         """从 trace_turns + trace_tool_calls 反查填 cost / tools。失败静默(eval 仍能跑)。"""
+        from chariot.services.trace import TraceService
+
         try:
-            async with agent.session_maker() as session:
-                repo = TraceRepo(session)
-                turns = await repo.list_turns(conversation_id=conversation_id, limit=1)
-                if not turns:
-                    return
-                await TraceCostExtractor(repo).populate(record, turns[0].id)
+            service = TraceService(agent)
+            turns = await service.list_turns(conversation_id=conversation_id, limit=1)
+            if not turns:
+                return
+            await TraceCostExtractor(service).populate(record, turns[0].id)
         except RuntimeError:
-            # agent 未装载 sessionmaker → no-op,record 保持默认值
+            # agent 未装载 DB runtime → no-op,record 保持默认值
             return
 
     async def run_all(self, tasks: list[GoldenTask]) -> list[RunRecord]:

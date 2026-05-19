@@ -71,7 +71,7 @@ async def test_skill_activated_from_request_field(tmp_path: Path) -> None:
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="hi")],
             skill="code_review",
             tools=[],
@@ -93,7 +93,7 @@ async def test_skill_activated_from_profile_default_when_request_none(tmp_path: 
         profile = AgentProfile(name="x", role="dev", default_skill="debug_helper")
         binding = _AgentBinding(agent_profile=profile)
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
@@ -115,7 +115,7 @@ async def test_request_empty_string_overrides_profile_default(tmp_path: Path) ->
         profile = AgentProfile(name="x", role="dev", default_skill="debug_helper")
         binding = _AgentBinding(agent_profile=profile)
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="hi")],
             skill="",
             tools=[],
@@ -134,7 +134,7 @@ async def test_dangling_skill_name_silent_fallback(tmp_path: Path) -> None:
     AgentRegistry._agents.clear()
     try:
         req = ChatRequest(
-            provider_name="mock",
+            provider_ref="mock",
             messages=[Message(role="user", content="hi")],
             skill="does_not_exist",
             tools=[],

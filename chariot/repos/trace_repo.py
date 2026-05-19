@@ -25,7 +25,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.exceptions import ConfigError
@@ -62,7 +62,8 @@ class TraceRepo:
     async def create_turn(
         self,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_snapshot: str,
         conversation_id: str | None = None,
         agent_profile: str | None = None,
         task_id: str | None = None,
@@ -77,7 +78,8 @@ class TraceRepo:
             agent_profile=agent_profile,
             task_id=task_id,
             task_run_id=task_run_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_snapshot=provider_snapshot,
             model=model,
             prompt_trace_id=prompt_trace_id,
             context_trace_id=context_trace_id,
@@ -158,6 +160,22 @@ class TraceRepo:
             await self.session.commit()
         return cleaned
 
+    async def update_turn_links(
+        self,
+        turn_id: str,
+        *,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
+    ) -> None:
+        row = await self.session.get(TraceTurnRow, turn_id)
+        if row is None:
+            return
+        if prompt_trace_id is not None:
+            row.prompt_trace_id = prompt_trace_id
+        if context_trace_id is not None:
+            row.context_trace_id = context_trace_id
+        await self.session.commit()
+
     # ---- 子事件 ----
 
     async def finalize_provider_call(
@@ -204,8 +222,11 @@ class TraceRepo:
         self,
         turn_id: str,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_snapshot: str,
         model: str | None = None,
+        prompt_trace_id: str | None = None,
+        context_trace_id: str | None = None,
         log_id: str | None = None,
         request_summary: dict[str, Any] | None = None,
         response_summary: dict[str, Any] | None = None,
@@ -216,8 +237,11 @@ class TraceRepo:
     ) -> TraceProviderCall:
         row = TraceProviderCallRow(
             turn_id=turn_id,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_snapshot=provider_snapshot,
             model=model,
+            prompt_trace_id=prompt_trace_id,
+            context_trace_id=context_trace_id,
             log_id=log_id,
             request_summary=self._serialize_json("request_summary", request_summary or {}),
             response_summary=self._serialize_json("response_summary", response_summary or {}),
@@ -292,7 +316,7 @@ class TraceRepo:
         *,
         conversation_id: str | None = None,
         task_id: str | None = None,
-        provider_name: str | None = None,
+        provider_snapshot: str | None = None,
         status: TurnStatus | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -302,13 +326,21 @@ class TraceRepo:
             stmt = stmt.where(TraceTurnRow.conversation_id == conversation_id)
         if task_id is not None:
             stmt = stmt.where(TraceTurnRow.task_id == task_id)
-        if provider_name is not None:
-            stmt = stmt.where(TraceTurnRow.provider_name == provider_name)
+        if provider_snapshot is not None:
+            stmt = stmt.where(TraceTurnRow.provider_snapshot == provider_snapshot)
         if status is not None:
             stmt = stmt.where(TraceTurnRow.status == status.value)
         stmt = stmt.limit(limit).offset(offset)
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self._turn_row_to_entry(row) for row in rows]
+        counts = await self._list_turn_call_counts([row.id for row in rows])
+        return [
+            self._turn_row_to_entry(
+                row,
+                provider_calls_count=counts.get(row.id, {}).get("provider_calls_count", 0),
+                tool_calls_count=counts.get(row.id, {}).get("tool_calls_count", 0),
+            )
+            for row in rows
+        ]
 
     async def list_provider_calls(self, turn_id: str) -> list[TraceProviderCall]:
         stmt = (
@@ -351,6 +383,22 @@ class TraceRepo:
             checkpoints=tuple(checkpoints),
         )
 
+    async def get_turn_ordinal(self, turn_id: str) -> tuple[int, int] | None:
+        row = await self.session.get(TraceTurnRow, turn_id)
+        if row is None or row.conversation_id is None:
+            return None
+        total_stmt = select(func.count()).where(TraceTurnRow.conversation_id == row.conversation_id)
+        ordinal_stmt = select(func.count()).where(
+            TraceTurnRow.conversation_id == row.conversation_id,
+            or_(
+                TraceTurnRow.started_at < row.started_at,
+                and_(TraceTurnRow.started_at == row.started_at, TraceTurnRow.id <= row.id),
+            ),
+        )
+        total = int((await self.session.execute(total_stmt)).scalar_one())
+        ordinal = int((await self.session.execute(ordinal_stmt)).scalar_one())
+        return ordinal, total
+
     # ---- 内部 ----
 
     async def _require_turn(self, turn_id: str) -> TraceTurnRow:
@@ -388,15 +436,44 @@ class TraceRepo:
             raise ConfigError(f"trace {label} JSON 顶层必须是 object")
         return cast(dict[str, Any], data)
 
+    async def _list_turn_call_counts(self, turn_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not turn_ids:
+            return {}
+        provider_stmt = (
+            select(TraceProviderCallRow.turn_id, func.count().label("count"))
+            .where(TraceProviderCallRow.turn_id.in_(turn_ids))
+            .group_by(TraceProviderCallRow.turn_id)
+        )
+        tool_stmt = (
+            select(TraceToolCallRow.turn_id, func.count().label("count"))
+            .where(TraceToolCallRow.turn_id.in_(turn_ids))
+            .group_by(TraceToolCallRow.turn_id)
+        )
+        provider_rows = (await self.session.execute(provider_stmt)).all()
+        tool_rows = (await self.session.execute(tool_stmt)).all()
+        counts: dict[str, dict[str, int]] = {turn_id: {} for turn_id in turn_ids}
+        for turn_id, count in provider_rows:
+            counts[turn_id]["provider_calls_count"] = int(count)
+        for turn_id, count in tool_rows:
+            counts[turn_id]["tool_calls_count"] = int(count)
+        return counts
+
     @classmethod
-    def _turn_row_to_entry(cls, row: TraceTurnRow) -> TraceTurn:
+    def _turn_row_to_entry(
+        cls,
+        row: TraceTurnRow,
+        *,
+        provider_calls_count: int = 0,
+        tool_calls_count: int = 0,
+    ) -> TraceTurn:
         return TraceTurn(
             id=row.id,
             conversation_id=row.conversation_id,
             agent_profile=row.agent_profile,
             task_id=row.task_id,
             task_run_id=row.task_run_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_snapshot=row.provider_snapshot,
             model=row.model,
             prompt_trace_id=row.prompt_trace_id,
             context_trace_id=row.context_trace_id,
@@ -414,6 +491,8 @@ class TraceRepo:
             duration_ms=row.duration_ms,
             started_at=row.started_at,
             finished_at=row.finished_at,
+            provider_calls_count=provider_calls_count,
+            tool_calls_count=tool_calls_count,
             meta=cls._deserialize_dict("meta", row.meta),
         )
 
@@ -422,8 +501,11 @@ class TraceRepo:
         return TraceProviderCall(
             id=row.id,
             turn_id=row.turn_id,
-            provider_name=row.provider_name,
+            provider_id=row.provider_id,
+            provider_snapshot=row.provider_snapshot,
             model=row.model,
+            prompt_trace_id=row.prompt_trace_id,
+            context_trace_id=row.context_trace_id,
             log_id=row.log_id,
             request_summary=cls._deserialize_dict("request_summary", row.request_summary),
             response_summary=cls._deserialize_dict("response_summary", row.response_summary),

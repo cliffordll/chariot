@@ -4,7 +4,8 @@
 `agent.run_chat(req)`,不再起独立 server。
 
 flags:
-- `--provider <name>`(可选):本次会话用的 provider entry。不传 = 走 DB 默认
+- `--provider <ref>`(可选):本次会话用的 provider 引用(优先 slug / id,兼容 legacy
+  name)。不传 = 走 DB 默认
   (`chariot provider use <name>` 设置)。两者都没 → die 提示设默认或加 --provider
 - `--conversation <id|new>`(主名) / `--convo <id|new>`(兼容别名):走 stateful path;
   `new` → CLI 生成 ULID 并打印;ULID 字面量 → 接续该会话;不传 → stateless
@@ -39,7 +40,7 @@ def chat_cmd(
         str | None,
         typer.Option(
             "--provider",
-            help="本次会话用的 provider entry name;不传走 DB 默认",
+            help="本次会话用的 provider 引用(优先 slug / id,兼容 legacy name);不传走 DB 默认",
         ),
     ] = None,
     conversation: Annotated[
@@ -59,8 +60,10 @@ def chat_cmd(
         typer.Option(
             "--agent",
             help=(
-                "agent_profile name;非空时 AIAgent 解析后用其 binding:"
-                "provider_profile 覆盖 --provider、prompt_bundle 决定 prompt、tool_profile 做 toolset filter。"
+                "agent_profile id;非空时 AIAgent 解析后用其 binding:"
+                "provider_id 覆盖 --provider、"
+                "prompt_id 决定 prompt、"
+                "toolset_id 做 toolset filter。"
             ),
         ),
     ] = None,
@@ -137,11 +140,11 @@ async def _run(
     # Phase 1:installed_runtime 装载 AIAgent(per-session AgentRegistry)+ 跑命令
     try:
         async with installed_runtime() as agent:
-            provider_name = provider or await _resolve_provider_name(agent)
+            provider_ref = provider or await _resolve_provider_ref(agent)
             resolved_agent = agent_profile or restored_agent
             ctx = ChatContext(
                 agent=agent,
-                provider_name=provider_name,
+                provider_ref=provider_ref,
                 conversation_id=conversation_id,
                 agent_profile=resolved_agent,
                 reflection_enabled=reflection_enabled,
@@ -176,15 +179,20 @@ async def _restore_conversation_config(conversation_id: str | None) -> str | Non
         conv = await ConversationService(sm).get(conversation_id)
     if conv is None:
         return None
-    return conv.agent_profile
+    if conv.agent_profile is None:
+        return None
+    from chariot.services.agent import AgentService
+
+    entry = await AgentService(sm).get_agent(conv.agent_profile)
+    return entry.id if entry is not None else conv.agent_profile
 
 
-async def _resolve_provider_name(agent: object) -> str | None:
+async def _resolve_provider_ref(agent: object) -> str | None:
     """返回 CLI 默认 provider;没有默认时保持 None。"""
     from chariot.services.provider import ProviderService
 
     default = await ProviderService(agent).get_default()
-    return default.name if default is not None else None
+    return default.slug if default is not None else None
 
 
 def register(app: typer.Typer) -> None:

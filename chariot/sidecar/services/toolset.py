@@ -47,11 +47,15 @@ class ToolsetApi:
         self,
         *,
         name: str,
+        rename: str | None = None,
         description: str | None = None,
         members: list[str] | None = None,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         service = ToolsetService(self._runtime)
+        if rename is not None:
+            entry = await service.rename(name, rename)
+            name = entry.id or entry.name
         entry = await service.update(
             name,
             description=description,
@@ -78,6 +82,7 @@ class ToolsetApi:
     @staticmethod
     def serialize(entry: Toolset) -> dict[str, Any]:
         return {
+            "id": entry.id,
             "name": entry.name,
             "description": entry.description,
             "members": list(entry.members),

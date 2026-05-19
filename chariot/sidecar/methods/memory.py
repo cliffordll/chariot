@@ -19,7 +19,7 @@ class MemoryMethods(MethodBase):
         del ctx
         kind = self._optional_str(params, "kind")
         conversation_id = self._optional_str(params, "conversation_id")
-        provider_name = self._optional_str(params, "provider_name")
+        provider_snapshot = self._optional_str(params, "provider_snapshot")
         tag = self._optional_str(params, "tag")
         search = self._optional_str(params, "search")
         pinned = self._optional_bool(params, "pinned")
@@ -32,7 +32,7 @@ class MemoryMethods(MethodBase):
                 pinned=pinned,
                 archived=archived,
                 conversation_id=conversation_id,
-                provider_name=provider_name,
+                provider_snapshot=provider_snapshot,
                 tag=tag,
                 search=search,
                 limit=limit,
@@ -169,6 +169,21 @@ class MemoryMethods(MethodBase):
             entries = await self._service.search_entries(query=query)
         return {"entries": entries}
 
+    async def relevant(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        conversation_id = self._optional_str(params, "conversation_id")
+        provider_snapshot = self._optional_str(params, "provider_snapshot")
+        tags = self._optional_list_of_str(params, "tags")
+        limit = int(params.get("limit", 8))
+        async with self._rpc_errors():
+            entries = await self._service.list_relevant_entries(
+                conversation_id=conversation_id,
+                provider_snapshot=provider_snapshot,
+                tags=tags,
+                limit=limit,
+            )
+        return {"entries": entries}
+
     @staticmethod
     def _optional_bool(params: dict[str, Any], key: str) -> bool | None:
         val = params.get(key)
@@ -189,5 +204,19 @@ class MemoryMethods(MethodBase):
         for idx, item in enumerate(val):
             if not isinstance(item, dict):
                 raise TypeError(f"{key}[{idx}] must be an object")
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _optional_list_of_str(params: dict[str, Any], key: str) -> list[str] | None:
+        val = params.get(key)
+        if val is None:
+            return None
+        if not isinstance(val, list):
+            raise TypeError(f"{key} must be a list or null")
+        out: list[str] = []
+        for idx, item in enumerate(val):
+            if not isinstance(item, str):
+                raise TypeError(f"{key}[{idx}] must be a string")
             out.append(item)
         return out

@@ -45,6 +45,7 @@ async def _list() -> None:
 
     rows = [
         (
+            str(e.id),
             e.name,
             e.type,
             e.source,
@@ -53,12 +54,12 @@ async def _list() -> None:
         )
         for e in entries
     ]
-    Renderer.table(["name", "type", "source", "enabled", "description"], rows, title="tools")
+    Renderer.table(["id", "name", "type", "source", "enabled", "description"], rows, title="tools")
 
 
 @tool_app.command("show", help="查看工具配置和 schema")
 def show_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
 ) -> None:
     asyncio.run(_show(name))
 
@@ -71,6 +72,7 @@ async def _show(name: str) -> None:
         return
 
     rows: list[tuple[str, str]] = [
+        ("id", str(entry.id)),
         ("name", entry.name),
         ("type", entry.type),
         ("enabled", "yes" if entry.enabled else "no"),
@@ -90,7 +92,7 @@ async def _show(name: str) -> None:
 
 @tool_app.command("probe", help="验证工具当前配置")
 def probe_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
 ) -> None:
     asyncio.run(_probe(name))
 
@@ -117,14 +119,14 @@ async def _probe(name: str) -> None:
 
 @tool_app.command("enable", help="启用工具")
 def enable_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
 ) -> None:
     asyncio.run(_set_enabled(name, True))
 
 
 @tool_app.command("disable", help="禁用工具")
 def disable_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
 ) -> None:
     asyncio.run(_set_enabled(name, False))
 
@@ -211,7 +213,7 @@ def _kv_error_message(raw: str, *, json_like: bool = False) -> str:
 
 @tool_app.command("config", help="Overwrite tool options")
 def config_cmd(
-    name: Annotated[str, typer.Argument(help="tool name")],
+    name: Annotated[str, typer.Argument(help="tool name or id")],
     options: Annotated[
         list[str] | None,
         typer.Option("-o", "--option", help="options key=value; repeatable"),
@@ -356,7 +358,7 @@ async def _create(
 
 @tool_app.command("update", help="更新自定义工具 (0.8.7)")
 def update_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
     description: Annotated[
         str | None,
         typer.Option("--description", "-d", help="新描述"),
@@ -438,7 +440,7 @@ async def _update(
 
 @tool_app.command("delete", help="删除自定义工具 (0.8.7)")
 def delete_cmd(
-    name: Annotated[str, typer.Argument(help="工具名")],
+    name: Annotated[str, typer.Argument(help="工具名或 id")],
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="跳过确认提示"),

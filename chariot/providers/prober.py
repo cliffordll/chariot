@@ -80,7 +80,7 @@ class ProviderProber:
             )
 
         req = ChatRequest(
-            provider_name=entry.name,
+            provider_ref=entry.slug,
             messages=[Message(role="user", content=cls._PROBE_PROMPT)],
             max_tokens=cls._PROBE_MAX_TOKENS,
         )

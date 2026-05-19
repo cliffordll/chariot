@@ -89,13 +89,13 @@ class CriticAgent:
         providers: dict[str, BaseProvider],
     ) -> CriticAgent | None:
         """扫 `aux_entries` 找 `name='critic'` 行,装好 CriticAgent 返回;
-        找不到 / dangling provider_entry 返 None(AIAgent.bootstrap 跳过装载)。"""
+        找不到 / dangling provider_id 返 None(AIAgent.bootstrap 跳过装载)。"""
         from chariot.agent.auxiliary_client import AuxiliaryClient
 
         for entry in aux_entries:
             if entry.name != CRITIC_AUX_NAME:
                 continue
-            provider = providers.get(entry.provider_entry)
+            provider = providers.get(entry.provider_id)
             if provider is None:
                 return None  # dangling reference
             return cls(AuxiliaryClient(entry=entry, provider=provider))

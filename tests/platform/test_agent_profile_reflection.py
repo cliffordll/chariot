@@ -15,6 +15,7 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db, init_db
 from chariot.repos.task_repo import TaskRepo
+from chariot.services.agent import AgentService
 
 
 @pytest_asyncio.fixture
@@ -96,23 +97,22 @@ async def agent(tmp_path: Path) -> AsyncIterator[AIAgent]:
 
 
 async def test_apply_profile_reflection_no_agent_profile_keeps_req(agent: AIAgent) -> None:
-    req = ChatRequest(provider_name="mock", messages=[Message(role="user", content="x")])
+    req = ChatRequest(provider_ref="mock", messages=[Message(role="user", content="x")])
     out = await agent._apply_profile_reflection(req)
     assert out.reflection_enabled is False  # no profile, no change
 
 
 async def test_apply_profile_reflection_with_enabled_profile(agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="alpha",
-            role="dev",
-            reflection_enabled=True,
-            reflection_max_retries=5,
-        )
+    entry = await AgentService(agent).create_agent(
+        name="alpha",
+        role="dev",
+        reflection_enabled=True,
+        reflection_max_retries=5,
+    )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
-        agent_profile="alpha",
+        agent_profile=entry.id,
     )
     out = await agent._apply_profile_reflection(req)
     assert out.reflection_enabled is True
@@ -120,16 +120,15 @@ async def test_apply_profile_reflection_with_enabled_profile(agent: AIAgent) -> 
 
 
 async def test_apply_profile_reflection_disabled_profile_no_op(agent: AIAgent) -> None:
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="beta",
-            role="dev",
-            reflection_enabled=False,
-        )
+    entry = await AgentService(agent).create_agent(
+        name="beta",
+        role="dev",
+        reflection_enabled=False,
+    )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
-        agent_profile="beta",
+        agent_profile=entry.id,
     )
     out = await agent._apply_profile_reflection(req)
     assert out.reflection_enabled is False
@@ -137,16 +136,15 @@ async def test_apply_profile_reflection_disabled_profile_no_op(agent: AIAgent) -
 
 async def test_apply_profile_reflection_req_explicit_overrides_profile(agent: AIAgent) -> None:
     """req.reflection_enabled=True 已显式 → 不被 profile 覆盖(尊重显式 flag)。"""
-    async with agent.session_maker() as session:
-        await TaskRepo(session).create_agent_profile(
-            name="gamma",
-            role="dev",
-            reflection_enabled=False,  # profile 关
-        )
+    entry = await AgentService(agent).create_agent(
+        name="gamma",
+        role="dev",
+        reflection_enabled=False,  # profile 关
+    )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="x")],
-        agent_profile="gamma",
+        agent_profile=entry.id,
         reflection_enabled=True,  # req 显式开
         reflection_max_retries=9,
     )

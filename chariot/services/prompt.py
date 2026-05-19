@@ -31,6 +31,17 @@ class PromptService:
     async def get_active_bundle(self) -> PromptBundleEntry | None:
         return await self._repo.get_active_bundle()
 
+    async def resolve_bundle(
+        self,
+        *,
+        bundle_name: str | None = None,
+    ) -> PromptBundleEntry | None:
+        if bundle_name is not None:
+            bundle = await self._repo.get_bundle(bundle_name)
+            if bundle is not None:
+                return bundle
+        return await self._repo.get_active_bundle()
+
     async def get_active_version(self, bundle_name: str | None = None) -> PromptVersionEntry | None:
         return await self._repo.get_active_version(bundle_name)
 
@@ -85,6 +96,9 @@ class PromptService:
             kwargs["layers"] = layers
         return await self._repo.update_bundle(name, **kwargs)
 
+    async def rename_bundle(self, name: str, new_name: str) -> PromptBundleEntry:
+        return await self._repo.rename_bundle(name, new_name=new_name)
+
     async def activate_bundle(self, name: str) -> PromptBundleEntry:
         return await self._repo.activate_bundle(name)
 
@@ -95,7 +109,8 @@ class PromptService:
         self,
         req: ChatRequest,
         *,
-        provider_name: str,
+        provider_id: str | None = None,
+        provider_snapshot: str,
         model: str | None,
         bundle_name: str | None = None,
         version: str | None = None,
@@ -104,7 +119,8 @@ class PromptService:
     ) -> PromptTraceEntry:
         return await self._repo.record_trace(
             req,
-            provider_name=provider_name,
+            provider_id=provider_id,
+            provider_snapshot=provider_snapshot,
             model=model,
             bundle_name=bundle_name,
             version=version,

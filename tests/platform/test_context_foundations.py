@@ -13,7 +13,7 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.context.composer import ContextComposer
 from chariot.database.session import dispose_db
-from chariot.repos.context_repo import ContextRepo
+from chariot.services.context import ContextService
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -33,7 +33,7 @@ async def agent(tmp_path: Path) -> AIAgent:
 
 def _stateful_req(conversation_id: str) -> ChatRequest:
     return ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hello")],
         conversation_id=conversation_id,
     )
@@ -44,21 +44,20 @@ async def test_context_repo_records_snapshot_and_trace(agent: AIAgent) -> None:
     conversation_id = "01H00000000000000000000000"
     req = _stateful_req(conversation_id)
 
-    async with agent.session_maker() as session:
-        repo = ContextRepo(session)
-        snapshot = ContextComposer.build_snapshot(
-            req,
-            provider_name="mock",
-            model="mock-1",
-            history=[{"role": "user", "content": "hello"}],
-            provider_capabilities={"supports_system": False},
-        )
-        recorded = await repo.record_snapshot(snapshot)
-        trace = await repo.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
+    service = ContextService(agent)
+    snapshot = ContextComposer.build_snapshot(
+        req,
+        provider_snapshot="mock",
+        model="mock-1",
+        history=[{"role": "user", "content": "hello"}],
+        provider_capabilities={"supports_system": False},
+    )
+    recorded = await service.record_snapshot(snapshot)
+    trace = await service.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
 
-        listed_snapshots = await repo.list_snapshots()
-        listed_traces = await repo.list_traces()
-        inspected = await repo.inspect_context(recorded.id)
+    listed_snapshots = await service.list_snapshots()
+    listed_traces = await service.list_traces()
+    inspected = await service.inspect_context(recorded.id)
 
     assert len(listed_snapshots) == 1
     assert len(listed_traces) == 1
@@ -77,10 +76,9 @@ async def test_stateful_chat_writes_context_records(agent: AIAgent) -> None:
     async for _event in agent.run_chat(req):
         pass
 
-    async with agent.session_maker() as session:
-        repo = ContextRepo(session)
-        snapshots = await repo.list_snapshots()
-        traces = await repo.list_traces()
+    service = ContextService(agent)
+    snapshots = await service.list_snapshots()
+    traces = await service.list_traces()
 
     assert len(snapshots) == 1
     assert len(traces) == 1

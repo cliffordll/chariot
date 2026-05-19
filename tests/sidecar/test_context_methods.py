@@ -16,8 +16,8 @@ from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.context.composer import ContextComposer
 from chariot.database.session import dispose_db
-from chariot.repos.context_repo import ContextRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.context import ContextService
 from chariot.sidecar.methods import register_methods
 
 
@@ -77,26 +77,31 @@ def server(agent: AIAgent, tmp_path: Path) -> JsonRpcServer:
 async def test_list_and_inspect_context_methods(server: JsonRpcServer, agent: AIAgent) -> None:
     conversation_id = "01H00000000000000000000000"
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="hello")],
         conversation_id=conversation_id,
     )
 
-    async with agent.session_maker() as session:
-        repo = ContextRepo(session)
-        snapshot = ContextComposer.build_snapshot(
-            req,
-            provider_name="mock",
-            model="mock-1",
-            history=[{"role": "user", "content": "hello"}],
-            provider_capabilities={"supports_system": False},
-        )
-        recorded = await repo.record_snapshot(snapshot)
-        await repo.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
+    service = ContextService(agent)
+    snapshot = ContextComposer.build_snapshot(
+        req,
+        provider_snapshot="mock",
+        model="mock-1",
+        history=[{"role": "user", "content": "hello"}],
+        provider_capabilities={"supports_system": False},
+    )
+    recorded = await service.record_snapshot(snapshot)
+    await service.record_trace(recorded.id, prompt_trace_id="prompt_trace_01")
 
     listed = await _call(server, "list_context_snapshots")
     assert listed["result"]["snapshots"][0]["id"] == recorded.id
+    assert listed["result"]["snapshots"][0]["provider_snapshot"] == "mock"
+    assert "provider_snapshot" in listed["result"]["snapshots"][0]
 
     inspected = await _call(server, "inspect_context", {"context_id": recorded.id})
     assert inspected["result"]["snapshot"]["id"] == recorded.id
     assert inspected["result"]["trace"]["snapshot_id"] == recorded.id
+    assert inspected["result"]["snapshot"]["provider_snapshot"] == "mock"
+    assert inspected["result"]["trace"]["provider_snapshot"] == "mock"
+    assert "provider_snapshot" in inspected["result"]["snapshot"]
+    assert "provider_snapshot" in inspected["result"]["trace"]

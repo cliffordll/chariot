@@ -4,15 +4,15 @@
 - **结构**(`messages.content`、tool_use / tool_result block 嵌套形式、role 词表)
   跟 Claude Messages API request body 1:1
 - 字段类型 / 默认值都对齐 Claude
-- 命名上有一处偏离:**chariot 用 `provider_name` 字段做路由 key**(对应 DB
-  `providers` 表的 entry name;CLI flag 是 `--provider`,IR / 内部参数用
-  `provider_name`,长名避免跟 wire 字段歧义);Claude wire 字段名是 `model`
+- 命名上有一处偏离:**chariot 用 `provider_ref` 字段做路由 key**(0.8.9 起
+  承载 provider ref:优先 slug / id;CLI flag 是 `--provider`);
+  Claude wire 字段名是 `model`
   (LLM id),由 AnthropicProvider 在 `_build_body` 里写死 `body["model"]
   = self.config.model`
-- Provider 内部都得做 entry name → wire 字段的最后一跳翻译,这步不可省
+- Provider 内部都得做 provider 路由引用 → wire 字段的最后一跳翻译,这步不可省
 
 关于 chariot 扩展字段:
-- `provider_name`:必填,路由 key(从 `--provider` flag 或 DB 默认 entry 来)
+- `provider_ref`:必填,路由 key(从 `--provider` flag 或 DB 默认 provider 来)
 - `conversation_id`:0.4.0 起 stateful 多轮触发(0.6.0 起从
   `X-Chariot-Conversation` header 升级到顶层字段)
 - `agent_id`:0.9.0+ 多 AIAgent 实例路由;0.6.0 默认 `None`,字段先占位
@@ -23,7 +23,7 @@
 - `anthropic_version` / `anthropic_beta`:HTTP header 级,Provider 内部处理
 
 `model` 字段(0.6.5+):
-- chariot IR 主路由 key 是 `provider_name`(对应 DB entry name);wire body
+- chariot IR 主路由 key 是 `provider_ref`(对应 provider ref);wire body
   里仍要写 `model`,Provider 内部从 `req.model or self.config.model` 决定
 - per-call 用法:`req.model = "claude-haiku-4-5"` → AnthropicProvider 把它写进
   body["model"];默认 None = 用 entry.options.model(实例化时落到 self.config.model)
@@ -88,30 +88,30 @@ class ToolSchema:
 @dataclass(frozen=True)
 class ChatRequest:
     """AIAgent 主入口的输入 —— 结构跟 Claude Messages API request body 对齐;
-    路由字段命名按 chariot 自己的语义(`provider_name` 而非 wire 字段名 `model`)。
+    路由字段命名按 chariot 自己的语义(`provider_ref` 而非 wire 字段名 `model`)。
 
     15 字段平铺:12 个跟 Claude API 同名同义(含 0.6.5+ 加回的 `model`),
-    3 个 chariot 扩展(provider_name / conversation_id / agent_id)。顺序按 Claude
+    3 个 chariot 扩展(provider_ref / conversation_id / agent_id)。顺序按 Claude
     官方 spec(model / messages / max_tokens / system / tools / tool_choice /
-    各 sampling / metadata / thinking)+ chariot 扩展放最后(`provider_name`
+    各 sampling / metadata / thinking)+ chariot 扩展放最后(`provider_ref`
     必填字段排最前)。
 
-    `provider_name` 字段是 chariot 的路由 key:对应 DB `providers` 表里的 entry
-    name(如 `claude` / `mock` / `ollama-qwen`),由 AIAgent 路由到对应
+    `provider_ref` 字段是 chariot 的路由 key:0.8.9 起承载 provider ref
+    (优先 slug / id),由 AIAgent 路由到对应
     `BaseProvider` 实例。`model`(0.6.5+,可选)是 per-call LLM id 覆盖;
     Provider 内部按 `req.model or self.config.model` 决定 wire body["model"]。
-    **`req.provider_name`(路由 key)≠ `req.model`(wire LLM id)**。
+    **`req.provider_ref`(路由 key)≠ `req.model`(wire LLM id)**。
 
     命名约定:CLI flag 用短名 `--provider` / `--model`(贴近用户)、IR / 内部
-    参数传递用 `provider_name` / `model`。
+    参数传递用 `provider_ref` / `model`。
 
     `messages` 是必填(Claude API 要求);其它字段都有合理默认。
     """
 
     # ─── Claude Messages API 字段(顺序按官方 spec) ───
     messages: list[Message]
-    provider_name: str | None = None  # entry name(chariot 内部当 Provider 路由 key);None = 未指定
-    model: str | None = None  # 0.6.5+ per-call LLM id 覆盖;None = 用 entry.options.model
+    provider_ref: str | None = None  # provider ref(优先 slug / id);None = 未指定
+    model: str | None = None  # 0.6.5+ per-call LLM id 覆盖;None = 用 provider 默认 model
     max_tokens: int = 4096
     system: str | list[SystemBlock] | None = None
     tools: list[ToolSchema] | None = None  # None = 沿用 enabled tools 注入;[] = 关闭工具调用
@@ -128,9 +128,9 @@ class ChatRequest:
     agent_id: str | None = None  # 0.9.0+ 多 AIAgent 实例;0.6.0 默认 None
     agent_profile: str | None = None
     """0.7.2-tool+ AgentProfile name 引用;非 None 时 AIAgent 解析后:
-    - profile.provider_profile 覆盖 req.provider_name
-    - profile.prompt_bundle 决定 prompt 注入(取代 get_active_bundle 兜底)
-    - profile.tool_profile 决定 toolset filter(取代全量挂载 tools)
+    - profile.provider_id 覆盖 req.provider_ref
+    - profile.prompt_id 决定 prompt 注入(取代 get_active_bundle 兜底)
+    - profile.toolset_id 决定 toolset filter(取代全量挂载 tools)
     dangling reference(profile name 不存在)走 fallback,不阻断 task。
     """
 
@@ -148,7 +148,7 @@ class ChatRequest:
     通过 `SkillActivator` 把 `<skill>` 块拼进 system + 按 manifest.allowed_tools /
     forbidden_tools 过滤工具列表。
 
-    - None(常态):走 prompt bundle + 全量工具(或 agent_profile.tool_profile 过滤)
+    - None(常态):走 prompt bundle + 全量工具(或 agent_profile.toolset_id 过滤)
     - agent_profile.default_skill 非空且本字段为 None → AIAgent 透传 profile 字段
     - dangling reference(skill name 不存在 / disabled)走 fallback,不阻断
 

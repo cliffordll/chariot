@@ -28,9 +28,9 @@ import pytest_asyncio
 from chariot.agent.registry import AgentRegistry
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db
-from chariot.repos.conversation_repo import ConversationRepo
-from chariot.repos.log_repo import LogRepo
 from chariot.rpc.jsonrpc import JsonRpcServer
+from chariot.services.conversation import ConversationService
+from chariot.services.log import LogService
 from chariot.sidecar.methods import register_methods
 
 # ---------------------------------------------------------------------------
@@ -120,20 +120,18 @@ class TestConversationMethods:
 
     async def test_list_conversations_returns_seeded(self, server: JsonRpcServer, agent: AIAgent) -> None:
         """_________?repo ___________________?2 _?conversation,_________?RPC list _____________?"""
-        async with agent.session_maker() as session:
-            repo = ConversationRepo(session)
-            await repo.create("01H_TEST_A", title="first")
-            await repo.create("01H_TEST_B", title="second")
+        service = ConversationService(agent)
+        await service.create("01H_TEST_A", title="first")
+        await service.create("01H_TEST_B", title="second")
 
         line = await _call(server, "list_conversations")
         ids = sorted(c["id"] for c in line["result"]["conversations"])
         assert ids == ["01H_TEST_A", "01H_TEST_B"]
 
     async def test_get_conversation_returns_messages(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = ConversationRepo(session)
-            await repo.create("01H_C", title="t")
-            await repo.append_message("01H_C", role="user", content="hi")
+        service = ConversationService(agent)
+        await service.create("01H_C", title="t")
+        await service.append_user_message("01H_C", "hi")
 
         line = await _call(server, "get_conversation", {"conversation_id": "01H_C"})
         result = line["result"]
@@ -146,8 +144,7 @@ class TestConversationMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_rename_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            await ConversationRepo(session).create("01H_R", title="old")
+        await ConversationService(agent).create("01H_R", title="old")
 
         line = await _call(server, "rename_conversation", {"conversation_id": "01H_R", "title": "new"})
         assert line["result"]["conversation"]["title"] == "new"
@@ -157,8 +154,7 @@ class TestConversationMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_delete_conversation(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            await ConversationRepo(session).create("01H_D", title="t")
+        await ConversationService(agent).create("01H_D", title="t")
 
         line = await _call(server, "delete_conversation", {"conversation_id": "01H_D"})
         assert line["result"] == {"deleted": "01H_D"}
@@ -231,7 +227,8 @@ class TestProviderMethods:
         line = await _call(server, "list_providers")
         providers = line["result"]["providers"]
         assert len(providers) == 1
-        assert providers[0]["name"] == "mock"
+        assert providers[0]["name"] == "Mock"
+        assert providers[0]["slug"] == "mock"
         assert providers[0]["type"] == "mock"
         # seed_if_empty ______________________?mock ___________________?provider
         assert providers[0]["default"] is True
@@ -249,27 +246,44 @@ class TestProviderMethods:
         )
         result = line["result"]["provider"]
         assert result["name"] == "mock2"
+        assert result["slug"] == "mock-mock2"
         assert result["type"] == "mock"
 
-    async def test_add_provider_duplicate_returns_err_duplicate(self, server: JsonRpcServer) -> None:
-        """seed _____________?'mock',___________________?_?ERR_DUPLICATE_?"""
+    async def test_add_provider_duplicate_name_gets_incremented_default_slug(self, server: JsonRpcServer) -> None:
+        first = await _call(
+            server,
+            "add_provider",
+            {"name": "Qwen", "type": "mock", "options": {}},
+        )
+        second = await _call(
+            server,
+            "add_provider",
+            {"name": "Qwen", "type": "mock", "options": {}},
+        )
+        assert first["result"]["provider"]["slug"] == "mock-qwen"
+        assert second["result"]["provider"]["slug"] == "mock-qwen-2"
+
+    async def test_add_provider_duplicate_name_still_succeeds_with_new_slug(self, server: JsonRpcServer) -> None:
+        """name 可重复;默认 slug 自动避让。"""
         line = await _call(
             server,
             "add_provider",
             {"name": "mock", "type": "mock", "options": {}},
         )
-        assert line["error"]["code"] == JsonRpcServer.ERR_DUPLICATE
+        assert line["result"]["provider"]["name"] == "mock"
+        assert line["result"]["provider"]["slug"] == "mock-mock"
 
     async def test_update_provider(self, server: JsonRpcServer) -> None:
-        await _call(
+        added = await _call(
             server,
             "add_provider",
             {"name": "p1", "type": "mock", "options": {"x": 1}},
         )
+        slug = added["result"]["provider"]["slug"]
         line = await _call(
             server,
             "update_provider",
-            {"name": "p1", "options": {"x": 2}},
+            {"name": slug, "options": {"x": 2}},
         )
         assert line["result"]["provider"]["options"] == {"x": 2}
 
@@ -278,9 +292,10 @@ class TestProviderMethods:
         assert line["error"]["code"] == JsonRpcServer.ERR_NOT_FOUND
 
     async def test_delete_provider(self, server: JsonRpcServer) -> None:
-        await _call(server, "add_provider", {"name": "p1", "type": "mock", "options": {}})
-        line = await _call(server, "delete_provider", {"name": "p1"})
-        assert line["result"] == {"deleted": "p1"}
+        added = await _call(server, "add_provider", {"name": "p1", "type": "mock", "options": {}})
+        slug = added["result"]["provider"]["slug"]
+        line = await _call(server, "delete_provider", {"name": slug})
+        assert line["result"] == {"deleted": slug}
 
     async def test_delete_provider_not_found(self, server: JsonRpcServer) -> None:
         line = await _call(server, "delete_provider", {"name": "ghost"})
@@ -310,10 +325,9 @@ class TestLogMethods:
         assert line["result"] == {"logs": []}
 
     async def test_list_logs_returns_inserted(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            await repo.create(provider="mock", status="ok", latency_ms=42)
-            await repo.create(provider="mock", status="error", error="boom")
+        service = LogService(agent)
+        await service.create(provider="mock", status="ok", latency_ms=42)
+        await service.create(provider="mock", status="error", error="boom")
 
         line = await _call(server, "list_logs")
         logs = line["result"]["logs"]
@@ -322,10 +336,9 @@ class TestLogMethods:
         assert statuses == ["error", "ok"]
 
     async def test_list_logs_limit(self, server: JsonRpcServer, agent: AIAgent) -> None:
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            for _ in range(5):
-                await repo.create(provider="mock", status="ok")
+        service = LogService(agent)
+        for _ in range(5):
+            await service.create(provider="mock", status="ok")
 
         line = await _call(server, "list_logs", {"limit": 2})
         assert len(line["result"]["logs"]) == 2
@@ -336,9 +349,7 @@ class TestLogMethods:
 
     async def test_list_logs_since_filter(self, server: JsonRpcServer, agent: AIAgent) -> None:
         """since _________?_?_________?created_at > since ______________?"""
-        async with agent.session_maker() as session:
-            repo = LogRepo(session)
-            await repo.create(provider="mock", status="ok")
+        await LogService(agent).create(provider="mock", status="ok")
 
         # __________________________________________________?created_at _?since,_____________?
         future_str = "2099-01-01T00:00:00"
@@ -410,7 +421,7 @@ class TestRegistration:
 #
 # _____________?Chat _____________?CLI _?`--base-url` / `--api-key`:RPC params ___________________?
 # ___________________?___________________?_?ChatMethod _?AgentRegistry.reserve(session_key _?
-# (provider_name, sorted options) _?sha _________?_?per-call AIAgent_?
+# (provider_ref, sorted options) _?sha _________?_?per-call AIAgent_?
 # _?override _?____________?agent(fixture _________?bootstrap,_________?registry)_?
 #
 # ____________________?`AgentRegistry.size()` _________?default agent _________?registry _?________?size
@@ -422,7 +433,7 @@ class TestChatPerCallOverride:
     @staticmethod
     def _chat_params(**extra: str) -> dict[str, Any]:
         return {
-            "provider_name": "mock",
+            "provider_ref": "mock",
             "messages": [{"role": "user", "content": "hi"}],
             **extra,
         }

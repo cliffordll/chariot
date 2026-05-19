@@ -46,12 +46,14 @@ class ProviderMethods(MethodBase):
     async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         name = self._require_str(params, "name")
+        rename = self._optional_str(params, "rename")
         type_ = self._optional_str(params, "type")
         options = self._optional_dict(params, "options")
         params_field = self._optional_dict(params, "params")
         async with self._rpc_errors():
             provider = await self._service.update_entry(
                 name=name,
+                rename=rename,
                 type_=type_,
                 options=options,
                 params=params_field,

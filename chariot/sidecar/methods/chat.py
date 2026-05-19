@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import time
@@ -22,6 +23,10 @@ class ChatMethod(MethodBase):
 
     async def __call__(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         stream_id, req, event_stream = await self._service.open_chat(params)
+        current_task = asyncio.current_task()
+        if current_task is None:  # pragma: no cover - asyncio always provides one
+            raise RuntimeError("chat handler must run inside an asyncio task")
+        self.runtime.register_chat(stream_id, current_task)
         started_at = time.perf_counter()
         status = "ok"
         error_message: str | None = None
@@ -38,10 +43,18 @@ class ChatMethod(MethodBase):
                 if event.kind == "error":
                     status = "error"
                     error_message = event.error_message or event.error_type or "chat error"
-                await ctx.notify("chat_event", dataclasses.asdict(event))
+                await ctx.notify(
+                    "chat_event",
+                    {
+                        "stream_id": stream_id,
+                        **dataclasses.asdict(event),
+                    },
+                )
+        except asyncio.CancelledError:
+            status = "cancelled"
         except Exception:
             await self._write_log(
-                provider=req.provider_name,
+                provider=req.provider_ref,
                 status="error",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -49,15 +62,17 @@ class ChatMethod(MethodBase):
                 error=error_message,
             )
             raise
+        finally:
+            self.runtime.unregister_chat(stream_id, current_task)
         await self._write_log(
-            provider=req.provider_name,
+            provider=req.provider_ref,
             status=status,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             started_at=started_at,
             error=error_message,
         )
-        return {"stream_id": stream_id, "ended_at": time.time()}
+        return {"stream_id": stream_id, "ended_at": time.time(), "cancelled": status == "cancelled"}
 
     async def _write_log(
         self,
@@ -78,3 +93,8 @@ class ChatMethod(MethodBase):
                 latency_ms=int((time.perf_counter() - started_at) * 1000),
                 error=error,
             )
+
+    async def cancel(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        stream_id = self._require_str(params, "stream_id")
+        return {"cancelled": self._service.cancel_chat(stream_id)}

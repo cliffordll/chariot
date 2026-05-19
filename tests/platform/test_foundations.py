@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -8,13 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chariot.agent.chat_request import ChatRequest, Message
-from chariot.database.session import dispose_db, init_db
-from chariot.models.task import TaskCreate, TaskRunCreate
+from chariot.database.session import CURRENT_SCHEMA_VERSION, dispose_db, init_db
+from chariot.models.task import TaskCreate, TaskKind, TaskRunCreate
 from chariot.repos.audit_repo import AuditRepo
 from chariot.repos.checkpoint_repo import CheckpointRepo
 from chariot.repos.eval_repo import EvalRepo
 from chariot.repos.memory_repo import MemoryRepo
 from chariot.repos.prompt_repo import PromptRepo
+from chariot.repos.provider_repo import ProviderRepo
 from chariot.repos.skill_repo import SkillRepo
 from chariot.repos.task_repo import TaskRepo
 from chariot.services.task import TaskService
@@ -64,8 +66,257 @@ class TestMigrationV10:
         )
         assert names.issubset(set(rows))
 
+    async def test_agent_profile_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        task_cols = (await session.execute(text("PRAGMA table_info(tasks)"))).mappings().all()
+        job_cols = (await session.execute(text("PRAGMA table_info(scheduled_jobs)"))).mappings().all()
+
+        assert "id" in _columns(agent_profile_cols)
+        assert "agent_profile_id" in _columns(task_cols)
+        assert "agent_profile_id" in _columns(job_cols)
+
+    async def test_toolset_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        toolset_cols = (await session.execute(text("PRAGMA table_info(toolsets)"))).mappings().all()
+        member_cols = (await session.execute(text("PRAGMA table_info(toolset_members)"))).mappings().all()
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+
+        assert "id" in _columns(toolset_cols)
+        assert "toolset_id" in _columns(member_cols)
+        assert "toolset_id" in _columns(agent_profile_cols)
+        assert "tool_profile" not in _columns(agent_profile_cols)
+
+    async def test_prompt_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        agent_profile_cols = (await session.execute(text("PRAGMA table_info(agent_profiles)"))).mappings().all()
+        assert "prompt_id" in _columns(agent_profile_cols)
+        assert "prompt_bundle" not in _columns(agent_profile_cols)
+
+    async def test_provider_snapshot_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        for table in (
+            "provider_health",
+            "prompt_traces",
+            "context_snapshots",
+            "context_traces",
+            "trace_turns",
+            "trace_provider_calls",
+        ):
+            cols = (await session.execute(text(f"PRAGMA table_info({table})"))).mappings().all()
+            assert "provider_snapshot" in _columns(cols)
+            assert all(not (name.startswith("provider_") and name.endswith("name_snapshot")) for name in _columns(cols))
+
+    async def test_job_identity_columns_exist(self, session: AsyncSession) -> None:
+        def _columns(rows: list[dict[str, object]]) -> set[str]:
+            return {str(row["name"]) for row in rows}
+
+        job_cols = (await session.execute(text("PRAGMA table_info(scheduled_jobs)"))).mappings().all()
+        job_run_cols = (await session.execute(text("PRAGMA table_info(job_runs)"))).mappings().all()
+
+        assert "id" in _columns(job_cols)
+        assert "job_id" in _columns(job_run_cols)
+
+    async def test_v1_logs_db_upgrades_via_squashed_migration(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "legacy-v1.db"
+        init_sql = (Path("chariot/database/migrations/001_init.sql")).read_text(encoding="utf-8")
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(init_sql)
+            conn.execute(
+                "INSERT INTO logs (id, model, input_tokens, output_tokens, latency_ms, status, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("log-1", "legacy-mock", 10, 20, 30, "ok", None),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        sm = await init_db(db_path)
+        async with sm() as upgraded:
+            version = (await upgraded.execute(text("PRAGMA user_version"))).scalar_one()
+            assert version == CURRENT_SCHEMA_VERSION
+
+            log_row = (
+                (
+                    await upgraded.execute(
+                        text("SELECT id, provider, input_tokens, output_tokens, latency_ms, status FROM logs"),
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            assert log_row["id"] == "log-1"
+            assert log_row["provider"] == "legacy-mock"
+            assert log_row["input_tokens"] == 10
+            assert log_row["output_tokens"] == 20
+            assert log_row["latency_ms"] == 30
+            assert log_row["status"] == "ok"
+
+            provider_row = (
+                (await upgraded.execute(text("SELECT id, slug, name FROM providers ORDER BY created_at, id LIMIT 1")))
+                .mappings()
+                .one()
+            )
+            assert provider_row["id"] == "provider_mock"
+            assert provider_row["slug"] == "mock"
+            assert provider_row["name"] == "Mock"
+
+            default_provider_id = (
+                await upgraded.execute(text("SELECT default_provider_id FROM settings WHERE id = 1"))
+            ).scalar_one()
+            assert default_provider_id == "provider_mock"
+        await dispose_db()
+
+    async def test_v28_db_auto_bumps_to_current_schema_without_replaying_squashed_sql(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "legacy-v28.db"
+        sm = await init_db(db_path)
+        async with sm() as seeded:
+            version = (await seeded.execute(text("PRAGMA user_version"))).scalar_one()
+            assert version == CURRENT_SCHEMA_VERSION
+        await dispose_db()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 28")
+            conn.commit()
+        finally:
+            conn.close()
+
+        sm = await init_db(db_path)
+        async with sm() as upgraded:
+            version = (await upgraded.execute(text("PRAGMA user_version"))).scalar_one()
+            assert version == CURRENT_SCHEMA_VERSION
+            default_provider_id = (
+                await upgraded.execute(text("SELECT default_provider_id FROM settings WHERE id = 1"))
+            ).scalar_one()
+            assert default_provider_id is not None
+        await dispose_db()
+
+    async def test_trace_provider_call_links_are_not_backfilled_from_conversation_history(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "trace-links.db"
+        sm = await init_db(db_path)
+        async with sm() as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO trace_turns (
+                        id, conversation_id, provider_snapshot, status, started_at, meta
+                    ) VALUES
+                        ('turn-1', 'conv-1', 'mock', 'completed', '2026-05-19 10:00:00+00:00', '{}'),
+                        ('turn-2', 'conv-1', 'mock', 'completed', '2026-05-19 10:05:00+00:00', '{}')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO trace_provider_calls (
+                        id, turn_id, provider_snapshot, request_summary, response_summary, started_at
+                    ) VALUES
+                        ('pc-1', 'turn-1', 'mock', '{}', '{}', '2026-05-19 10:00:01+00:00'),
+                        ('pc-2', 'turn-2', 'mock', '{}', '{}', '2026-05-19 10:05:01+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO prompt_traces (
+                        id, bundle_id, version_id, conversation_id, provider_snapshot, request, source_refs, prompt_size, created_at
+                    ) VALUES
+                        ('pt-1', 'bundle-1', 'version-1', 'conv-1', 'mock', '{}', '[]', 1, '2026-05-19 10:00:02+00:00'),
+                        ('pt-2', 'bundle-1', 'version-1', 'conv-1', 'mock', '{}', '[]', 1, '2026-05-19 10:05:02+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO context_snapshots (
+                        id, conversation_id, provider_snapshot, request, slices, source_refs, context_size, created_at
+                    ) VALUES
+                        ('snap-1', 'conv-1', 'mock', '{}', '[]', '[]', 1, '2026-05-19 10:00:01+00:00'),
+                        ('snap-2', 'conv-1', 'mock', '{}', '[]', '[]', 1, '2026-05-19 10:05:01+00:00')
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO context_traces (
+                        id, snapshot_id, conversation_id, provider_snapshot, prompt_trace_id, policy, selected_refs, created_at
+                    ) VALUES
+                        ('ctx-1', 'snap-1', 'conv-1', 'mock', 'pt-1', '{}', '[]', '2026-05-19 10:00:03+00:00'),
+                        ('ctx-2', 'snap-2', 'conv-1', 'mock', 'pt-2', '{}', '[]', '2026-05-19 10:05:03+00:00')
+                    """
+                )
+            )
+            await session.commit()
+        await dispose_db()
+
+        sm = await init_db(db_path)
+        async with sm() as session:
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            """
+                        SELECT id, prompt_trace_id, context_trace_id
+                        FROM trace_provider_calls
+                        ORDER BY started_at ASC, id ASC
+                        """
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            assert rows[0]["id"] == "pc-1"
+            assert rows[0]["prompt_trace_id"] is None
+            assert rows[0]["context_trace_id"] is None
+            assert rows[1]["id"] == "pc-2"
+            assert rows[1]["prompt_trace_id"] is None
+            assert rows[1]["context_trace_id"] is None
+        await dispose_db()
+
 
 class TestPlatformRepos:
+    async def test_provider_repo_default_slug_uses_type_and_name(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        created = await repo.create(name="Qwen 3 32B", type="mock", options={})
+        assert created.slug == "mock-qwen-3-32b"
+
+    async def test_provider_repo_default_slug_auto_suffixes_conflicts(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        first = await repo.create(name="Qwen", type="mock", options={})
+        second = await repo.create(name="Qwen", type="mock", options={})
+        assert first.slug == "mock-qwen"
+        assert second.slug == "mock-qwen-2"
+
+    async def test_provider_repo_can_rename_display_name(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        created = await repo.create(name="Qwen", type="mock", options={})
+        renamed = await repo.rename(created.id, new_name="Qwen Renamed")
+        assert renamed.id == created.id
+        assert renamed.name == "Qwen Renamed"
+
+    async def test_provider_repo_does_not_resolve_display_name_refs(self, session: AsyncSession) -> None:
+        repo = ProviderRepo(session)
+        created = await repo.create(name="Human Readable", type="mock", options={})
+        assert await repo.get_entry(created.slug) is not None
+        assert await repo.get_entry(created.id) is not None
+        assert await repo.get_entry("Human Readable") is None
+
     async def test_memory_repo_create_and_list(self, session: AsyncSession) -> None:
         repo = MemoryRepo(session)
         entry = await repo.create(kind="preference", text="默认用中文", meta={"scope": "user"})
@@ -130,31 +381,53 @@ class TestPlatformRepos:
 
         trace = await repo.record_trace(
             ChatRequest(
-                provider_name="mock",
+                provider_ref="mock",
                 messages=[Message(role="user", content="hi")],
                 system="system prompt",
             ),
-            provider_name="mock",
+            provider_snapshot="mock",
             model="mock-1",
         )
         assert len(trace.id) == 26
         fetched = await repo.get_trace(trace.id)
         assert fetched is not None
-        assert fetched.provider_name == "mock"
+        assert fetched.provider_snapshot == "mock"
 
         active_bundle = await repo.get_active_bundle()
         assert active_bundle is not None
         assert active_bundle.name == "default"
 
+    async def test_prompt_repo_rename_updates_agent_bindings(self, session: AsyncSession) -> None:
+        prompt_repo = PromptRepo(session)
+        task_repo = TaskRepo(session)
+        created = await prompt_repo.create_bundle("review")
+        await task_repo.create_agent_profile(name="reviewer", role="review", prompt_id=created.bundle_id)
+
+        renamed = await prompt_repo.rename_bundle("review", new_name="review-v2")
+        assert renamed.name == "review-v2"
+
+        agent = await task_repo.get_agent_profile("reviewer")
+        assert agent is not None
+        assert agent.prompt_id == created.bundle_id
+
     async def test_task_repo_create_profile_task_run_and_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
+        mock = await ProviderRepo(session).get_entry("mock")
+        from chariot.repos.toolset_repo import ToolsetRepo
+
+        toolset = await ToolsetRepo(session).create(name="default", members=["read_file"])
         profile = await repo.create_agent_profile(
             name="planner",
             role="planner",
-            tool_profile="default",
-            provider_profile="mock",
+            toolset_id=toolset.id,
+            provider_id="mock",
             budget={"max_steps": 3},
         )
+        assert mock is not None
+        assert len(toolset.id) == 26
+        assert len(profile.id) == 26
+        assert profile.toolset_id == toolset.id
+        assert profile.provider_id == mock.id
         task = await repo.create_task(
             TaskCreate(
                 goal="split work into child tasks",
@@ -168,16 +441,49 @@ class TestPlatformRepos:
         job_run = await repo.create_job_run(job_name=job.name, task_id=task.id, status="queued")
 
         assert (await repo.get_agent_profile(profile.name)) is not None
+        by_id = await repo.get_agent_profile(profile.id)
+        assert by_id is not None
+        assert by_id.name == profile.name
+        assert by_id.toolset_id == toolset.id
         stored_task = await repo.get_task(task.id)
         assert stored_task is not None
         assert stored_task.agent_profile == "planner"
         assert stored_task.status.value == "queued"
+        task_row = (
+            (
+                await session.execute(
+                    text("SELECT agent_profile, agent_profile_id FROM tasks WHERE id = :id"), {"id": task.id}
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert task_row["agent_profile"] == "planner"
+        assert task_row["agent_profile_id"] == profile.id
         runs = await repo.list_runs(task.id)
         assert runs[0].id == run.id
         jobs = await repo.list_jobs()
         assert jobs[0].name == job.name
+        assert len(jobs[0].id) == 26
+        updated_job = await repo.update_job(name=job.name, agent_profile=profile.id)
+        assert updated_job.agent_profile == "planner"
+        job_row = (
+            (
+                await session.execute(
+                    text("SELECT id, agent_profile, agent_profile_id FROM scheduled_jobs WHERE name = :name"),
+                    {"name": job.name},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert len(str(job_row["id"])) == 26
+        assert job_row["agent_profile"] == "planner"
+        assert job_row["agent_profile_id"] == profile.id
         job_runs = await repo.list_job_runs(job.name)
         assert job_runs[0].id == job_run.id
+        assert job_runs[0].job_id == jobs[0].id
+        assert (await repo.list_job_runs(jobs[0].id))[0].id == job_run.id
 
     async def test_task_repo_update_delete_agent_and_delete_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)
@@ -185,11 +491,11 @@ class TestPlatformRepos:
         updated = await repo.update_agent_profile(
             name="planner",
             role="executor",
-            tool_profile="default",
+            toolset_id="default",
             meta={"scope": "repo"},
         )
         assert updated.role == "executor"
-        assert updated.tool_profile == "default"
+        assert updated.toolset_id == "default"
         assert updated.meta["scope"] == "repo"
         await repo.delete_agent_profile("planner")
         assert await repo.get_agent_profile("planner") is None
@@ -198,33 +504,69 @@ class TestPlatformRepos:
         await repo.delete_job("cleanup")
         assert await repo.get_job("cleanup") is None
 
+    async def test_task_repo_rename_agent_profile_updates_live_name_refs(self, session: AsyncSession) -> None:
+        repo = TaskRepo(session)
+        created = await repo.create_agent_profile(name="planner", role="planner")
+        await repo.create_task(TaskCreate(goal="plan", kind=TaskKind.INTERACTIVE, agent_profile=created.id))
+        await repo.create_job(name="nightly", goal="sync", cron="0 0 * * *", agent_profile=created.id)
+        await session.execute(
+            text("INSERT INTO conversations (id, title, agent_profile) VALUES ('cv_1', NULL, 'planner')")
+        )
+        await session.commit()
+
+        renamed = await repo.rename_agent_profile(created.id, new_name="planner-v2")
+        assert renamed.id == created.id
+        assert renamed.name == "planner-v2"
+
+        task_row = (
+            await session.execute(
+                text("SELECT agent_profile FROM tasks WHERE agent_profile_id = :id"), {"id": created.id}
+            )
+        ).scalar_one()
+        job_row = (
+            await session.execute(
+                text("SELECT agent_profile FROM scheduled_jobs WHERE agent_profile_id = :id"),
+                {"id": created.id},
+            )
+        ).scalar_one()
+        convo_row = (
+            await session.execute(text("SELECT agent_profile FROM conversations WHERE id = 'cv_1'"))
+        ).scalar_one()
+        assert task_row == "planner-v2"
+        assert job_row == "planner-v2"
+        assert convo_row == "planner-v2"
+
     async def test_task_repo_clear_agent_binding_fields(self, session: AsyncSession) -> None:
         """显式传 None 应清空 binding;未传(UNSET 默认)保持原值。"""
         repo = TaskRepo(session)
+        from chariot.repos.toolset_repo import ToolsetRepo
+
+        prompt = await PromptRepo(session).create_bundle("research")
+        toolset = await ToolsetRepo(session).create(name="fs_safe")
         await repo.create_agent_profile(
             name="a1",
             role="r",
-            prompt_bundle="research",
-            tool_profile="fs_safe",
-            provider_profile="claude",
+            prompt_id=prompt.bundle_id,
+            toolset_id=toolset.id,
+            provider_id="claude",
         )
         # 1) 未传 prompt/tool/provider → 都保留;只改 role
         u1 = await repo.update_agent_profile(name="a1", role="executor")
-        assert u1.prompt_bundle == "research"
-        assert u1.tool_profile == "fs_safe"
-        assert u1.provider_profile == "claude"
+        assert u1.prompt_id == prompt.bundle_id
+        assert u1.toolset_id == toolset.id
+        assert u1.provider_id == "claude"
         # 2) 显式 None → 清空 provider,其它仍保留
-        u2 = await repo.update_agent_profile(name="a1", provider_profile=None)
-        assert u2.provider_profile is None
-        assert u2.prompt_bundle == "research"
-        assert u2.tool_profile == "fs_safe"
+        u2 = await repo.update_agent_profile(name="a1", provider_id=None)
+        assert u2.provider_id is None
+        assert u2.prompt_id == prompt.bundle_id
+        assert u2.toolset_id == toolset.id
         # 3) 同时清两个
-        u3 = await repo.update_agent_profile(name="a1", prompt_bundle=None, tool_profile=None)
-        assert u3.prompt_bundle is None
-        assert u3.tool_profile is None
+        u3 = await repo.update_agent_profile(name="a1", prompt_id=None, toolset_id=None)
+        assert u3.prompt_id is None
+        assert u3.toolset_id is None
         # 4) 重新 set
-        u4 = await repo.update_agent_profile(name="a1", provider_profile="ollama")
-        assert u4.provider_profile == "ollama"
+        u4 = await repo.update_agent_profile(name="a1", provider_id="ollama")
+        assert u4.provider_id == "ollama"
 
     async def test_task_repo_update_and_toggle_job(self, session: AsyncSession) -> None:
         repo = TaskRepo(session)

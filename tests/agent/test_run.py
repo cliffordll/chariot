@@ -1,7 +1,7 @@
 """AIAgent 单测。
 
 覆盖(对照 FEATURE.md S.6 验收清单):
-- 路由:`req.provider_name='not_exists'` → 单 event error(error_type='unknown_provider')
+- 路由:`req.provider_ref='not_exists'` → 单 event error(error_type='unknown_provider')
 - default tools 注入:`req.tools is None` + 装载 N 个 tool → AgentLoop 拿到 N 个 schema
 - default tools:`req.tools=[]` → 关闭工具调用(透传 [],不替换)
 - default tools:`req.tools=[<显式>]` → 透传(不替换)
@@ -12,16 +12,24 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
+from chariot.agent.exceptions import ProviderError
 from chariot.agent.run import AIAgent
+from chariot.database.session import dispose_db, init_db
+from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
+from chariot.services.conversation import ConversationService
+from chariot.services.prompt import PromptService
+from chariot.services.provider import ProviderService
 from chariot.tools.base import BaseTool
 
 # ---------------------------------------------------------------------------
@@ -57,6 +65,70 @@ class _LimitedProvider(_CapturingProvider):
     )
 
 
+class _ConcurrentEchoProvider(BaseProvider):
+    def __init__(self, name: str = "concurrent") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _ConcurrentEchoProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        last_msg = req.messages[-1]
+        content = self._message_text(last_msg.content)
+        await asyncio.sleep(0.05)
+        yield ChatEvent.message_start(message_id=f"m-{content}", model=self.config.model)
+        yield ChatEvent.text_block_start(index=0)
+        yield ChatEvent.text_delta(f"echo:{content}", index=0)
+        yield ChatEvent.block_stop(index=0)
+        yield ChatEvent.message_delta_done(stop_reason="end_turn")
+        yield ChatEvent.message_done()
+
+    @staticmethod
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            return "".join(parts)
+        return str(content)
+
+
+class _RaisingProvider(BaseProvider):
+    def __init__(self, name: str = "raising") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _RaisingProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        raise ProviderError("upstream_server_error", "上游 502: simulated")
+        yield  # pragma: no cover
+
+
+class _BlockingProvider(BaseProvider):
+    def __init__(self, name: str = "blocking") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+        self.started = asyncio.Event()
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _BlockingProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        del req
+        yield ChatEvent.message_start(message_id="m1", model=self.config.model)
+        yield ChatEvent.text_block_start(index=0)
+        yield ChatEvent.text_delta("partial", index=0)
+        self.started.set()
+        await asyncio.Future[None]()
+        yield  # pragma: no cover
+
+
 class _StubTool(BaseTool):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -76,6 +148,16 @@ class _StubTool(BaseTool):
         return {"type": "tool_result", "content": [{"type": "text", "text": "ok"}]}
 
 
+@pytest_asyncio.fixture
+async def sessionmaker(tmp_path: Path):
+    db_path = tmp_path / "chariot.db"
+    sm = await init_db(db_path)
+    try:
+        yield sm
+    finally:
+        await dispose_db()
+
+
 # ---------------------------------------------------------------------------
 # 路由 / unknown provider
 # ---------------------------------------------------------------------------
@@ -85,7 +167,7 @@ class TestRouting:
     async def test_unknown_provider_yields_error(self) -> None:
         agent = AIAgent(providers={"mock": _CapturingProvider("mock")}, tools={})
         req = ChatRequest(
-            provider_name="not_exists",
+            provider_ref="not_exists",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
@@ -93,18 +175,41 @@ class TestRouting:
         assert events[0].kind == "error"
         assert events[0].error_type == "unknown_provider"
 
-    async def test_routes_by_provider_name(self) -> None:
+    async def test_routes_by_provider_ref(self) -> None:
         p1 = _CapturingProvider("p1")
         p2 = _CapturingProvider("p2")
         agent = AIAgent(providers={"p1": p1, "p2": p2}, tools={})
         req = ChatRequest(
-            provider_name="p2",
+            provider_ref="p2",
             messages=[Message(role="user", content="hi")],
         )
         _ = [ev async for ev in agent.run_chat(req)]
         # 只有 p2 被调用
         assert p1.last_req is None
         assert p2.last_req is not None
+
+    async def test_does_not_route_by_provider_display_name(self) -> None:
+        provider = _CapturingProvider("p")
+        entry = ProviderEntry(
+            id="prov_123",
+            slug="provider-slug",
+            name="Human Readable",
+            type="mock",
+            options={},
+        )
+        agent = AIAgent(
+            providers={"prov_123": provider, "provider-slug": provider},
+            provider_entries={"prov_123": entry, "provider-slug": entry},
+            tools={},
+        )
+        req = ChatRequest(
+            provider_ref="Human Readable",
+            messages=[Message(role="user", content="hi")],
+        )
+        events = [ev async for ev in agent.run_chat(req)]
+        assert len(events) == 1
+        assert events[0].kind == "error"
+        assert events[0].error_type == "unknown_provider"
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +226,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1"), "t2": _StubTool("t2")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=None,
         )
@@ -137,7 +242,7 @@ class TestDefaultToolsInjection:
             tools={"t1": _StubTool("t1")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=[],
         )
@@ -155,7 +260,7 @@ class TestDefaultToolsInjection:
             ToolSchema(name="custom", description="custom", input_schema={"type": "object"}),
         ]
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             tools=list(explicit),  # 显式
         )
@@ -174,7 +279,7 @@ class TestRequestNormalization:
             tools={"t1": _StubTool("t1")},
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             system="system prompt",
             tools=[ToolSchema(name="custom", description="custom", input_schema={"type": "object"})],
@@ -208,7 +313,7 @@ class TestStatelessPath:
         agent = AIAgent(providers={"p": provider}, tools={}, sessionmaker=None)
 
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
         )
         events = [ev async for ev in agent.run_chat(req)]
@@ -232,7 +337,7 @@ class TestStatefulPath:
             sessionmaker=None,  # 没装载,会 yield error 但 acquire 之前先报错
         )
         req = ChatRequest(
-            provider_name="p",
+            provider_ref="p",
             messages=[Message(role="user", content="hi")],
             conversation_id="01H_TEST",
         )
@@ -240,6 +345,60 @@ class TestStatefulPath:
         # sessionmaker=None → yield 'no_sessionmaker' error
         assert events[0].kind == "error"
         assert events[0].error_type == "no_sessionmaker"
+
+    async def test_different_conversations_run_concurrently(self, sessionmaker) -> None:
+        provider = _ConcurrentEchoProvider("p")
+        agent = AIAgent(
+            providers={"p": provider},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+        async with sessionmaker() as session:
+            await PromptService(session).seed_if_empty()
+
+        async def run_one(conversation_id: str, text: str) -> list[ChatEvent]:
+            req = ChatRequest(
+                provider_ref="p",
+                messages=[Message(role="user", content=text)],
+                conversation_id=conversation_id,
+            )
+            return [ev async for ev in agent.run_chat(req)]
+
+        left, right = await asyncio.gather(
+            run_one("01CONCURRENTLEFT0000000000", "left"),
+            run_one("01CONCURRENTRIGHT000000000", "right"),
+        )
+
+        for events, expected in ((left, "left"), (right, "right")):
+            assert any(ev.kind == "stream_done" for ev in events)
+            text_chunks = [
+                str((ev.delta or {}).get("text", ""))
+                for ev in events
+                if ev.kind == "content_block_delta" and (ev.delta or {}).get("type") == "text_delta"
+            ]
+            assert "".join(text_chunks) == f"echo:{expected}"
+
+    async def test_stateful_error_is_persisted_into_history(self, sessionmaker) -> None:
+        agent = AIAgent(
+            providers={"p": _RaisingProvider("p")},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+        req = ChatRequest(
+            provider_ref="p",
+            messages=[Message(role="user", content="hi")],
+            conversation_id="01CONVERRORPERSIST000000000",
+        )
+
+        events = [ev async for ev in agent.run_chat(req)]
+
+        assert events[-1].kind == "error"
+        async with sessionmaker() as session:
+            messages = await ConversationService(session).get_messages("01CONVERRORPERSIST000000000")
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == [
+            {"type": "text", "text": "[error] upstream_server_error: 上游 502: simulated"}
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -259,23 +418,22 @@ class TestBootstrapProviderOverrides:
     async def _seed_anthropic_entry(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Path]:
         """tmp DB 装一个 anthropic entry,yield db_path。"""
         from chariot.database.session import dispose_db
-        from chariot.repos.provider_repo import ProviderRepo
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
         monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
         db_path = tmp_path / "chariot.db"
         agent = await AIAgent.bootstrap(db_path)
-        async with agent.session_maker() as session:
-            await ProviderRepo(session).create(
-                name="claude",
-                type="anthropic",
-                options={
-                    "model": "claude-old",
-                    "api_key": "key-old",
-                    "base_url": "https://old.api",
-                },
-            )
+        await ProviderService(agent).create(
+            name="Claude Human",
+            slug="claude",
+            type="anthropic",
+            options={
+                "model": "claude-old",
+                "api_key": "key-old",
+                "base_url": "https://old.api",
+            },
+        )
         await dispose_db()
         try:
             yield db_path
@@ -314,6 +472,14 @@ class TestBootstrapProviderOverrides:
         )
         assert agent.providers["claude"].config.model == "claude-old"
 
+    async def test_overrides_keyed_by_provider_display_name_ignored(self, _seed_anthropic_entry: Path) -> None:
+        """overrides keyed 到 provider 展示名 → 不再命中,必须改用 slug 或 id。"""
+        agent = await AIAgent.bootstrap(
+            _seed_anthropic_entry,
+            provider_overrides={"Claude Human": {"model": "claude-new"}},
+        )
+        assert agent.providers["claude"].config.model == "claude-old"
+
     async def test_invalid_override_raises_config_error(self, _seed_anthropic_entry: Path) -> None:
         """空串 base_url 进 patch → ConfigError(create 校验阶段)。"""
         from chariot.agent.exceptions import ConfigError
@@ -323,3 +489,34 @@ class TestBootstrapProviderOverrides:
                 _seed_anthropic_entry,
                 provider_overrides={"claude": {"base_url": ""}},
             )
+
+
+class TestStatefulCancellationPersistence:
+    async def test_stateful_cancellation_is_persisted_into_history(self, sessionmaker) -> None:
+        provider = _BlockingProvider("p")
+        agent = AIAgent(
+            providers={"p": provider},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+        req = ChatRequest(
+            provider_ref="p",
+            messages=[Message(role="user", content="hi")],
+            conversation_id="01CONVCANCELPERSIST00000000",
+        )
+
+        async def _consume() -> list[ChatEvent]:
+            return [ev async for ev in agent.run_chat(req)]
+
+        task = asyncio.create_task(_consume())
+        await provider.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        async with sessionmaker() as session:
+            messages = await ConversationService(session).get_messages("01CONVCANCELPERSIST00000000")
+        assert messages[-2]["role"] == "assistant"
+        assert messages[-2]["content"] == [{"type": "text", "text": "partial"}]
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == [{"type": "text", "text": "[cancelled] interrupted by user"}]

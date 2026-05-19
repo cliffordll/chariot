@@ -26,6 +26,8 @@ AIAgent / Provider 流里出错时 yield `ChatEvent(kind="error")`(不抛异常)
 
 from __future__ import annotations
 
+import asyncio
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -58,11 +60,16 @@ class ChatError(Exception):
         return s if len(s) <= limit else s[:limit] + "…"
 
 
+class ChatInterruptedError(Exception):
+    """Current chat turn was interrupted by the user."""
+
+
 @dataclass(frozen=True)
 class TurnResult:
     """一轮请求的收尾结果(ChatRepl / ChatOnce 用 meta 行展示)。"""
 
     text: str
+    provider_snapshot: str | None
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -73,10 +80,9 @@ class ChatContext:
     """一次聊天会话的上下文:AIAgent 引用 + 会话配置 + 多轮历史。"""
 
     agent: AIAgent
-    # provider entry name(0.6.0 v6 起):chariot 路由 key,对应 DB providers
-    # 表的 entry name。透传给 ChatRequest.provider_name(0.6.5+ 起字段名跟
-    # wire `model` 区分开)。
-    provider_name: str | None = None
+    # provider 路由引用。0.8.9 起优先走 provider slug / id,兼容 legacy
+    # display name;透传给 ChatRequest.provider_ref。
+    provider_ref: str | None = None
     max_tokens: int = 1024
     messages: list[dict[str, Any]] = field(default_factory=_empty_messages)
     # 0.4.0:可选 conversation id(ULID)。给了则 ChatRequest.conversation_id 透传给 AIAgent,
@@ -89,8 +95,10 @@ class ChatContext:
     # None = 不覆盖,沿用 entry.options.model(常态)
     model_override: str | None = None
     # 0.7.2+:CLI `--agent` flag 的承载;每轮 req 透传给 `ChatRequest.agent_profile`,
-    # AIAgent 解析后:profile.provider_profile 覆盖 req.provider_name,
-    # profile.prompt_bundle 决定 prompt 注入,profile.tool_profile 做 toolset filter。
+    # AIAgent 解析后:profile.provider_id
+    # 覆盖 req.provider_ref,
+    # profile.prompt_id 决定 prompt 注入,
+    # profile.toolset_id 做 toolset filter。
     # None = 不绑定 agent_profile(常态;走全局 active bundle + 全量 enabled tools)
     agent_profile: str | None = None
     # B4 wave 3:CLI `--reflect` flag 承载;透传给 ChatRequest.reflection_*。
@@ -117,17 +125,18 @@ class ChatContext:
             self.messages.pop()
 
     def reset(self) -> None:
-        """清空对话历史,保留会话配置(provider_name / max_tokens / conversation_id)。"""
+        """清空对话历史,保留会话配置(provider_ref / max_tokens / conversation_id)。"""
         self.messages.clear()
 
     def set_provider(self, name: str | None) -> None:
-        self.provider_name = name
+        self.provider_ref = name
 
     # ---------- 核心:一轮请求 ----------
 
     async def run_turn(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
         """?? ChatRequest -> ? `agent.run_chat(req)` -> ?? ChatEvent -> ???"""
         req = self._build_request()
+        effective_provider_display = await self.agent.resolve_chat_provider_display(req)
         current_text: list[str] = []
         last_message_text: list[str] = []
         input_tokens = 0
@@ -147,7 +156,7 @@ class ChatContext:
 
         if error_event is not None:
             await log_writer.record(
-                provider=self.provider_name,
+                provider=effective_provider_display or self.provider_ref,
                 status="error",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -161,12 +170,13 @@ class ChatContext:
 
         result = TurnResult(
             text="".join(last_message_text),
+            provider_snapshot=effective_provider_display or self.provider_ref,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
         await log_writer.record(
-            provider=self.provider_name,
+            provider=result.provider_snapshot,
             status="ok",
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
@@ -174,6 +184,34 @@ class ChatContext:
             error=None,
         )
         return result
+
+    async def run_turn_interruptible(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
+        """Run one turn and let Ctrl+C cancel only the in-flight turn."""
+        turn_task = asyncio.create_task(self.run_turn(on_event))
+        previous = signal.getsignal(signal.SIGINT)
+        interrupted = False
+
+        def _handle_sigint(signum: int, frame: object | None) -> None:
+            nonlocal interrupted
+            del signum, frame
+            if not turn_task.done():
+                interrupted = True
+                turn_task.cancel()
+                return
+            if callable(previous):
+                previous(signal.SIGINT, None)
+                return
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _handle_sigint)
+        try:
+            return await turn_task
+        except asyncio.CancelledError as e:
+            if interrupted:
+                raise ChatInterruptedError from e
+            raise
+        finally:
+            signal.signal(signal.SIGINT, previous)
 
     @staticmethod
     def _accumulate_text(ev: ChatEvent, sink: list[str]) -> None:
@@ -200,13 +238,14 @@ class ChatContext:
         """把对话历史组装成 ChatRequest。
 
         req.messages 取值取决于 stateful / stateless;详见模块级 docstring 契约段。
-        `ChatRequest.provider_name` 是 chariot 路由 key(entry name);wire 字段
+        `ChatRequest.provider_ref` 是 chariot 路由引用(provider slug / id /
+        兼容 legacy name);wire 字段
         `body.model` 由 Provider 内部从 `req.model or self.config.model` 决定
         —— `model_override` 非 None 时走 per-call 覆盖(CLI `--model`),
         否则用 entry.options.model。
         """
         return ChatRequest(
-            provider_name=self.provider_name,
+            provider_ref=self.provider_ref,
             messages=[self._to_message(m) for m in self._messages_to_send()],
             model=self.model_override,
             max_tokens=self.max_tokens,

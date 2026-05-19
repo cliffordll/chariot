@@ -87,10 +87,13 @@ class TestToolsetMethods:
             {"name": "fs_safe", "description": "只读", "members": ["read_file", "list_dir"]},
         )
         assert created["result"]["toolset"]["name"] == "fs_safe"
+        assert created["result"]["toolset"]["id"]
         assert created["result"]["toolset"]["members"] == ["list_dir", "read_file"]
 
         shown = await _call(server, "get_toolset", {"name": "fs_safe"})
         assert shown["result"]["toolset"]["description"] == "只读"
+        shown_by_id = await _call(server, "get_toolset", {"name": created["result"]["toolset"]["id"]})
+        assert shown_by_id["result"]["toolset"]["name"] == "fs_safe"
 
     async def test_show_not_found(self, server: JsonRpcServer) -> None:
         line = await _call(server, "get_toolset", {"name": "ghost"})

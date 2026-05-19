@@ -40,11 +40,11 @@ async def test_file_reference_expanded_into_user_message(tmp_path: Path, agent: 
     agent._reference_expander = ReferenceExpander(
         cwd=tmp_path,
         allowed_domains=frozenset(),
-        sessionmaker=agent.session_maker,
+        sessionmaker=agent._sessionmaker,
     )
 
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="see @file:note.txt please")],
     )
     text_chunks: list[str] = []
@@ -59,10 +59,36 @@ async def test_file_reference_expanded_into_user_message(tmp_path: Path, agent: 
     assert 'type="file"' in echo
 
 
+async def test_file_reference_with_space_after_colon_is_expanded(tmp_path: Path, agent: AIAgent) -> None:
+    target = tmp_path / "note.txt"
+    target.write_text("HELLO FROM FILE", encoding="utf-8")
+    from chariot.context.references import ReferenceExpander
+
+    agent._reference_expander = ReferenceExpander(
+        cwd=tmp_path,
+        allowed_domains=frozenset(),
+        sessionmaker=agent._sessionmaker,
+    )
+
+    req = ChatRequest(
+        provider_ref="mock",
+        messages=[Message(role="user", content="see @file: note.txt please")],
+    )
+    text_chunks: list[str] = []
+    async for ev in agent.run_chat(req):
+        if ev.kind == "content_block_delta":
+            delta = ev.delta or {}
+            if delta.get("type") == "text_delta":
+                text_chunks.append(delta.get("text", ""))
+    echo = "".join(text_chunks)
+    assert "HELLO FROM FILE" in echo
+    assert "<reference" in echo
+
+
 async def test_unknown_reference_type_passes_through(agent: AIAgent) -> None:
     """非内建 type(如 @custom:x)pattern 不匹配 → 原样保留,不报错。"""
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="@custom:x raw text")],
     )
     text_chunks: list[str] = []
@@ -81,10 +107,10 @@ async def test_file_not_found_yields_error_block(tmp_path: Path, agent: AIAgent)
     agent._reference_expander = ReferenceExpander(
         cwd=tmp_path,
         allowed_domains=frozenset(),
-        sessionmaker=agent.session_maker,
+        sessionmaker=agent._sessionmaker,
     )
     req = ChatRequest(
-        provider_name="mock",
+        provider_ref="mock",
         messages=[Message(role="user", content="@file:ghost.md")],
     )
     text_chunks: list[str] = []

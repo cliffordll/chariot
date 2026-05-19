@@ -17,20 +17,20 @@ class AuxiliaryService:
     async def list_entries(self) -> list[AuxiliaryClientEntry]:
         return await self._repo.list_entries()
 
-    async def get_entry(self, name: str) -> AuxiliaryClientEntry | None:
-        return await self._repo.get_entry(name)
+    async def get_entry(self, ref: str) -> AuxiliaryClientEntry | None:
+        return await self._repo.get_entry(ref)
 
     async def create(
         self,
         *,
         name: str,
-        provider_entry: str,
+        provider_id: str,
         model: str | None = None,
         params: dict[str, Any] | None = None,
     ) -> AuxiliaryClientEntry:
         return await self._repo.create(
             name=name,
-            provider_entry=provider_entry,
+            provider_id=provider_id,
             model=model,
             params=params,
         )
@@ -39,13 +39,13 @@ class AuxiliaryService:
         self,
         name: str,
         *,
-        provider_entry: str | None = None,
+        provider_id: str | None = None,
         model: ClearableStr = None,
         params: dict[str, Any] | None = None,
     ) -> AuxiliaryClientEntry:
         return await self._repo.update(
             name,
-            provider_entry=provider_entry,
+            provider_id=provider_id,
             model=model,
             params=params,
         )

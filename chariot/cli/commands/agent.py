@@ -46,18 +46,26 @@ def agent_list_cmd() -> None:
 
 @agent_app.command("show", help="查看单个 agent profile")
 def agent_show_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
 ) -> None:
     asyncio.run(_agent_show(name))
 
 
 @agent_app.command("add", help="创建 agent profile")
 def agent_add_cmd(
-    name: Annotated[str, typer.Option("--name", help="agent profile name")] = "",
+    name: Annotated[str, typer.Option("--name", help="agent profile name (stable id auto-generated)")] = "",
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
-    prompt_bundle: Annotated[str, typer.Option("--prompt-bundle", help="prompt bundle")] = "",
-    tool_profile: Annotated[str, typer.Option("--tool-profile", help="tool profile")] = "",
-    provider_profile: Annotated[str, typer.Option("--provider-profile", help="provider profile")] = "",
+    prompt_id: Annotated[str, typer.Option("--prompt-id", help="prompt 绑定 id")] = "",
+    context_id: Annotated[str, typer.Option("--context-id", help="context 绑定 id")] = "",
+    toolset_id: Annotated[str, typer.Option("--toolset-id", help="toolset 绑定 id")] = "",
+    provider_id: Annotated[
+        str,
+        typer.Option(
+            "--provider-id",
+            "--provider-profile",
+            help="provider 绑定(推荐 --provider-id; --provider-profile 保留兼容)",
+        ),
+    ] = "",
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
     reflection_enabled: Annotated[
@@ -76,9 +84,10 @@ def agent_add_cmd(
         _agent_add(
             name=name,
             role=role,
-            prompt_bundle=prompt_bundle or None,
-            tool_profile=tool_profile or None,
-            provider_profile=provider_profile or None,
+            prompt_id=prompt_id or None,
+            context_id=context_id or None,
+            toolset_id=toolset_id or None,
+            provider_id=provider_id or None,
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,
@@ -89,19 +98,22 @@ def agent_add_cmd(
 
 @agent_app.command("update", help="update agent profile")
 def agent_update_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
+    rename: Annotated[str | None, typer.Option("--rename", help="new agent profile name")] = None,
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
-    prompt_bundle: Annotated[
+    prompt_id: Annotated[str | None, typer.Option("--prompt-id", help="prompt 绑定 id(传空串表示清空)")] = None,
+    context_id: Annotated[str | None, typer.Option("--context-id", help="context 绑定 id(传空串表示清空)")] = None,
+    toolset_id: Annotated[
         str | None,
-        typer.Option("--prompt-bundle", help="prompt bundle name(传空串 `--prompt-bundle ''` 表示清空)"),
+        typer.Option("--toolset-id", help="toolset 绑定 id(传空串清空)"),
     ] = None,
-    tool_profile: Annotated[
+    provider_id: Annotated[
         str | None,
-        typer.Option("--tool-profile", help="tool profile name(传空串清空)"),
-    ] = None,
-    provider_profile: Annotated[
-        str | None,
-        typer.Option("--provider-profile", help="provider profile name(传空串清空)"),
+        typer.Option(
+            "--provider-id",
+            "--provider-profile",
+            help="provider 绑定(推荐 --provider-id;传空串清空; --provider-profile 保留兼容)",
+        ),
     ] = None,
     budget: Annotated[str, typer.Option("--budget", help="JSON budget")] = "",
     meta: Annotated[str, typer.Option("--meta", help="JSON meta")] = "",
@@ -131,10 +143,12 @@ def agent_update_cmd(
     asyncio.run(
         _agent_update(
             name=name,
+            rename=rename,
             role=role or None,
-            prompt_bundle=_to_clearable(prompt_bundle),
-            tool_profile=_to_clearable(tool_profile),
-            provider_profile=_to_clearable(provider_profile),
+            prompt_id=_to_clearable(prompt_id),
+            context_id=_to_clearable(context_id),
+            toolset_id=_to_clearable(toolset_id),
+            provider_id=_to_clearable(provider_id),
             budget=budget,
             meta=meta,
             reflection_enabled=reflection_enabled,
@@ -159,7 +173,7 @@ def _to_clearable(value: str | None) -> ClearableStr:
 
 @agent_app.command("remove", help="remove agent profile")
 def agent_remove_cmd(
-    name: Annotated[str, typer.Argument(help="agent profile name")],
+    name: Annotated[str, typer.Argument(help="agent profile name or id")],
 ) -> None:
     asyncio.run(_agent_remove(name))
 
@@ -172,15 +186,17 @@ async def _agent_list() -> None:
         return
     rows = [
         (
+            entry.id or "-",
             entry.name,
             entry.role,
-            entry.prompt_bundle or "-",
-            entry.tool_profile or "-",
-            entry.provider_profile or "-",
+            entry.prompt_label or entry.prompt_id or "-",
+            entry.context_label or entry.context_id or "-",
+            entry.toolset_label or entry.toolset_id or "-",
+            entry.provider_label or entry.provider_id or "-",
         )
         for entry in entries
     ]
-    Renderer.table(["name", "role", "prompt_bundle", "tool_profile", "provider_profile"], rows, title="agents")
+    Renderer.table(["id", "name", "role", "prompt", "context", "toolset", "provider"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -191,11 +207,17 @@ async def _agent_show(name: str) -> None:
             return
     Renderer.kv(
         {
+            "id": entry.id or "-",
             "name": entry.name,
             "role": entry.role,
-            "prompt_bundle": entry.prompt_bundle or "-",
-            "tool_profile": entry.tool_profile or "-",
-            "provider_profile": entry.provider_profile or "-",
+            "prompt_id": entry.prompt_id or "-",
+            "prompt": entry.prompt_label or entry.prompt_id or "-",
+            "context_id": entry.context_id or "-",
+            "context": entry.context_label or entry.context_id or "-",
+            "toolset_id": entry.toolset_id or "-",
+            "toolset": entry.toolset_label or entry.toolset_id or "-",
+            "provider_id": entry.provider_id or "-",
+            "provider": entry.provider_label or entry.provider_id or "-",
             "reflection_enabled": str(entry.reflection_enabled).lower(),
             "reflection_max_retries": str(entry.reflection_max_retries),
             "created_at": _fmt_dt(entry.created_at),
@@ -214,9 +236,10 @@ async def _agent_add(
     *,
     name: str,
     role: str,
-    prompt_bundle: str | None,
-    tool_profile: str | None,
-    provider_profile: str | None,
+    prompt_id: str | None,
+    context_id: str | None,
+    toolset_id: str | None,
+    provider_id: str | None,
     budget: str,
     meta: str,
     reflection_enabled: bool = False,
@@ -231,9 +254,10 @@ async def _agent_add(
         entry = await AgentService(agent).create_agent(
             name=name.strip(),
             role=role.strip(),
-            prompt_bundle=prompt_bundle,
-            tool_profile=tool_profile,
-            provider_profile=provider_profile,
+            prompt_id=prompt_id,
+            context_id=context_id,
+            toolset_id=toolset_id,
+            provider_id=provider_id,
             budget=parsed_budget,
             meta=parsed_meta,
             reflection_enabled=reflection_enabled,
@@ -245,10 +269,12 @@ async def _agent_add(
 async def _agent_update(
     *,
     name: str,
+    rename: str | None,
     role: str | None,
-    prompt_bundle: ClearableStr,
-    tool_profile: ClearableStr,
-    provider_profile: ClearableStr,
+    prompt_id: ClearableStr,
+    context_id: ClearableStr,
+    toolset_id: ClearableStr,
+    provider_id: ClearableStr,
     budget: str,
     meta: str,
     reflection_enabled: bool | None = None,
@@ -256,20 +282,39 @@ async def _agent_update(
 ) -> None:
     parsed_budget = _parse_meta(budget) if budget.strip() else None
     parsed_meta = _parse_meta(meta) if meta.strip() else None
+    has_non_rename_updates = (
+        role is not None
+        or prompt_id is not UNSET
+        or context_id is not UNSET
+        or toolset_id is not UNSET
+        or provider_id is not UNSET
+        or parsed_budget is not None
+        or parsed_meta is not None
+        or reflection_enabled is not None
+        or reflection_max_retries is not None
+    )
+    if rename is None and not has_non_rename_updates:
+        Renderer.die("至少提供一个更新项")
+        return
     async with installed_runtime() as agent:
         service = AgentService(agent)
         try:
-            entry = await service.update_agent(
-                name=name,
-                role=role,
-                prompt_bundle=prompt_bundle,
-                tool_profile=tool_profile,
-                provider_profile=provider_profile,
-                budget=parsed_budget,
-                meta=parsed_meta,
-                reflection_enabled=reflection_enabled,
-                reflection_max_retries=reflection_max_retries,
-            )
+            if rename is not None:
+                entry = await service.rename_agent(name, rename)
+                name = entry.id or entry.name
+            if has_non_rename_updates:
+                entry = await service.update_agent(
+                    name=name,
+                    role=role,
+                    prompt_id=prompt_id,
+                    context_id=context_id,
+                    toolset_id=toolset_id,
+                    provider_id=provider_id,
+                    budget=parsed_budget,
+                    meta=parsed_meta,
+                    reflection_enabled=reflection_enabled,
+                    reflection_max_retries=reflection_max_retries,
+                )
         except ValueError as exc:
             Renderer.die(str(exc))
             return
