@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,11 @@ export default function Memory() {
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
+  const [detailSections, setDetailSections] = useState({
+    memory: true,
+    events: true,
+    links: true,
+  });
 
   const load = useCallback(async (params: { kind: string | null; search: string | null }) => {
     setState({ kind: "loading" });
@@ -78,6 +84,10 @@ export default function Memory() {
     void load({ kind: kindFilter, search: searchFilter });
   }, [kindFilter, load, searchFilter]);
 
+  const toggleDetailSection = useCallback((section: "memory" | "events" | "links") => {
+    setDetailSections((cur) => ({ ...cur, [section]: !cur[section] }));
+  }, []);
+
   const inspect = useCallback(
     async (id: string) => {
       if (detail.kind !== "idle" && detail.id === id) {
@@ -98,6 +108,7 @@ export default function Memory() {
           events: eventRes.events,
           links: linkRes.links,
         });
+        setDetailSections({ memory: true, events: true, links: true });
       } catch (e) {
         setDetail({
           kind: "err",
@@ -124,42 +135,59 @@ export default function Memory() {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-44 flex-1 space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">kind</label>
-            <Input
-              value={kindDraft}
-              onChange={(e) => setKindDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyFilter();
-                }
-              }}
-              placeholder="Optional memory kind"
-            />
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-44 flex-1 space-y-1">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">kind</label>
+              <Input
+                value={kindDraft}
+                onChange={(e) => setKindDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyFilter();
+                  }
+                }}
+                placeholder="Optional memory kind"
+              />
+            </div>
+            <div className="min-w-64 flex-[2] space-y-1">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">search</label>
+              <Input
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyFilter();
+                  }
+                }}
+                placeholder="Search memory text"
+              />
+            </div>
+            <Button onClick={applyFilter}>Apply</Button>
+            <Button variant="outline" onClick={clearFilter}>
+              Clear
+            </Button>
+            <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
+              <Badge variant="outline">{summary.memories} memories</Badge>
+            </div>
           </div>
-          <div className="min-w-64 flex-[2] space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground">search</label>
-            <Input
-              value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  applyFilter();
-                }
-              }}
-              placeholder="Search memory text"
-            />
-          </div>
-          <Button onClick={applyFilter}>Apply</Button>
-          <Button variant="outline" onClick={clearFilter}>
-            Clear
-          </Button>
-          <div className="ml-auto flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">{summary.memories} memories</Badge>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Kind 是自由分类字段。常见示例:
+            {" "}
+            <code>preference</code>
+            {" "}
+            (用户偏好),
+            {" "}
+            <code>instruction</code>
+            {" "}
+            (命令约束),
+            {" "}
+            <code>lesson</code>
+            {" "}
+            (经验教训)。
+          </p>
         </div>
       </div>
 
@@ -248,12 +276,24 @@ export default function Memory() {
                 </Badge>
                 <span className="break-all font-mono text-xs text-muted-foreground">{detail.id}</span>
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <JsonBlock title="Memory" value={detail.memory} />
-                <JsonBlock title="Meta" value={detail.memory.meta} />
-              </div>
-              <JsonBlock title="Events" value={detail.events} />
-              <JsonBlock title="Links" value={detail.links} />
+              <JsonBlock
+                title="Memory"
+                value={detail.memory}
+                expanded={detailSections.memory}
+                onToggle={() => toggleDetailSection("memory")}
+              />
+              <JsonBlock
+                title="Events"
+                value={detail.events}
+                expanded={detailSections.events}
+                onToggle={() => toggleDetailSection("events")}
+              />
+              <JsonBlock
+                title="Links"
+                value={detail.links}
+                expanded={detailSections.links}
+                onToggle={() => toggleDetailSection("links")}
+              />
             </section>
           )}
         </div>
@@ -282,13 +322,32 @@ function SectionHeader({
   );
 }
 
-function JsonBlock({ title, value }: { title: string; value: unknown }) {
+function JsonBlock({
+  title,
+  value,
+  expanded,
+  onToggle,
+}: {
+  title: string;
+  value: unknown;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
     <div className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">{title}</h3>
-      <pre className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between rounded-md border border-border bg-muted/10 px-3 py-2 text-left hover:bg-muted/20"
+        onClick={onToggle}
+      >
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">{title}</h3>
+        <ChevronDown className={"h-3.5 w-3.5 text-muted-foreground transition " + (expanded ? "" : "-rotate-90")} />
+      </button>
+      {expanded && (
+        <pre className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/20 p-4 text-xs leading-6 whitespace-pre-wrap break-words">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }
