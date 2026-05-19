@@ -6,16 +6,20 @@ export function CollapsibleJson({
   value,
   defaultExpanded: _defaultExpanded = false,
   maxHeightClassName = "max-h-56",
+  containerClassName = "rounded-lg border border-border bg-muted/10 p-4",
+  contentClassName = "rounded bg-background/80 p-3 font-mono text-[11px] leading-5",
 }: {
   title?: string;
   value: unknown;
   defaultExpanded?: boolean;
   maxHeightClassName?: string;
+  containerClassName?: string;
+  contentClassName?: string;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border border-border bg-muted/10 p-4">
+    <div className={`space-y-2 ${containerClassName}`}>
       {title ? <div className="text-sm font-medium">{title}</div> : null}
-      <div className={`${maxHeightClassName} overflow-auto rounded bg-background/80 p-3 font-mono text-[11px] leading-5`}>
+      <div className={`${maxHeightClassName} overflow-auto ${contentClassName}`}>
         <JsonTree value={value} />
       </div>
     </div>

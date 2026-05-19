@@ -85,10 +85,10 @@ function BindingStack({ agent }: { agent: AgentProfile }) {
   ];
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-0.5">
       {rows.map((row) => (
-        <div key={row.label} className="flex min-w-0 items-center gap-2">
-          <span className="w-14 shrink-0 text-[11px] font-medium text-muted-foreground">{row.label}</span>
+        <div key={row.label} className="flex min-w-0 items-center gap-1.5">
+          <span className="w-12 shrink-0 text-[10px] font-medium text-muted-foreground">{row.label}</span>
           <Badge variant={row.variant} className="min-w-0 max-w-full truncate">
             {row.text}
           </Badge>
@@ -354,9 +354,10 @@ function AgentDetailCard({
             <Button variant="outline" size="sm" onClick={() => onRemove(agent)}>Remove</Button>
           </div>
         </div>
-
-        <MetaBlock title="Budget" value={agent.budget} />
-        <MetaBlock title="Meta" value={agent.meta} />
+        <div className="space-y-4">
+          <MetaBlock title="Budget" value={agent.budget} />
+          <MetaBlock title="Meta" value={agent.meta} />
+        </div>
       </div>
     </Panel>
   );
@@ -721,7 +722,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function MetaBlock({ title, value }: { title: string; value: Record<string, unknown> }) {
-  return <CollapsibleJson title={title} value={value} />;
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">{title}</div>
+      <CollapsibleJson
+        value={value}
+        maxHeightClassName="max-h-64"
+        containerClassName="rounded-lg border border-border bg-muted/10 px-3 py-2"
+        contentClassName="rounded bg-background/80 px-2 py-1.5 font-mono text-[11px] leading-5"
+      />
+    </div>
+  );
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
