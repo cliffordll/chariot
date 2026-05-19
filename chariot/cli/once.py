@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import typer
 
-from chariot.cli.context import ChatContext, ChatError
+from chariot.cli.context import ChatContext, ChatError, ChatInterruptedError
 from chariot.cli.render import Renderer
 
 
@@ -28,11 +28,17 @@ class ChatOnce:
             raise typer.Exit(code=1) from None
         self.ctx.append_user(text)
         try:
-            result = await self.ctx.run_turn(Renderer.render_event)
+            result = await self.ctx.run_turn_interruptible(Renderer.render_event)
         except ChatError as e:
             Renderer.stream_newline()
             Renderer.error_bubble(f"{e.error_type}: {e.short_message()}")
             raise typer.Exit(code=1) from None
+        except ChatInterruptedError:
+            Renderer.stream_newline()
+            Renderer.out(
+                "中断结束：当前回复已停止" + ("，已记录到会话历史" if self.ctx.conversation_id is not None else "")
+            )
+            raise typer.Exit(code=130) from None
 
         Renderer.stream_newline()
         Renderer.meta_line(

@@ -61,7 +61,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from ulid import ULID
 
-from chariot.cli.context import ChatContext, ChatError
+from chariot.cli.context import ChatContext, ChatError, ChatInterruptedError
 from chariot.cli.render import Renderer
 from chariot.services.conversation import ConversationService
 from chariot.services.tool import ToolService
@@ -307,12 +307,12 @@ class ChatRepl:
     async def run(self) -> None:
         """主循环:读输入 → 分派 slash / 发请求 → 打印 meta 行。
 
-        Ctrl+C / EOF / `/exit` / `/quit` 退出。
+        输入阶段 Ctrl+C / EOF / `/exit` / `/quit` 退出;流式输出阶段 Ctrl+C 中断当前 turn。
         """
         Renderer.out(
             f"chariot chat · agent={self.ctx.agent_profile or '(none)'}"
             + (f" · conversation={self.ctx.conversation_id}" if self.ctx.conversation_id else "")
-            + " · /help 查看命令",
+            + " · /help 查看命令 · Ctrl+C 中断当前 turn",
         )
         if self.ctx.agent_profile is None:
             Renderer.out("提示: 先用 `/agent <id>` 选择 agent_profile，再发送消息。")
@@ -393,12 +393,20 @@ class ChatRepl:
         self.ctx.append_user(user_text)
         Renderer.start_spinner()
         try:
-            result = await self.ctx.run_turn(Renderer.render_event)
+            result = await self.ctx.run_turn_interruptible(Renderer.render_event)
         except ChatError as e:
             Renderer.stop_spinner()
             Renderer.stream_newline()
             self.ctx.pop_last()
             Renderer.error_bubble(f"{e.error_type}: {e.short_message()}")
+            return
+        except ChatInterruptedError:
+            Renderer.stop_spinner()
+            Renderer.stream_newline()
+            self.ctx.pop_last()
+            Renderer.out(
+                "中断结束：当前回复已停止" + ("，已记录到会话历史" if self.ctx.conversation_id is not None else "")
+            )
             return
         finally:
             Renderer.stop_spinner()

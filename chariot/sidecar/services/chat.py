@@ -26,6 +26,9 @@ class ChatService:
         )
         return stream_id, req, agent.run_chat(req)
 
+    def cancel_chat(self, stream_id: str) -> bool:
+        return self._runtime.cancel_chat(stream_id)
+
     @staticmethod
     def _optional_str(params: dict[str, Any], key: str) -> str | None:
         val = params.get(key)

@@ -26,6 +26,8 @@ AIAgent / Provider 流里出错时 yield `ChatEvent(kind="error")`(不抛异常)
 
 from __future__ import annotations
 
+import asyncio
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -56,6 +58,10 @@ class ChatError(Exception):
     def short_message(self, limit: int = 200) -> str:
         s = self.error_message.strip()
         return s if len(s) <= limit else s[:limit] + "…"
+
+
+class ChatInterruptedError(Exception):
+    """Current chat turn was interrupted by the user."""
 
 
 @dataclass(frozen=True)
@@ -178,6 +184,34 @@ class ChatContext:
             error=None,
         )
         return result
+
+    async def run_turn_interruptible(self, on_event: Callable[[ChatEvent], None]) -> TurnResult:
+        """Run one turn and let Ctrl+C cancel only the in-flight turn."""
+        turn_task = asyncio.create_task(self.run_turn(on_event))
+        previous = signal.getsignal(signal.SIGINT)
+        interrupted = False
+
+        def _handle_sigint(signum: int, frame: object | None) -> None:
+            nonlocal interrupted
+            del signum, frame
+            if not turn_task.done():
+                interrupted = True
+                turn_task.cancel()
+                return
+            if callable(previous):
+                previous(signal.SIGINT, None)
+                return
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _handle_sigint)
+        try:
+            return await turn_task
+        except asyncio.CancelledError as e:
+            if interrupted:
+                raise ChatInterruptedError from e
+            raise
+        finally:
+            signal.signal(signal.SIGINT, previous)
 
     @staticmethod
     def _accumulate_text(ev: ChatEvent, sink: list[str]) -> None:

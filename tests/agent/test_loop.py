@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -429,6 +430,50 @@ class TestProviderError:
         assert store.assistant_messages[0]["content"] == [
             {"type": "text", "text": "[error] upstream_auth_failed: 401 from upstream"}
         ]
+
+
+class TestCancellation:
+    async def test_cancellation_persists_partial_and_cancelled_message(self, req: ChatRequest) -> None:
+        class _BlockingProvider(BaseProvider):
+            def __init__(self) -> None:
+                self.config = BaseProviderConfig(name="blocking", model="scripted-1")
+                self.started = asyncio.Event()
+
+            @classmethod
+            def create(cls, options: dict[str, Any]) -> _BlockingProvider:
+                return cls()
+
+            async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+                del req
+                yield ChatEvent.message_start(message_id="m1", model="scripted-1")
+                yield ChatEvent.text_block_start(index=0)
+                yield ChatEvent.text_delta("partial", index=0)
+                self.started.set()
+                await asyncio.Future[None]()
+                yield  # pragma: no cover
+
+        provider = _BlockingProvider()
+        store = _StubMessageStore()
+        loop = AgentLoop(
+            provider=provider,
+            tools={},
+            message_store=store,
+            conversation_id="conv_cancel",
+            provider_snapshot="blocking",
+        )
+
+        async def _consume() -> list[ChatEvent]:
+            return [ev async for ev in loop.stream_chat(req)]
+
+        task = asyncio.create_task(_consume())
+        await provider.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert len(store.assistant_messages) == 2
+        assert store.assistant_messages[0]["content"] == [{"type": "text", "text": "partial"}]
+        assert store.assistant_messages[1]["content"] == [{"type": "text", "text": "[cancelled] interrupted by user"}]
 
 
 class TestProviderContractValidation:

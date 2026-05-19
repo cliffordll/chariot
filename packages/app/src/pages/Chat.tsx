@@ -279,6 +279,10 @@ function isErrorBubbleText(text: string): boolean {
   return text.startsWith("[error] ");
 }
 
+function isCancelledBubbleText(text: string): boolean {
+  return text.startsWith("[cancelled] ");
+}
+
 export default function Chat() {
   const [providersState, setProvidersState] = useState<ProvidersState>({ kind: "loading" });
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -749,9 +753,7 @@ export default function Chat() {
           },
         };
       });
-      if (!result.aborted) {
-        void refreshAfterTurn(targetKey, conversationId, requestId);
-      }
+      void refreshAfterTurn(targetKey, conversationId, requestId);
     } catch (e) {
       setChatPageStoreState((state) => {
         const current = state.sessions[targetKey];
@@ -1247,15 +1249,23 @@ function MessageRow({ msg }: { msg: Message }) {
 
 function AssistantTextBubble({ text }: { text: string }) {
   const isError = isErrorBubbleText(text);
+  const isCancelled = isCancelledBubbleText(text);
   return (
     <div
       className={
         "max-w-[85%] rounded-lg border px-3 py-2 text-sm " +
         (isError
           ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : isCancelled
+            ? "border-amber-300/40 bg-amber-50 text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-100"
           : "border-border bg-background")
       }
     >
+      {isCancelled && (
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+          中断结束
+        </div>
+      )}
       {text ? (
         <MarkdownText text={text} />
       ) : (

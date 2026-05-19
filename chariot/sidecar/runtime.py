@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -29,6 +30,7 @@ class SidecarRuntime:
         self._agent = agent
         self._db_path = db_path
         self._session_key = session_key
+        self._running_chats: dict[str, asyncio.Task[object]] = {}
 
     @property
     def agent(self) -> SidecarAgent:
@@ -86,3 +88,18 @@ class SidecarRuntime:
 
         self._agent = await AIAgent.bootstrap(self._db_path)
         return self._agent
+
+    def register_chat(self, stream_id: str, task: asyncio.Task[object]) -> None:
+        self._running_chats[stream_id] = task
+
+    def unregister_chat(self, stream_id: str, task: asyncio.Task[object]) -> None:
+        current = self._running_chats.get(stream_id)
+        if current is task:
+            self._running_chats.pop(stream_id, None)
+
+    def cancel_chat(self, stream_id: str) -> bool:
+        task = self._running_chats.get(stream_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True

@@ -654,6 +654,10 @@ export interface DiffResult {
 }
 
 const apiCore = {
+  cancelChat(stream_id: string): Promise<{ cancelled: boolean }> {
+    return rpc("cancel_chat", { stream_id });
+  },
+
   listConversations(): Promise<{ conversations: Conversation[] }> {
     return rpc("list_conversations");
   },

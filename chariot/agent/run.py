@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from collections.abc import AsyncIterator
@@ -537,6 +538,7 @@ class AIAgent:
         last_usage: dict[str, Any] | None = None
         last_stop_reason: str | None = None
         last_error: ChatEvent | None = None
+        was_cancelled = False
 
         try:
             if req.is_stateful():
@@ -553,13 +555,30 @@ class AIAgent:
                 if event.kind == "error":
                     last_error = event
                 yield event
+        except asyncio.CancelledError:
+            was_cancelled = True
+            raise
         finally:
-            status = TurnStatus.FAILED if last_error is not None else TurnStatus.COMPLETED
+            status = (
+                TurnStatus.CANCELLED
+                if was_cancelled
+                else TurnStatus.FAILED
+                if last_error is not None
+                else TurnStatus.COMPLETED
+            )
             await turn.finalize(
                 status=status,
                 stop_reason=last_stop_reason,
-                error_type=last_error.error_type if last_error is not None else None,
-                error_message=last_error.error_message if last_error is not None else None,
+                error_type=(
+                    "cancelled" if was_cancelled else last_error.error_type if last_error is not None else None
+                ),
+                error_message=(
+                    "chat cancelled by user"
+                    if was_cancelled
+                    else last_error.error_message
+                    if last_error is not None
+                    else None
+                ),
                 input_tokens=(last_usage or {}).get("input_tokens"),
                 output_tokens=(last_usage or {}).get("output_tokens"),
                 cache_read_tokens=(last_usage or {}).get("cache_read_input_tokens"),

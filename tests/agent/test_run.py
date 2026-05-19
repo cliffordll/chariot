@@ -110,6 +110,25 @@ class _RaisingProvider(BaseProvider):
         yield  # pragma: no cover
 
 
+class _BlockingProvider(BaseProvider):
+    def __init__(self, name: str = "blocking") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+        self.started = asyncio.Event()
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _BlockingProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        del req
+        yield ChatEvent.message_start(message_id="m1", model=self.config.model)
+        yield ChatEvent.text_block_start(index=0)
+        yield ChatEvent.text_delta("partial", index=0)
+        self.started.set()
+        await asyncio.Future[None]()
+        yield  # pragma: no cover
+
+
 class _StubTool(BaseTool):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -470,3 +489,34 @@ class TestBootstrapProviderOverrides:
                 _seed_anthropic_entry,
                 provider_overrides={"claude": {"base_url": ""}},
             )
+
+
+class TestStatefulCancellationPersistence:
+    async def test_stateful_cancellation_is_persisted_into_history(self, sessionmaker) -> None:
+        provider = _BlockingProvider("p")
+        agent = AIAgent(
+            providers={"p": provider},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+        req = ChatRequest(
+            provider_ref="p",
+            messages=[Message(role="user", content="hi")],
+            conversation_id="01CONVCANCELPERSIST00000000",
+        )
+
+        async def _consume() -> list[ChatEvent]:
+            return [ev async for ev in agent.run_chat(req)]
+
+        task = asyncio.create_task(_consume())
+        await provider.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        async with sessionmaker() as session:
+            messages = await ConversationService(session).get_messages("01CONVCANCELPERSIST00000000")
+        assert messages[-2]["role"] == "assistant"
+        assert messages[-2]["content"] == [{"type": "text", "text": "partial"}]
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == [{"type": "text", "text": "[cancelled] interrupted by user"}]

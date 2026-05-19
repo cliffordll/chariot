@@ -185,7 +185,9 @@ def register_methods(
     from chariot.sidecar.methods.toolset import ToolsetMethods
     from chariot.sidecar.methods.trace import TraceMethods
 
-    server.method("chat")(ChatMethod(runtime))
+    chat = ChatMethod(runtime)
+    server.method("chat")(chat)
+    server.method("cancel_chat")(chat.cancel)
 
     contexts = ContextMethods(runtime)
     server.method("list_context_snapshots")(contexts.list_)

@@ -16,7 +16,7 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import { rpc } from "@/lib/api";
+import { api, rpc } from "@/lib/api";
 
 // ============================================================
 // Claude 形态 ChatEvent payload(对齐 chariot.agent.chat_event.ChatEvent)
@@ -202,10 +202,13 @@ export async function runChatTurn(
       onEvent(stream_ev);
     }
   });
-  signal.addEventListener("abort", () => unlisten());
+  signal.addEventListener("abort", () => {
+    unlisten();
+    void api.cancelChat(expectedStreamId).catch(() => {});
+  });
   console.debug("[chariot] chat invoke start", req.provider_ref, req.conversation_id ?? "(stateless)", expectedStreamId);
   try {
-    const result = await rpc<{ stream_id: string; ended_at: number }>("chat", {
+    const result = await rpc<{ stream_id: string; ended_at: number; cancelled?: boolean }>("chat", {
       ...req,
       stream_id: expectedStreamId,
     });
@@ -219,7 +222,7 @@ export async function runChatTurn(
       endedAt: result.ended_at,
       inputTokens: tracker.inputTokens,
       outputTokens: tracker.outputTokens,
-      aborted: false,
+      aborted: signal.aborted || result.cancelled === true,
     };
   } catch (e) {
     console.debug("[chariot] chat threw", { frames: frameCount, error: e });

@@ -74,6 +74,23 @@ class _MockAgent:
             yield ev
 
 
+class _BlockingAgent:
+    def __init__(self) -> None:
+        self.last_req: ChatRequest | None = None
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def run_chat(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        self.last_req = req
+        self.started.set()
+        try:
+            await asyncio.Future[None]()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+        yield  # pragma: no cover
+
+
 def _chat_request_frame(rid: int, params: dict[str, Any]) -> bytes:
     """拼一帧 chat request(带换行)。"""
     return (json.dumps({"jsonrpc": "2.0", "id": rid, "method": "chat", "params": params}) + "\n").encode()
@@ -196,6 +213,50 @@ class TestChatStreaming:
         assert logs[0].status == "ok"
         assert logs[0].input_tokens == 3
         assert logs[0].output_tokens == 7
+
+    async def test_cancel_chat_cancels_inflight_turn_and_returns_response(self) -> None:
+        agent = _BlockingAgent()
+        server = JsonRpcServer()
+        register_methods(server, agent, db_path=_DUMMY_DB_PATH)
+
+        reader = asyncio.StreamReader()
+        writer = MockWriter()
+        serve_task = asyncio.create_task(server.serve(reader, writer))
+
+        reader.feed_data(
+            _chat_request_frame(
+                1,
+                {
+                    "provider_ref": "mock",
+                    "stream_id": "stream_cancel_me",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        )
+        await agent.started.wait()
+        reader.feed_data(
+            (
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "cancel_chat",
+                        "params": {"stream_id": "stream_cancel_me"},
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+        reader.feed_eof()
+        await serve_task
+
+        assert agent.cancelled.is_set() is True
+        lines = writer.lines()
+        cancel_resp = next(line for line in lines if line.get("id") == 2)
+        chat_resp = next(line for line in lines if line.get("id") == 1)
+        assert cancel_resp["result"] == {"cancelled": True}
+        assert chat_resp["result"]["stream_id"] == "stream_cancel_me"
+        assert chat_resp["result"]["cancelled"] is True
 
 
 # ---------------------------------------------------------------------------

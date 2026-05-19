@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from collections.abc import AsyncIterator
@@ -119,6 +120,12 @@ class AgentLoop:
                 await self._persist_error(err)
                 yield err
                 return
+            except asyncio.CancelledError:
+                if pc_handle is not None:
+                    await pc_handle.finish(error_type="cancelled")
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_cancelled()
+                raise
 
             # 正常或 stop_reason 结束 → 写 provider call 完成摘要
             if pc_handle is not None and not saw_error:
@@ -234,6 +241,16 @@ class AgentLoop:
         await self._message_store.append_assistant_message(
             self._conversation_id,
             content=[{"type": "text", "text": self._format_error_text(event)}],
+            provider_snapshot=self._provider_snapshot,
+            agent_profile=self._agent_profile,
+        )
+
+    async def _persist_cancelled(self) -> None:
+        if self._message_store is None or self._conversation_id is None:
+            return
+        await self._message_store.append_assistant_message(
+            self._conversation_id,
+            content=[{"type": "text", "text": "[cancelled] interrupted by user"}],
             provider_snapshot=self._provider_snapshot,
             agent_profile=self._agent_profile,
         )
