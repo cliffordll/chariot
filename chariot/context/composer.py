@@ -33,6 +33,7 @@ class ContextComposer:
         history: list[dict[str, Any]],
         memory_entries: list[dict[str, Any]] | None = None,
         memory_policy: dict[str, Any] | None = None,
+        context_policy: dict[str, Any] | None = None,
         provider_capabilities: dict[str, Any] | None = None,
     ) -> ContextSnapshot:
         request = asdict(req)
@@ -41,6 +42,7 @@ class ContextComposer:
             history=history,
             memory_entries=memory_entries,
             memory_policy=memory_policy,
+            context_policy=context_policy,
             provider_snapshot=provider_snapshot,
             model=model,
             provider_capabilities=provider_capabilities,
@@ -81,6 +83,7 @@ class ContextComposer:
         history: list[dict[str, Any]],
         memory_entries: list[dict[str, Any]] | None,
         memory_policy: dict[str, Any] | None,
+        context_policy: dict[str, Any] | None,
         provider_snapshot: str,
         model: str | None,
         provider_capabilities: dict[str, Any] | None,
@@ -91,12 +94,16 @@ class ContextComposer:
             "model": model,
             "capabilities": provider_capabilities or {},
         }
-        policy_state = memory_policy or {
-            "version": "v1",
-            "name": "default_context_policy",
-            "history_messages": len(history),
-            "trimmed": False,
-        }
+        policy_state = (
+            context_policy
+            or memory_policy
+            or {
+                "version": "v1",
+                "name": "default_context_policy",
+                "history_messages": len(history),
+                "trimmed": False,
+            }
+        )
         return [
             ContextSlice(
                 name="conversation_history",
@@ -125,5 +132,9 @@ class ContextComposer:
             ContextSlice(name="tool_state", source="ChatRequest.tools", content=tool_names),
             ContextSlice(name="skill_state", source="not implemented yet", content=None),
             ContextSlice(name="provider_state", source="BaseProvider capabilities", content=provider_state),
-            ContextSlice(name="policy_state", source="default context policy", content=policy_state),
+            ContextSlice(
+                name="policy_state",
+                source=str(policy_state.get("name", "context policy")),
+                content=policy_state,
+            ),
         ]

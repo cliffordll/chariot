@@ -56,6 +56,7 @@ def agent_add_cmd(
     name: Annotated[str, typer.Option("--name", help="agent profile name (stable id auto-generated)")] = "",
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_id: Annotated[str, typer.Option("--prompt-id", help="prompt 绑定 id")] = "",
+    context_id: Annotated[str, typer.Option("--context-id", help="context 绑定 id")] = "",
     toolset_id: Annotated[str, typer.Option("--toolset-id", help="toolset 绑定 id")] = "",
     provider_id: Annotated[
         str,
@@ -84,6 +85,7 @@ def agent_add_cmd(
             name=name,
             role=role,
             prompt_id=prompt_id or None,
+            context_id=context_id or None,
             toolset_id=toolset_id or None,
             provider_id=provider_id or None,
             budget=budget,
@@ -100,6 +102,7 @@ def agent_update_cmd(
     rename: Annotated[str | None, typer.Option("--rename", help="new agent profile name")] = None,
     role: Annotated[str, typer.Option("--role", help="agent role")] = "",
     prompt_id: Annotated[str | None, typer.Option("--prompt-id", help="prompt 绑定 id(传空串表示清空)")] = None,
+    context_id: Annotated[str | None, typer.Option("--context-id", help="context 绑定 id(传空串表示清空)")] = None,
     toolset_id: Annotated[
         str | None,
         typer.Option("--toolset-id", help="toolset 绑定 id(传空串清空)"),
@@ -143,6 +146,7 @@ def agent_update_cmd(
             rename=rename,
             role=role or None,
             prompt_id=_to_clearable(prompt_id),
+            context_id=_to_clearable(context_id),
             toolset_id=_to_clearable(toolset_id),
             provider_id=_to_clearable(provider_id),
             budget=budget,
@@ -186,12 +190,13 @@ async def _agent_list() -> None:
             entry.name,
             entry.role,
             entry.prompt_label or entry.prompt_id or "-",
+            entry.context_label or entry.context_id or "-",
             entry.toolset_label or entry.toolset_id or "-",
             entry.provider_label or entry.provider_id or "-",
         )
         for entry in entries
     ]
-    Renderer.table(["id", "name", "role", "prompt", "toolset", "provider"], rows, title="agents")
+    Renderer.table(["id", "name", "role", "prompt", "context", "toolset", "provider"], rows, title="agents")
 
 
 async def _agent_show(name: str) -> None:
@@ -207,6 +212,8 @@ async def _agent_show(name: str) -> None:
             "role": entry.role,
             "prompt_id": entry.prompt_id or "-",
             "prompt": entry.prompt_label or entry.prompt_id or "-",
+            "context_id": entry.context_id or "-",
+            "context": entry.context_label or entry.context_id or "-",
             "toolset_id": entry.toolset_id or "-",
             "toolset": entry.toolset_label or entry.toolset_id or "-",
             "provider_id": entry.provider_id or "-",
@@ -230,6 +237,7 @@ async def _agent_add(
     name: str,
     role: str,
     prompt_id: str | None,
+    context_id: str | None,
     toolset_id: str | None,
     provider_id: str | None,
     budget: str,
@@ -247,6 +255,7 @@ async def _agent_add(
             name=name.strip(),
             role=role.strip(),
             prompt_id=prompt_id,
+            context_id=context_id,
             toolset_id=toolset_id,
             provider_id=provider_id,
             budget=parsed_budget,
@@ -263,6 +272,7 @@ async def _agent_update(
     rename: str | None,
     role: str | None,
     prompt_id: ClearableStr,
+    context_id: ClearableStr,
     toolset_id: ClearableStr,
     provider_id: ClearableStr,
     budget: str,
@@ -275,6 +285,7 @@ async def _agent_update(
     has_non_rename_updates = (
         role is not None
         or prompt_id is not UNSET
+        or context_id is not UNSET
         or toolset_id is not UNSET
         or provider_id is not UNSET
         or parsed_budget is not None
@@ -296,6 +307,7 @@ async def _agent_update(
                     name=name,
                     role=role,
                     prompt_id=prompt_id,
+                    context_id=context_id,
                     toolset_id=toolset_id,
                     provider_id=provider_id,
                     budget=parsed_budget,

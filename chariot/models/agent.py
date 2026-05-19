@@ -47,6 +47,8 @@ class AgentProfile:
     agent_label: str | None = None
     prompt_id: str | None = None
     prompt_label: str | None = None
+    context_id: str | None = None
+    context_label: str | None = None
     toolset_id: str | None = None
     toolset_label: str | None = None
     provider_id: str | None = None
@@ -72,8 +74,10 @@ class AgentProfile:
         role: str,
         provider_id: str | None = None,
         prompt_id: str | None = None,
+        context_id: str | None = None,
         toolset_id: str | None = None,
         prompt_label: str | None = None,
+        context_label: str | None = None,
         toolset_label: str | None = None,
         provider_label: str | None = None,
         budget: dict[str, Any] | None = None,
@@ -91,6 +95,8 @@ class AgentProfile:
             role=role,
             prompt_id=prompt_id,
             prompt_label=prompt_label,
+            context_id=context_id,
+            context_label=context_label,
             toolset_id=toolset_id,
             toolset_label=toolset_label,
             provider_id=provider_id,

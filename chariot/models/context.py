@@ -15,6 +15,30 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class ContextBundleEntry:
+    id: str
+    name: str
+    description: str | None
+    is_active: bool
+    version_count: int
+    active_version: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ContextVersionEntry:
+    id: str
+    bundle_id: str
+    bundle_name: str
+    version: str
+    spec: dict[str, Any]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class ContextSlice:
     name: str
     source: str
@@ -51,6 +75,10 @@ class ContextSnapshotEntry:
 class ContextTraceEntry:
     id: str
     snapshot_id: str
+    bundle_id: str | None
+    bundle_name: str | None
+    version_id: str | None
+    version: str | None
     conversation_id: str | None
     provider_id: str | None
     provider_snapshot: str

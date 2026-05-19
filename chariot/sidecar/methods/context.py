@@ -15,6 +15,71 @@ class ContextMethods(MethodBase):
         super().__init__(runtime)
         self._service = ContextApi(runtime)
 
+    async def bundles(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del params, ctx
+        async with self._rpc_errors():
+            bundles = await self._service.list_bundles()
+        return {"bundles": bundles}
+
+    async def show(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        async with self._rpc_errors():
+            bundle = await self._service.get_bundle(name=name)
+        return {"bundle": bundle}
+
+    async def versions(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        bundle_name = self._require_str(params, "bundle_name")
+        async with self._rpc_errors():
+            versions = await self._service.list_versions(bundle_name=bundle_name)
+        return {"versions": versions}
+
+    async def version(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        bundle_name = self._require_str(params, "bundle_name")
+        version = self._require_str(params, "version")
+        async with self._rpc_errors():
+            entry = await self._service.get_version(bundle_name=bundle_name, version=version)
+        return {"version": entry}
+
+    async def add(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        description = self._optional_str(params, "description")
+        spec = self._optional_dict(params, "spec")
+        async with self._rpc_errors():
+            result = await self._service.add_bundle(name=name, description=description, spec=spec)
+        return result
+
+    async def update(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        rename = self._optional_str(params, "rename")
+        description = params.get("description")
+        if description is not None and not isinstance(description, str):
+            raise TypeError("description must be a string or null")
+        spec = self._optional_dict(params, "spec")
+        async with self._rpc_errors():
+            result = await self._service.update_bundle(
+                name=name,
+                rename=rename,
+                description=description,
+                description_set="description" in params,
+                spec=spec,
+            )
+        return result
+
+    async def activate(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
+        del ctx
+        name = self._require_str(params, "name")
+        version = params.get("version")
+        if version is not None and not isinstance(version, str):
+            raise TypeError("version must be a string or null")
+        async with self._rpc_errors():
+            result = await self._service.activate_bundle(name=name, version=version)
+        return result
+
     async def list_(self, params: dict[str, Any], ctx: RpcContext) -> dict[str, Any]:
         del ctx
         conversation_id = params.get("conversation_id")

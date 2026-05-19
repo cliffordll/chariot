@@ -399,6 +399,8 @@ class ContextTraceRow(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
     snapshot_id: Mapped[str] = mapped_column(index=True)
+    bundle_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    version_id: Mapped[str | None] = mapped_column(default=None, index=True)
     conversation_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_snapshot: Mapped[str] = mapped_column("provider_snapshot", index=True)
@@ -407,6 +409,29 @@ class ContextTraceRow(Base):
     policy: Mapped[str] = mapped_column(default="{}")
     selected_refs: Mapped[str] = mapped_column(default="[]")
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+
+
+class ContextBundleRow(Base):
+    __tablename__ = "context_bundles"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    name: Mapped[str] = mapped_column(unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(default=None)
+    is_active: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class ContextVersionRow(Base):
+    __tablename__ = "context_versions"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=_new_ulid)
+    bundle_id: Mapped[str] = mapped_column(index=True)
+    version: Mapped[str] = mapped_column(index=True)
+    spec: Mapped[str] = mapped_column(default="{}")
+    is_active: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 
 class AgentProfileRow(Base):
@@ -418,6 +443,7 @@ class AgentProfileRow(Base):
     id: Mapped[str] = mapped_column(unique=True, index=True, default=_new_ulid)
     role: Mapped[str] = mapped_column(index=True)
     prompt_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    context_id: Mapped[str | None] = mapped_column(default=None, index=True)
     toolset_id: Mapped[str | None] = mapped_column(default=None, index=True)
     provider_id: Mapped[str | None] = mapped_column(default=None)
     budget: Mapped[str] = mapped_column(default="{}")

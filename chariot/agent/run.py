@@ -212,6 +212,7 @@ class AIAgent:
         from chariot.database.session import init_db
         from chariot.providers.registry import ProviderRegistry
         from chariot.services.auxiliary import AuxiliaryService
+        from chariot.services.context import ContextService
         from chariot.services.prompt import PromptService
         from chariot.services.provider import ProviderService
         from chariot.services.tool import ToolService
@@ -222,6 +223,7 @@ class AIAgent:
             await ProviderService(session).seed_if_empty()
             await ToolService(session).sync_builtin_tools()
             await PromptService(session).seed_if_empty()
+            await ContextService(session).seed_if_empty()
             cfg = await ChariotConfig.from_db(session)
             tool_cfg = await ToolConfig.from_db(session)
             aux_entries = await AuxiliaryService(session).list_entries()
@@ -782,6 +784,11 @@ class AIAgent:
         history = await conversation_service.load_history_as_messages(conversation_id)
         memory_policy = MemoryPolicy()
         memory_entries = await self._load_memory_entries(session, req, provider_record, memory_policy)
+        context_bundle_ref = binding.agent_profile.context_id if binding.agent_profile is not None else None
+        context_bundle = await context_service.resolve_bundle(bundle_name=context_bundle_ref)
+        context_version = (
+            await context_service.get_active_version(context_bundle.name) if context_bundle is not None else None
+        )
         context_snapshot = await context_service.record_snapshot(
             ContextComposer.build_snapshot(
                 req,
@@ -791,6 +798,7 @@ class AIAgent:
                 history=[{"role": msg.role, "content": msg.content} for msg in history],
                 memory_entries=memory_entries,
                 memory_policy=memory_policy.describe(),
+                context_policy=context_version.spec if context_version is not None else None,
                 provider_capabilities=dataclasses.asdict(provider.capabilities),
             )
         )
@@ -809,6 +817,9 @@ class AIAgent:
         await context_service.record_trace(
             context_snapshot.id,
             prompt_trace_id=prompt_trace.id,
+            policy_name=context_version.version if context_version is not None else "default_context_policy",
+            bundle_id=context_bundle.id if context_bundle is not None else None,
+            version_id=context_version.id if context_version is not None else None,
         )
         if turn is not None:
             await turn.update_links(

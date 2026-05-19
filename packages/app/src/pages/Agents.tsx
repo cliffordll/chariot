@@ -38,7 +38,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type AgentProfile, type ApiError, type PromptBundle, type Provider, type Toolset } from "@/lib/api";
+import {
+  api,
+  type AgentProfile,
+  type ApiError,
+  type ContextBundle,
+  type PromptBundle,
+  type Provider,
+  type Toolset,
+} from "@/lib/api";
 
 type AgentsState =
   | { kind: "loading" }
@@ -53,6 +61,7 @@ type DetailState =
 
 type BindingOptions = {
   bundles: PromptBundle[];
+  contexts: ContextBundle[];
   toolsets: Toolset[];
   providers: Provider[];
 };
@@ -69,6 +78,7 @@ function bindingText(label: string | null, ref: string | null): string {
 function BindingStack({ agent }: { agent: AgentProfile }) {
   const rows = [
     { label: "Prompt", text: bindingText(agent.prompt_label, agent.prompt_id), variant: "outline" as const },
+    { label: "Context", text: bindingText(agent.context_label, agent.context_id), variant: "outline" as const },
     { label: "Toolset", text: bindingText(agent.toolset_label, agent.toolset_id), variant: "secondary" as const },
     { label: "Provider", text: bindingText(agent.provider_label, agent.provider_id), variant: "outline" as const },
   ];
@@ -95,7 +105,12 @@ export default function Agents() {
   const [removeAgent, setRemoveAgent] = useState<AgentProfile | null>(null);
   const [removing, setRemoving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [bindingOptions, setBindingOptions] = useState<BindingOptions>({ bundles: [], toolsets: [], providers: [] });
+  const [bindingOptions, setBindingOptions] = useState<BindingOptions>({
+    bundles: [],
+    contexts: [],
+    toolsets: [],
+    providers: [],
+  });
 
   const detailRef = useRef(detail);
   useEffect(() => {
@@ -143,12 +158,13 @@ export default function Agents() {
   useEffect(() => {
     void (async () => {
       try {
-        const [{ bundles }, { toolsets }, { providers }] = await Promise.all([
+        const [{ bundles }, { bundles: contexts }, { toolsets }, { providers }] = await Promise.all([
           api.listPromptBundles(),
+          api.listContextBundles(),
           api.listToolsets(),
           api.listProviders(),
         ]);
-        setBindingOptions({ bundles, toolsets, providers });
+        setBindingOptions({ bundles, contexts, toolsets, providers });
       } catch {
         // 静默:datalist 是辅助提示,失败不阻断 Agents 页主功能
       }
@@ -319,6 +335,7 @@ function AgentDetailCard({
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{agent.role}</Badge>
               {agent.prompt_id && <Badge variant="outline">{bindingText(agent.prompt_label, agent.prompt_id)}</Badge>}
+              {agent.context_id && <Badge variant="outline">{bindingText(agent.context_label, agent.context_id)}</Badge>}
               {agent.toolset_id && <Badge variant="secondary">{bindingText(agent.toolset_label, agent.toolset_id)}</Badge>}
               {agent.provider_id && <Badge variant="outline">{bindingText(agent.provider_label, agent.provider_id)}</Badge>}
               {agent.reflection_enabled && (
@@ -389,6 +406,7 @@ function CreateAgentDialog({
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [promptId, setPromptId] = useState("");
+  const [contextId, setContextId] = useState("");
   const [toolsetId, setToolsetId] = useState("");
   const [providerProfile, setProviderProfile] = useState("");
   const [budget, setBudget] = useState("{}");
@@ -415,6 +433,7 @@ function CreateAgentDialog({
         name,
         role,
         prompt_id: promptId || null,
+        context_id: contextId || null,
         toolset_id: toolsetId || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
@@ -448,12 +467,20 @@ function CreateAgentDialog({
               <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="planner" />
             </Field>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <Field label="Prompt ID">
-                <BindingSelect
+              <BindingSelect
                 value={promptId}
                 onChange={setPromptId}
                 options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
+                placeholder="(none)"
+              />
+            </Field>
+            <Field label="Context ID">
+              <BindingSelect
+                value={contextId}
+                onChange={setContextId}
+                options={options.contexts.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>
@@ -529,6 +556,7 @@ function EditAgentDialog({
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
   const [promptId, setPromptId] = useState(agent.prompt_id ?? "");
+  const [contextId, setContextId] = useState(agent.context_id ?? "");
   const [toolsetId, setToolsetId] = useState(agent.toolset_id ?? "");
   const [providerProfile, setProviderProfile] = useState(agent.provider_id ?? "");
   const [budget, setBudget] = useState(JSON.stringify(agent.budget, null, 2));
@@ -555,6 +583,7 @@ function EditAgentDialog({
         rename: name.trim() !== agent.name ? name.trim() : undefined,
         role,
         prompt_id: promptId || null,
+        context_id: contextId || null,
         toolset_id: toolsetId || null,
         provider_id: providerProfile || null,
         budget: parsedBudget,
@@ -584,12 +613,20 @@ function EditAgentDialog({
           <Field label="Role">
             <Input value={role} onChange={(e) => setRole(e.target.value)} />
           </Field>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <Field label="Prompt ID">
               <BindingSelect
                 value={promptId}
                 onChange={setPromptId}
                 options={options.bundles.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
+                placeholder="(none)"
+              />
+            </Field>
+            <Field label="Context ID">
+              <BindingSelect
+                value={contextId}
+                onChange={setContextId}
+                options={options.contexts.map((bundle) => ({ value: bundle.id, label: bundle.name }))}
                 placeholder="(none)"
               />
             </Field>

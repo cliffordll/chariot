@@ -243,6 +243,10 @@ export interface ContextSnapshot {
 export interface ContextTrace {
   id: string;
   snapshot_id: string;
+  bundle_id: string | null;
+  bundle_name: string | null;
+  version_id: string | null;
+  version: string | null;
   conversation_id: string | null;
   provider_snapshot: string;
   model: string | null;
@@ -255,6 +259,32 @@ export interface ContextTrace {
 export interface ContextInspectResult {
   snapshot: ContextSnapshot | null;
   trace: ContextTrace | null;
+}
+
+export interface ContextBundle {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  version_count: number;
+  active_version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextVersion {
+  id: string;
+  bundle_id: string;
+  bundle_name: string;
+  version: string;
+  spec: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextBundleDetail extends ContextBundle {
+  versions?: ContextVersion[];
 }
 
 export interface MemoryEntry {
@@ -374,6 +404,8 @@ export interface AgentProfile {
   role: string;
   prompt_id: string | null;
   prompt_label: string | null;
+  context_id: string | null;
+  context_label: string | null;
   toolset_id: string | null;
   toolset_label: string | null;
   provider_id: string | null;
@@ -938,6 +970,22 @@ const apiCore = {
     return rpc("list_context_snapshots", { ...params });
   },
 
+  listContextBundles(): Promise<{ bundles: ContextBundle[] }> {
+    return rpc("list_context_bundles");
+  },
+
+  getContextBundle(name: string): Promise<{ bundle: ContextBundleDetail }> {
+    return rpc("get_context_bundle", { name });
+  },
+
+  listContextVersions(bundle_name: string): Promise<{ versions: ContextVersion[] }> {
+    return rpc("list_context_versions", { bundle_name });
+  },
+
+  getContextVersion(bundle_name: string, version: string): Promise<{ version: ContextVersion }> {
+    return rpc("get_context_version", { bundle_name, version });
+  },
+
   getContextSnapshot(snapshot_id: string): Promise<{ snapshot: ContextSnapshot }> {
     return rpc("get_context_snapshot", { snapshot_id });
   },
@@ -950,6 +998,32 @@ const apiCore = {
 
   inspectContext(context_id: string): Promise<ContextInspectResult> {
     return rpc("inspect_context", { context_id });
+  },
+
+  addContextBundle(payload: {
+    name: string;
+    description?: string | null;
+    spec?: Record<string, unknown> | null;
+  }): Promise<{ bundle: ContextBundle; version: ContextVersion }> {
+    return rpc("add_context_bundle", payload as Record<string, unknown>);
+  },
+
+  updateContextBundle(
+    payload: {
+      name: string;
+      rename?: string | null;
+      description?: string | null;
+      spec?: Record<string, unknown> | null;
+    },
+  ): Promise<{ bundle: ContextBundle; version: ContextVersion }> {
+    return rpc("update_context_bundle", payload as Record<string, unknown>);
+  },
+
+  activateContextBundle(payload: {
+    name: string;
+    version?: string | null;
+  }): Promise<{ bundle: ContextBundle; version: ContextVersion | null }> {
+    return rpc("activate_context_bundle", payload as Record<string, unknown>);
   },
 
   listMemories(params: {
@@ -1045,6 +1119,7 @@ const apiCore = {
     name: string;
     role: string;
     prompt_id?: string | null;
+    context_id?: string | null;
     toolset_id?: string | null;
     provider_id?: string | null;
     budget?: Record<string, unknown>;
@@ -1061,6 +1136,7 @@ const apiCore = {
       rename?: string;
       role?: string | null;
       prompt_id?: string | null;
+      context_id?: string | null;
       toolset_id?: string | null;
       provider_id?: string | null;
       budget?: Record<string, unknown>;

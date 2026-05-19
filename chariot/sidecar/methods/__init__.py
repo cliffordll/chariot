@@ -191,9 +191,16 @@ def register_methods(
 
     contexts = ContextMethods(runtime)
     server.method("list_context_snapshots")(contexts.list_)
+    server.method("list_context_bundles")(contexts.bundles)
+    server.method("get_context_bundle")(contexts.show)
+    server.method("list_context_versions")(contexts.versions)
+    server.method("get_context_version")(contexts.version)
     server.method("get_context_snapshot")(contexts.get)
     server.method("list_context_traces")(contexts.traces)
     server.method("inspect_context")(contexts.inspect)
+    server.method("add_context_bundle")(contexts.add)
+    server.method("update_context_bundle")(contexts.update)
+    server.method("activate_context_bundle")(contexts.activate)
 
     memories = MemoryMethods(runtime)
     server.method("list_memories")(memories.list_)
