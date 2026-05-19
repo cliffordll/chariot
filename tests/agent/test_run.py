@@ -22,10 +22,13 @@ import pytest_asyncio
 
 from chariot.agent.chat_event import ChatEvent
 from chariot.agent.chat_request import ChatRequest, Message, ToolSchema
+from chariot.agent.exceptions import ProviderError
 from chariot.agent.run import AIAgent
 from chariot.database.session import dispose_db, init_db
 from chariot.models.provider import ProviderEntry
 from chariot.providers.base import BaseProvider, BaseProviderCapabilities, BaseProviderConfig
+from chariot.services.conversation import ConversationService
+from chariot.services.prompt import PromptService
 from chariot.services.provider import ProviderService
 from chariot.tools.base import BaseTool
 
@@ -92,6 +95,19 @@ class _ConcurrentEchoProvider(BaseProvider):
                     parts.append(str(block.get("text", "")))
             return "".join(parts)
         return str(content)
+
+
+class _RaisingProvider(BaseProvider):
+    def __init__(self, name: str = "raising") -> None:
+        self.config = BaseProviderConfig(name=name, model=f"{name}-1")
+
+    @classmethod
+    def create(cls, options: dict[str, Any]) -> _RaisingProvider:
+        return cls()
+
+    async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        raise ProviderError("upstream_server_error", "上游 502: simulated")
+        yield  # pragma: no cover
 
 
 class _StubTool(BaseTool):
@@ -318,6 +334,8 @@ class TestStatefulPath:
             tools={},
             sessionmaker=sessionmaker,
         )
+        async with sessionmaker() as session:
+            await PromptService(session).seed_if_empty()
 
         async def run_one(conversation_id: str, text: str) -> list[ChatEvent]:
             req = ChatRequest(
@@ -340,6 +358,28 @@ class TestStatefulPath:
                 if ev.kind == "content_block_delta" and (ev.delta or {}).get("type") == "text_delta"
             ]
             assert "".join(text_chunks) == f"echo:{expected}"
+
+    async def test_stateful_error_is_persisted_into_history(self, sessionmaker) -> None:
+        agent = AIAgent(
+            providers={"p": _RaisingProvider("p")},
+            tools={},
+            sessionmaker=sessionmaker,
+        )
+        req = ChatRequest(
+            provider_ref="p",
+            messages=[Message(role="user", content="hi")],
+            conversation_id="01CONVERRORPERSIST000000000",
+        )
+
+        events = [ev async for ev in agent.run_chat(req)]
+
+        assert events[-1].kind == "error"
+        async with sessionmaker() as session:
+            messages = await ConversationService(session).get_messages("01CONVERRORPERSIST000000000")
+        assert messages[-1]["role"] == "assistant"
+        assert messages[-1]["content"] == [
+            {"type": "text", "text": "[error] upstream_server_error: 上游 502: simulated"}
+        ]
 
 
 # ---------------------------------------------------------------------------

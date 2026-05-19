@@ -378,6 +378,58 @@ class TestProviderError:
         assert ev.error_message is not None
         assert "401" in ev.error_message
 
+    async def test_provider_error_persists_error_message(self, req: ChatRequest) -> None:
+        store = _StubMessageStore()
+        events_seq = [
+            ChatEvent.message_start(message_id="msg_x", model="scripted-1"),
+            ChatEvent.error_event(
+                error_type="upstream_stream_error",
+                error_message="simulated mid-stream",
+            ),
+        ]
+        loop = _make_loop(
+            [events_seq],
+            message_store=store,
+            conversation_id="conv_err",
+            provider_snapshot="scripted",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 1
+        assert store.assistant_messages[0]["content"] == [
+            {"type": "text", "text": "[error] upstream_stream_error: simulated mid-stream"}
+        ]
+
+    async def test_provider_raise_persists_error_message(self, req: ChatRequest) -> None:
+        class _RaisingProvider(BaseProvider):
+            def __init__(self) -> None:
+                self.config = BaseProviderConfig(name="raising", model="scripted-1")
+
+            @classmethod
+            def create(cls, options: dict[str, Any]) -> _RaisingProvider:
+                return cls()
+
+            async def generate(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+                raise ProviderError("upstream_auth_failed", "401 from upstream")
+                yield  # pragma: no cover
+
+        store = _StubMessageStore()
+        loop = AgentLoop(
+            provider=_RaisingProvider(),
+            tools={},
+            message_store=store,
+            conversation_id="conv_raise",
+            provider_snapshot="raising",
+        )
+
+        _ = [ev async for ev in loop.stream_chat(req)]
+
+        assert len(store.assistant_messages) == 1
+        assert store.assistant_messages[0]["content"] == [
+            {"type": "text", "text": "[error] upstream_auth_failed: 401 from upstream"}
+        ]
+
 
 class TestProviderContractValidation:
     async def test_invalid_event_sequence_yields_contract_error(self, req: ChatRequest) -> None:

@@ -96,20 +96,28 @@ class AgentLoop:
                         error_type = event.error_type
                         if pc_handle is not None:
                             await pc_handle.finish(error_type=event.error_type)
+                        await self._persist_assistant(assistant_blocks)
+                        await self._persist_error(event)
                         return
                 validator.ensure_complete()
             except ProviderContractError as e:
                 if pc_handle is not None:
                     await pc_handle.finish(error_type="invalid_provider_event")
-                yield ChatEvent.error_event(
+                err = ChatEvent.error_event(
                     error_type="invalid_provider_event",
                     error_message=str(e),
                 )
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_error(err)
+                yield err
                 return
             except ProviderError as e:
                 if pc_handle is not None:
                     await pc_handle.finish(error_type=e.code)
-                yield ChatEvent.error_event(error_type=e.code, error_message=e.message)
+                err = ChatEvent.error_event(error_type=e.code, error_message=e.message)
+                await self._persist_assistant(assistant_blocks)
+                await self._persist_error(err)
+                yield err
                 return
 
             # 正常或 stop_reason 结束 → 写 provider call 完成摘要
@@ -217,6 +225,22 @@ class AgentLoop:
             self._conversation_id,
             content=content,
         )
+
+    async def _persist_error(self, event: ChatEvent) -> None:
+        if self._message_store is None or self._conversation_id is None:
+            return
+        if event.kind != "error" or event.error_type is None or event.error_message is None:
+            return
+        await self._message_store.append_assistant_message(
+            self._conversation_id,
+            content=[{"type": "text", "text": self._format_error_text(event)}],
+            provider_snapshot=self._provider_snapshot,
+            agent_profile=self._agent_profile,
+        )
+
+    @staticmethod
+    def _format_error_text(event: ChatEvent) -> str:
+        return f"[error] {event.error_type}: {event.error_message}"
 
     @staticmethod
     def _tool_result_event_to_block(ev: ChatEvent) -> dict[str, Any]:
